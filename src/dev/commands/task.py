@@ -21,7 +21,7 @@ def _slugify(title: str) -> str:
     return s or "task"
 
 
-@click.command("start")
+@click.command("create")
 @click.argument("title", type=str)
 @click.option(
     "--repo",
@@ -52,7 +52,7 @@ def start_task(
     description: str,
     tasks_dir: Path,
 ) -> None:
-    """Start a new task: create directory, task file, agent chat, and clone repo."""
+    """Create a new task: create directory, task file, agent chat, and clone repo."""
     name = _slugify(title)
     manager = TaskManager(tasks_root=tasks_dir)
     try:
@@ -64,7 +64,7 @@ def start_task(
             agent_cmd=AGENT_CMD,
             agent_create_chat_args=AGENT_CREATE_CHAT_ARGS,
         )
-        click.echo(f"Task started: {tasks_dir / name}")
+        click.echo(f"Task created: {tasks_dir / name}")
         click.echo(f"  Task file: {tasks_dir / name / 'task.md'}")
         click.echo(f"  Launch script: {tasks_dir / name / 'launch-agent.sh'}")
         click.echo(f"  Repo cloned into: {tasks_dir / name / name}")

@@ -10,12 +10,12 @@ def test_main_help() -> None:
     result = runner.invoke(main, ["--help"])
     assert result.exit_code == 0
     assert "Dev CLI" in result.output
-    assert "start" in result.output
+    assert "create" in result.output
 
 
-def test_start_help() -> None:
+def test_create_help() -> None:
     runner = CliRunner()
-    result = runner.invoke(main, ["start", "--help"])
+    result = runner.invoke(main, ["create", "--help"])
     assert result.exit_code == 0
     assert "TITLE" in result.output
     assert "--repo" in result.output

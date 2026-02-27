@@ -18,10 +18,10 @@ tox
 
 ## Usage
 
-Start a new task (creates a subdirectory, task file, agent chat, launch script, and clones the repo):
+Create a new task (creates a subdirectory, task file, agent chat, launch script, and clones the repo):
 
 ```bash
-dev start "My task title" --repo https://github.com/user/repo.git --description "Implement feature X and add tests."
+dev create "My task title" --repo https://github.com/user/repo.git --description "Implement feature X and add tests."
 ```
 
 Options:
