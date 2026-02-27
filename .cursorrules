@@ -1,0 +1,5 @@
+# Cursor rules
+
+## Testing
+
+- Always test your changes. After making code changes, run the test suite (e.g. `pytest tests/ -v` or `tox`) and fix any failures before considering the task done.
