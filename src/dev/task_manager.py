@@ -29,7 +29,7 @@ class TaskManager:
         self._write_task_file(task_dir, title, description)
         chat_id = self._create_agent_chat(agent_cmd, agent_create_chat_args)
         self._write_launch_script(task_dir, agent_cmd, chat_id)
-        self._clone_repo(task_dir, task_name, repo_url)
+        self._clone_repo(task_dir, repo_url)
 
     def _write_task_file(self, task_dir: Path, title: str, description: str) -> None:
         path = task_dir / "task.md"
@@ -68,10 +68,11 @@ exec {agent_cmd} agent chat {chat_id}
         path.write_text(content, encoding="utf-8")
         path.chmod(0o755)
 
-    def _clone_repo(self, task_dir: Path, task_name: str, repo_url: str) -> None:
-        clone_dir = task_dir / task_name
+    def _clone_repo(self, task_dir: Path, repo_url: str) -> None:
+        """Clone repo into task_dir; git uses the repo name from the URL as the directory."""
         subprocess.run(
-            ["git", "clone", repo_url, str(clone_dir)],
+            ["git", "clone", repo_url],
+            cwd=task_dir,
             check=True,
             capture_output=True,
         )

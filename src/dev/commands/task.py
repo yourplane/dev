@@ -21,6 +21,12 @@ def _slugify(title: str) -> str:
     return s or "task"
 
 
+def _repo_name_from_url(repo_url: str) -> str:
+    """Derive repo directory name from URL (e.g. .../repo.git -> repo)."""
+    name = repo_url.rstrip("/").split("/")[-1]
+    return name.removesuffix(".git") if name.endswith(".git") else name or "repo"
+
+
 @click.command("create")
 @click.argument("title", type=str)
 @click.option(
@@ -64,10 +70,12 @@ def start_task(
             agent_cmd=AGENT_CMD,
             agent_create_chat_args=AGENT_CREATE_CHAT_ARGS,
         )
-        click.echo(f"Task created: {tasks_dir / name}")
-        click.echo(f"  Task file: {tasks_dir / name / 'task.md'}")
-        click.echo(f"  Launch script: {tasks_dir / name / 'launch-agent.sh'}")
-        click.echo(f"  Repo cloned into: {tasks_dir / name / name}")
+        task_dir = tasks_dir / name
+        repo_dir = _repo_name_from_url(repo_url)
+        click.echo(f"Task created: {task_dir}")
+        click.echo(f"  Task file: {task_dir / 'task.md'}")
+        click.echo(f"  Launch script: {task_dir / 'launch-agent.sh'}")
+        click.echo(f"  Repo cloned into: {task_dir / repo_dir}")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         raise SystemExit(1)

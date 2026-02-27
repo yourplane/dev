@@ -61,7 +61,8 @@ def test_start_task(
         if cmd[0] == "cursor" and "create-chat" in cmd:
             return MagicMock(stdout="Chat created.\nmy-chat-id-456\n", stderr="", returncode=0)
         if cmd[0] == "git" and cmd[1] == "clone":
-            (tmp_tasks_root / "my-task" / "my-task").mkdir(parents=True)
+            # git clone with cwd creates task_dir/repo-name (repo from URL)
+            (tmp_tasks_root / "my-task" / "repo").mkdir(parents=True)
             return MagicMock(returncode=0)
         raise NotImplementedError(cmd)
 
@@ -91,6 +92,7 @@ def test_start_task(
     git_cmd = clone_calls[0][0][0]
     assert git_cmd[1] == "clone"
     assert git_cmd[2] == "https://github.com/user/repo.git"
+    assert clone_calls[0][1].get("cwd") == tmp_tasks_root / "my-task"
 
 
 def test_start_task_creates_directory(manager: TaskManager, tmp_tasks_root: Path) -> None:
@@ -98,7 +100,7 @@ def test_start_task_creates_directory(manager: TaskManager, tmp_tasks_root: Path
         mock_run.side_effect = lambda cmd, **kwargs: (
             MagicMock(stdout="chat-123\n", stderr="", returncode=0)
             if cmd[0] == "cursor"
-            else (Path(tmp_tasks_root / "foo" / "foo").mkdir(parents=True) or MagicMock(returncode=0))
+            else (Path(tmp_tasks_root / "foo" / "y").mkdir(parents=True) or MagicMock(returncode=0))
             if cmd[0] == "git"
             else MagicMock(returncode=0)
         )

@@ -35,7 +35,7 @@ The command:
 1. Creates `~/tasks/<slug>/` from the task title.
 2. Writes `task.md` with the title and description.
 3. Runs `cursor agent create-chat`, saves the chat ID, and writes `launch-agent.sh` to resume that chat.
-4. Clones the repo into `~/tasks/<slug>/<slug>/`.
+4. Clones the repo into `~/tasks/<slug>/`; the subdirectory name is the repo name from the URL.
 
 Resume the agent for a task:
 
