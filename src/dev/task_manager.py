@@ -31,7 +31,7 @@ class TaskManager:
 
         self._write_task_file(task_dir, title, description)
         chat_id = self._create_agent_chat(agent_cmd, agent_create_chat_args)
-        self._write_launch_script(task_dir, agent_cmd, chat_id)
+        self._write_chat_id_file(task_dir, chat_id)
         self._clone_repo(task_dir, repo_url)
 
     def _write_task_file(self, task_dir: Path, title: str, description: str) -> None:
@@ -60,16 +60,10 @@ class TaskManager:
             raise ValueError("Could not parse chat ID from agent output")
         return last
 
-    def _write_launch_script(
-        self, task_dir: Path, agent_cmd: str, chat_id: str
-    ) -> None:
-        path = task_dir / "launch-agent.sh"
-        content = f"""#!/bin/bash
-# Launch Cursor agent with chat ID for this task
-exec {agent_cmd} agent --force --resume {chat_id}
-"""
-        path.write_text(content, encoding="utf-8")
-        path.chmod(0o755)
+    def _write_chat_id_file(self, task_dir: Path, chat_id: str) -> None:
+        """Write the agent chat ID to a file in the task directory."""
+        path = task_dir / "agent-chat-id"
+        path.write_text(chat_id.strip(), encoding="utf-8")
 
     def _clone_repo(self, task_dir: Path, repo_url: str) -> None:
         """Clone repo into task_dir; git uses the repo name from the URL as the directory."""

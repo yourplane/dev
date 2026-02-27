@@ -2,7 +2,7 @@
 
 import click
 
-from dev.commands import archive_task, list_tasks, start_task
+from dev.commands import archive_task, launch_agent, list_tasks, start_task
 
 
 @click.group()
@@ -13,5 +13,6 @@ def main() -> None:
 
 
 main.add_command(start_task)
+main.add_command(launch_agent)
 main.add_command(list_tasks)
 main.add_command(archive_task)

@@ -1,5 +1,6 @@
 """Task management commands."""
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -11,6 +12,7 @@ from dev.task_manager import TaskManager
 TASKS_ROOT = Path.home() / "tasks"
 AGENT_CMD = "cursor"
 AGENT_CREATE_CHAT_ARGS = ["agent", "create-chat"]
+AGENT_CHAT_ID_FILE = "agent-chat-id"
 
 
 def _slugify(title: str) -> str:
@@ -74,11 +76,63 @@ def start_task(
         repo_dir = _repo_name_from_url(repo_url)
         click.echo(f"Task created: {task_dir}")
         click.echo(f"  Task file: {task_dir / 'task.md'}")
-        click.echo(f"  Launch script: {task_dir / 'launch-agent.sh'}")
+        click.echo(f"  Chat ID file: {task_dir / AGENT_CHAT_ID_FILE}")
         click.echo(f"  Repo cloned into: {task_dir / repo_dir}")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         raise SystemExit(1)
+
+
+@click.command("agent")
+@click.option(
+    "--task",
+    "-t",
+    "task_name",
+    type=str,
+    default=None,
+    help="Task name (directory name). If not set, use current directory.",
+)
+@click.option(
+    "--tasks-dir",
+    type=click.Path(path_type=Path),
+    default=TASKS_ROOT,
+    envvar="DEV_TASKS_DIR",
+    help="Root directory for tasks (used only with --task).",
+)
+@click.option(
+    "--agent-cmd",
+    type=str,
+    default=AGENT_CMD,
+    envvar="DEV_AGENT_CMD",
+    help="Command to run for the agent (e.g. cursor).",
+)
+def launch_agent(
+    task_name: str | None,
+    tasks_dir: Path,
+    agent_cmd: str,
+) -> None:
+    """Launch the agent for this task (resume chat using saved chat ID)."""
+    if task_name is not None:
+        task_dir = tasks_dir / task_name
+        chat_id_path = task_dir / AGENT_CHAT_ID_FILE
+    else:
+        chat_id_path = Path.cwd() / AGENT_CHAT_ID_FILE
+
+    if not chat_id_path.exists():
+        click.echo(
+            f"Chat ID file not found: {chat_id_path}. Run from a task directory or use --task.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    chat_id = chat_id_path.read_text(encoding="utf-8").strip()
+    if not chat_id:
+        click.echo("Chat ID file is empty.", err=True)
+        raise SystemExit(1)
+
+    # Launch agent the same way launch-agent.sh did: exec agent --force --resume <chat_id>
+    argv = [agent_cmd, "agent", "--force", "--resume", chat_id]
+    os.execvp(agent_cmd, argv)
 
 
 @click.command("list")

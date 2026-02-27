@@ -41,14 +41,12 @@ def test_write_task_file(manager: TaskManager, tmp_tasks_root: Path) -> None:
     assert path.read_text() == "# My Title\n\nDo the thing.\n"
 
 
-def test_write_launch_script(manager: TaskManager, tmp_tasks_root: Path) -> None:
+def test_write_chat_id_file(manager: TaskManager, tmp_tasks_root: Path) -> None:
     task_dir = tmp_tasks_root / "my-task"
     task_dir.mkdir(parents=True)
-    manager._write_launch_script(task_dir, "cursor", "chat-uuid-123")
-    path = task_dir / "launch-agent.sh"
-    content = path.read_text()
-    assert "cursor agent --force --resume chat-uuid-123" in content
-    assert path.stat().st_mode & 0o111
+    manager._write_chat_id_file(task_dir, "chat-uuid-123")
+    path = task_dir / "agent-chat-id"
+    assert path.read_text().strip() == "chat-uuid-123"
 
 
 @patch("dev.task_manager.subprocess.run")
@@ -79,8 +77,8 @@ def test_start_task(
 
     task_dir = tmp_tasks_root / "my-task"
     assert (task_dir / "task.md").read_text() == "# My Task\n\nBuild the feature.\n"
-    assert (task_dir / "launch-agent.sh").exists()
-    assert "my-chat-id-456" in (task_dir / "launch-agent.sh").read_text()
+    assert (task_dir / "agent-chat-id").exists()
+    assert (task_dir / "agent-chat-id").read_text().strip() == "my-chat-id-456"
 
     create_chat_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "cursor"]
     assert len(create_chat_calls) == 1
@@ -112,7 +110,7 @@ def test_start_task_creates_directory(manager: TaskManager, tmp_tasks_root: Path
         )
     assert (tmp_tasks_root / "foo").is_dir()
     assert (tmp_tasks_root / "foo" / "task.md").exists()
-    assert (tmp_tasks_root / "foo" / "launch-agent.sh").exists()
+    assert (tmp_tasks_root / "foo" / "agent-chat-id").exists()
 
 
 def test_start_task_duplicate_name_raises(manager: TaskManager, tmp_tasks_root: Path) -> None:
