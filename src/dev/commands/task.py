@@ -79,3 +79,42 @@ def start_task(
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         raise SystemExit(1)
+
+
+@click.command("list")
+@click.option(
+    "--tasks-dir",
+    type=click.Path(path_type=Path),
+    default=TASKS_ROOT,
+    envvar="DEV_TASKS_DIR",
+    help="Root directory for tasks (default: ~/tasks).",
+)
+def list_tasks(tasks_dir: Path) -> None:
+    """List task directories (excludes .archive)."""
+    manager = TaskManager(tasks_root=tasks_dir)
+    names = manager.list_tasks()
+    if not names:
+        click.echo("No tasks.")
+        return
+    for name in names:
+        click.echo(name)
+
+
+@click.command("archive")
+@click.argument("task_name", type=str)
+@click.option(
+    "--tasks-dir",
+    type=click.Path(path_type=Path),
+    default=TASKS_ROOT,
+    envvar="DEV_TASKS_DIR",
+    help="Root directory for tasks (default: ~/tasks).",
+)
+def archive_task(task_name: str, tasks_dir: Path) -> None:
+    """Move a task to ~/tasks/.archive with a unique name (date + random suffix)."""
+    manager = TaskManager(tasks_root=tasks_dir)
+    try:
+        dest = manager.archive_task(task_name)
+        click.echo(f"Archived to {dest}")
+    except FileNotFoundError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)

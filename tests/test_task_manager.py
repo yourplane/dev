@@ -47,7 +47,7 @@ def test_write_launch_script(manager: TaskManager, tmp_tasks_root: Path) -> None
     manager._write_launch_script(task_dir, "cursor", "chat-uuid-123")
     path = task_dir / "launch-agent.sh"
     content = path.read_text()
-    assert "cursor agent chat chat-uuid-123" in content
+    assert "cursor agent --resume chat-uuid-123" in content
     assert path.stat().st_mode & 0o111
 
 
@@ -125,3 +125,56 @@ def test_start_task_duplicate_name_raises(manager: TaskManager, tmp_tasks_root: 
                 description="Desc",
                 repo_url="https://github.com/a/b.git",
             )
+
+
+def test_list_tasks_empty(manager: TaskManager) -> None:
+    assert manager.list_tasks() == []
+
+
+def test_list_tasks_nonexistent_root(manager: TaskManager, tmp_tasks_root: Path) -> None:
+    assert not tmp_tasks_root.exists()
+    assert manager.list_tasks() == []
+
+
+def test_list_tasks_returns_sorted_excludes_archive_and_hidden(
+    manager: TaskManager, tmp_tasks_root: Path
+) -> None:
+    tmp_tasks_root.mkdir(parents=True)
+    (tmp_tasks_root / "z-task").mkdir()
+    (tmp_tasks_root / "a-task").mkdir()
+    (tmp_tasks_root / ".archive").mkdir()
+    (tmp_tasks_root / ".hidden").mkdir()
+    assert manager.list_tasks() == ["a-task", "z-task"]
+
+
+def test_archive_task(manager: TaskManager, tmp_tasks_root: Path) -> None:
+    tmp_tasks_root.mkdir(parents=True)
+    task_dir = tmp_tasks_root / "my-task"
+    task_dir.mkdir()
+    (task_dir / "task.md").write_text("# Task\n\nDesc.")
+    dest = manager.archive_task("my-task")
+    assert not task_dir.exists()
+    assert dest.parent == tmp_tasks_root / ".archive"
+    assert dest.name.startswith("my-task-")
+    assert dest.is_dir()
+    assert (dest / "task.md").read_text() == "# Task\n\nDesc."
+    # Name should be my-task-<month>-<day>-<6 hex chars>
+    parts = dest.name.split("-")
+    assert len(parts) >= 4
+    assert parts[0] == "my"
+    assert parts[1] == "task"
+    assert len(parts[-1]) == 6 and all(c in "0123456789abcdef" for c in parts[-1])
+
+
+def test_archive_task_not_found_raises(manager: TaskManager, tmp_tasks_root: Path) -> None:
+    tmp_tasks_root.mkdir(parents=True)
+    with pytest.raises(FileNotFoundError, match="Task not found"):
+        manager.archive_task("nonexistent")
+
+
+def test_archive_task_strips_trailing_slash(manager: TaskManager, tmp_tasks_root: Path) -> None:
+    tmp_tasks_root.mkdir(parents=True)
+    (tmp_tasks_root / "spotify").mkdir()
+    dest = manager.archive_task("spotify/")
+    assert "/" not in dest.name
+    assert dest.name.startswith("spotify-")

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import secrets
+import shutil
 import subprocess
+from datetime import datetime
 from pathlib import Path
 
 
@@ -63,7 +66,7 @@ class TaskManager:
         path = task_dir / "launch-agent.sh"
         content = f"""#!/bin/bash
 # Launch Cursor agent with chat ID for this task
-exec {agent_cmd} agent chat {chat_id}
+exec {agent_cmd} agent --resume {chat_id}
 """
         path.write_text(content, encoding="utf-8")
         path.chmod(0o755)
@@ -76,3 +79,29 @@ exec {agent_cmd} agent chat {chat_id}
             check=True,
             capture_output=True,
         )
+
+    def list_tasks(self) -> list[str]:
+        """Return sorted list of task directory names (excludes .archive and hidden dirs)."""
+        root = Path(self.tasks_root)
+        if not root.exists():
+            return []
+        return sorted(
+            p.name
+            for p in root.iterdir()
+            if p.is_dir() and not p.name.startswith(".") and p.name != ".archive"
+        )
+
+    def archive_task(self, task_name: str) -> Path:
+        """Move task directory to .archive with name task_name-<date>-<random>. Returns archive path."""
+        task_name = task_name.strip("/")
+        task_dir = self.tasks_root / task_name
+        if not task_dir.exists() or not task_dir.is_dir():
+            raise FileNotFoundError(f"Task not found: {task_name}")
+        archive_root = self.tasks_root / ".archive"
+        archive_root.mkdir(parents=True, exist_ok=True)
+        date_str = datetime.now().strftime("%b-%d").lower()
+        random_suffix = secrets.token_hex(3)
+        dest_name = f"{task_name}-{date_str}-{random_suffix}"
+        dest = archive_root / dest_name
+        shutil.move(str(task_dir), str(dest))
+        return dest

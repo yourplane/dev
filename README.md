@@ -43,6 +43,18 @@ Resume the agent for a task:
 ~/tasks/<task-slug>/launch-agent.sh
 ```
 
+List tasks (excludes `~/tasks/.archive` and hidden dirs):
+
+```bash
+dev list
+```
+
+Archive a task (moves it to `~/tasks/.archive` with a unique name: `<task-name>-<date>-<random>`, e.g. `my-task-feb-27-a1b2c3`):
+
+```bash
+dev archive <task-name>
+```
+
 ## Development
 
 Run tests:
