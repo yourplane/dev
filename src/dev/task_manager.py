@@ -66,7 +66,7 @@ class TaskManager:
         path = task_dir / "launch-agent.sh"
         content = f"""#!/bin/bash
 # Launch Cursor agent with chat ID for this task
-exec {agent_cmd} agent --resume {chat_id}
+exec {agent_cmd} agent --force --resume {chat_id}
 """
         path.write_text(content, encoding="utf-8")
         path.chmod(0o755)

@@ -47,7 +47,7 @@ def test_write_launch_script(manager: TaskManager, tmp_tasks_root: Path) -> None
     manager._write_launch_script(task_dir, "cursor", "chat-uuid-123")
     path = task_dir / "launch-agent.sh"
     content = path.read_text()
-    assert "cursor agent --resume chat-uuid-123" in content
+    assert "cursor agent --force --resume chat-uuid-123" in content
     assert path.stat().st_mode & 0o111
 
 
