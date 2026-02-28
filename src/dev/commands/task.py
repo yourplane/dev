@@ -7,6 +7,7 @@ from pathlib import Path
 
 import click
 
+from dev.repo_config import resolve_repo
 from dev.task_manager import TaskManager
 
 TASKS_ROOT = Path.home() / "tasks"
@@ -37,7 +38,7 @@ def _repo_name_from_url(repo_url: str) -> str:
     "repo_url",
     required=True,
     type=str,
-    help="Git repository URL to clone into the task directory.",
+    help="Git repository URL or shorthand (e.g. desk) from config (~/.config/dev/repos.json).",
 )
 @click.option(
     "--description",
@@ -61,6 +62,11 @@ def start_task(
     tasks_dir: Path,
 ) -> None:
     """Create a new task: create directory, task file, agent chat, and clone repo."""
+    try:
+        repo_url = resolve_repo(repo_url)
+    except ValueError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
     name = _slugify(title)
     manager = TaskManager(tasks_root=tasks_dir)
     try:

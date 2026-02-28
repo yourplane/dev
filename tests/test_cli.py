@@ -1,7 +1,7 @@
 """Tests for CLI entry point."""
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from click.testing import CliRunner
@@ -116,3 +116,96 @@ def test_agent_launches_with_chat_id(runner: CliRunner, tmp_path: Path) -> None:
         "my-chat-uuid-123",
         "Read the task.md file and do it.",
     ]
+
+
+def test_create_with_unknown_shorthand_exits_nonzero(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir()
+    config_file = tmp_path / "repos.json"
+    config_file.write_text("{}")
+    with patch("dev.repo_config.CONFIG_FILE", config_file):
+        result = runner.invoke(
+            main,
+            [
+                "create",
+                "Some task",
+                "--repo",
+                "unknown",
+                "--description",
+                "Do it.",
+                "--tasks-dir",
+                str(tasks_dir),
+            ],
+        )
+    assert result.exit_code != 0
+    assert "Unknown repo shorthand" in result.output
+
+
+def test_create_with_shorthand_uses_resolved_url(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir()
+    config_file = tmp_path / "repos.json"
+    config_file.write_text(
+        '{"desk": "https://github.com/maxrademacher/desk.git"}'
+    )
+    with patch("dev.repo_config.CONFIG_FILE", config_file):
+        with patch("dev.commands.task.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="chat-id\n")
+            result = runner.invoke(
+                main,
+                [
+                    "create",
+                    "My task",
+                    "--repo",
+                    "desk",
+                    "--description",
+                    "Do it.",
+                    "--tasks-dir",
+                    str(tasks_dir),
+                ],
+            )
+    assert result.exit_code == 0
+    clone_calls = [
+        c for c in mock_run.call_args_list if c[0][0][:2] == ["git", "clone"]
+    ]
+    assert len(clone_calls) == 1
+    assert clone_calls[0][0][0][2] == "https://github.com/maxrademacher/desk.git"
+
+
+def test_repos_help() -> None:
+    result = CliRunner().invoke(main, ["repos", "--help"])
+    assert result.exit_code == 0
+    assert "add" in result.output
+    assert "list" in result.output
+
+
+def test_repos_list_empty(runner: CliRunner, tmp_path: Path) -> None:
+    config_file = tmp_path / "repos.json"
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    config_file.write_text("{}")
+    with patch("dev.repo_config.CONFIG_FILE", config_file):
+        result = runner.invoke(main, ["repos", "list"])
+    assert result.exit_code == 0
+    assert "No repo shorthands" in result.output
+
+
+def test_repos_add_and_list(runner: CliRunner, tmp_path: Path) -> None:
+    config_file = tmp_path / "repos.json"
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    config_file.write_text("{}")
+    with patch("dev.repo_config.CONFIG_FILE", config_file):
+        result = runner.invoke(
+            main,
+            ["repos", "add", "desk", "https://github.com/maxrademacher/desk.git"],
+        )
+    assert result.exit_code == 0
+    assert "Added desk" in result.output
+    with patch("dev.repo_config.CONFIG_FILE", config_file):
+        result2 = runner.invoke(main, ["repos", "list"])
+    assert result2.exit_code == 0
+    assert "desk" in result2.output
+    assert "maxrademacher/desk" in result2.output

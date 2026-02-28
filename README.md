@@ -26,9 +26,18 @@ dev create "My task title" --repo https://github.com/user/repo.git --description
 
 Options:
 
-- `--repo` / `-r`: Git repository URL (required).
+- `--repo` / `-r`: Git repository URL or a shorthand (e.g. `desk`) from your config (required).
 - `--description` / `-d`: Task description/goal (required).
 - `--tasks-dir`: Override tasks root (default: `~/tasks`). Can set `DEV_TASKS_DIR` instead.
+
+**Repo shorthand:** You can use a short name instead of a full URL if you add it to the config:
+
+```bash
+dev repos add desk https://github.com/maxrademacher/desk.git
+dev create "My task" --repo desk --description "Do the thing."
+```
+
+Config is stored in `~/.config/dev/repos.json`. List shorthands with `dev repos list`.
 
 The command:
 
