@@ -79,6 +79,9 @@ def test_start_task(
     assert (task_dir / "task.md").read_text() == "# My Task\n\nBuild the feature.\n"
     assert (task_dir / "agent-chat-id").exists()
     assert (task_dir / "agent-chat-id").read_text().strip() == "my-chat-id-456"
+    assert (task_dir / ".cursorrules").exists()
+    assert "workspace root is not a git project" in (task_dir / ".cursorrules").read_text()
+    assert "one level deeper" in (task_dir / ".cursorrules").read_text()
 
     create_chat_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "cursor"]
     assert len(create_chat_calls) == 1
@@ -111,6 +114,7 @@ def test_start_task_creates_directory(manager: TaskManager, tmp_tasks_root: Path
     assert (tmp_tasks_root / "foo").is_dir()
     assert (tmp_tasks_root / "foo" / "task.md").exists()
     assert (tmp_tasks_root / "foo" / "agent-chat-id").exists()
+    assert (tmp_tasks_root / "foo" / ".cursorrules").exists()
 
 
 def test_start_task_duplicate_name_raises(manager: TaskManager, tmp_tasks_root: Path) -> None:

@@ -32,6 +32,7 @@ class TaskManager:
         self._write_task_file(task_dir, title, description)
         chat_id = self._create_agent_chat(agent_cmd, agent_create_chat_args)
         self._write_chat_id_file(task_dir, chat_id)
+        self._write_cursor_rules(task_dir)
         self._clone_repo(task_dir, repo_url)
 
     def _write_task_file(self, task_dir: Path, title: str, description: str) -> None:
@@ -64,6 +65,15 @@ class TaskManager:
         """Write the agent chat ID to a file in the task directory."""
         path = task_dir / "agent-chat-id"
         path.write_text(chat_id.strip(), encoding="utf-8")
+
+    def _write_cursor_rules(self, task_dir: Path) -> None:
+        """Write .cursorrules so the agent knows the workspace root is not a git repo."""
+        path = task_dir / ".cursorrules"
+        path.write_text(
+            "The workspace root is not a git project. Git projects are one level deeper "
+            "(each subdirectory that was cloned from a repo is its own git project).\n",
+            encoding="utf-8",
+        )
 
     def _clone_repo(self, task_dir: Path, repo_url: str) -> None:
         """Clone repo into task_dir; git uses the repo name from the URL as the directory."""
