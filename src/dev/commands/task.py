@@ -84,6 +84,8 @@ def start_task(
         click.echo(f"  Task file: {task_dir / 'task.md'}")
         click.echo(f"  Chat ID file: {task_dir / AGENT_CHAT_ID_FILE}")
         click.echo(f"  Repo cloned into: {task_dir / repo_dir}")
+        if (task_dir / ".venv").exists():
+            click.echo(f"  Venv: {task_dir / '.venv'} (repo installed in editable mode)")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         raise SystemExit(1)

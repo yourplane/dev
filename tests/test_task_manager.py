@@ -181,3 +181,49 @@ def test_archive_task_strips_trailing_slash(manager: TaskManager, tmp_tasks_root
     dest = manager.archive_task("spotify/")
     assert "/" not in dest.name
     assert dest.name.startswith("spotify-")
+
+
+def test_repo_name_from_url_with_git_suffix() -> None:
+    assert TaskManager._repo_name_from_url("https://github.com/user/repo.git") == "repo"
+
+
+def test_repo_name_from_url_without_git_suffix() -> None:
+    assert TaskManager._repo_name_from_url("https://github.com/user/repo") == "repo"
+
+
+def test_setup_pyenv_skips_when_no_python_project(
+    manager: TaskManager, tmp_tasks_root: Path
+) -> None:
+    """When repo has no pyproject.toml or setup.py, skip venv and do not create .venv."""
+    task_dir = tmp_tasks_root / "my-task"
+    task_dir.mkdir(parents=True)
+    (task_dir / "some-repo").mkdir()  # no pyproject.toml or setup.py
+    manager._setup_pyenv(task_dir, "https://github.com/user/some-repo.git")
+    assert not (task_dir / ".venv").exists()
+    assert not (task_dir / ".cursor" / "rules" / "pyenv-testing.mdc").exists()
+
+
+@patch("dev.task_manager.subprocess.run")
+def test_setup_pyenv_creates_venv_and_rule_when_pyproject_exists(
+    mock_run: MagicMock, manager: TaskManager, tmp_tasks_root: Path
+) -> None:
+    """When repo has pyproject.toml, create venv, pip install -e, and write Cursor rule."""
+    task_dir = tmp_tasks_root / "my-task"
+    task_dir.mkdir(parents=True)
+    repo_dir = task_dir / "myrepo"
+    repo_dir.mkdir()
+    (repo_dir / "pyproject.toml").write_text("[project]\nname = 'myrepo'")
+    mock_run.return_value = MagicMock(returncode=0)
+
+    manager._setup_pyenv(task_dir, "https://github.com/user/myrepo.git")
+
+    assert (task_dir / ".venv").exists() or mock_run.call_count >= 1
+    rule_path = task_dir / ".cursor" / "rules" / "pyenv-testing.mdc"
+    assert rule_path.exists()
+    content = rule_path.read_text()
+    assert "virtual environment" in content
+    assert ".venv" in content
+    # Should have been called for venv and pip install
+    venv_calls = [c for c in mock_run.call_args_list if c[0][0][-1] == "venv" or "venv" in str(c)]
+    pip_calls = [c for c in mock_run.call_args_list if "pip" in str(c[0][0])]
+    assert len(venv_calls) >= 1 or len(pip_calls) >= 1

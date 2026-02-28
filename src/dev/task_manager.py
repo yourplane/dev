@@ -5,6 +5,7 @@ from __future__ import annotations
 import secrets
 import shutil
 import subprocess
+import sys
 from datetime import datetime
 from pathlib import Path
 
@@ -34,6 +35,7 @@ class TaskManager:
         self._write_chat_id_file(task_dir, chat_id)
         self._write_cursor_rules(task_dir)
         self._clone_repo(task_dir, repo_url)
+        self._setup_pyenv(task_dir, repo_url)
 
     def _write_task_file(self, task_dir: Path, title: str, description: str) -> None:
         path = task_dir / "task.md"
@@ -84,6 +86,77 @@ class TaskManager:
             cwd=task_dir,
             check=True,
             capture_output=True,
+        )
+
+    @staticmethod
+    def _repo_name_from_url(repo_url: str) -> str:
+        """Derive repo directory name from URL (e.g. .../repo.git -> repo)."""
+        name = repo_url.rstrip("/").split("/")[-1]
+        return name.removesuffix(".git") if name.endswith(".git") else name or "repo"
+
+    def _setup_pyenv(self, task_dir: Path, repo_url: str) -> None:
+        """Create a venv, install the cloned repo in editable mode, and add a Cursor rule for testing."""
+        repo_name = self._repo_name_from_url(repo_url)
+        repo_path = task_dir / repo_name
+
+        if not (repo_path / "pyproject.toml").exists() and not (
+            repo_path / "setup.py"
+        ).exists():
+            print(
+                f"Warning: {repo_name} has no pyproject.toml or setup.py; skipping Python venv setup.",
+                file=sys.stderr,
+            )
+            return
+
+        venv_dir = task_dir / ".venv"
+        try:
+            subprocess.run(
+                [sys.executable, "-m", "venv", str(venv_dir)],
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError as e:
+            print(
+                f"Warning: failed to create virtual environment: {e}",
+                file=sys.stderr,
+            )
+            return
+
+        pip = venv_dir / "bin" / "pip"
+        if sys.platform == "win32":
+            pip = venv_dir / "Scripts" / "pip.exe"
+        try:
+            subprocess.run(
+                [str(pip), "install", "-e", str(repo_path)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except subprocess.CalledProcessError as e:
+            print(
+                f"Warning: failed to install {repo_name} in editable mode: {e}",
+                file=sys.stderr,
+            )
+            return
+
+        rules_dir = task_dir / ".cursor" / "rules"
+        rules_dir.mkdir(parents=True, exist_ok=True)
+        rule_path = rules_dir / "pyenv-testing.mdc"
+        rule_path.write_text(
+            "---\n"
+            "description: Use the task virtual environment for testing\n"
+            "alwaysApply: true\n"
+            "---\n\n"
+            "# Testing with the task virtual environment\n\n"
+            "When running or testing the cloned repo (e.g. its CLI or tests), use the tool "
+            "installed in this task's virtual environment:\n\n"
+            "- **Virtual environment path:** `.venv` at the task root\n"
+            "- **Run the installed CLI:** `.venv/bin/<command>` (or `Scripts\\<command>.exe` on Windows)\n"
+            "- **Run tests:** Use `.venv/bin/python -m pytest` or `.venv/bin/tox` so that the "
+            "editable-installed package and its dependencies are used.\n\n"
+            "Do not rely on a system-wide or other Python environment for testing; always "
+            "invoke via this task's `.venv` to ensure the correct editable installation is under test.\n",
+            encoding="utf-8",
         )
 
     def list_tasks(self) -> list[str]:
