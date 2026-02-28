@@ -67,8 +67,10 @@ class TaskManager:
         path.write_text(chat_id.strip(), encoding="utf-8")
 
     def _write_cursor_rules(self, task_dir: Path) -> None:
-        """Write .cursorrules so the agent knows the workspace root is not a git repo."""
-        path = task_dir / ".cursorrules"
+        """Write .cursor/rules/ so the agent knows the workspace root is not a git repo."""
+        rules_dir = task_dir / ".cursor" / "rules"
+        rules_dir.mkdir(parents=True, exist_ok=True)
+        path = rules_dir / "git-workspace.mdc"
         path.write_text(
             "The workspace root is not a git project. Git projects are one level deeper "
             "(each subdirectory that was cloned from a repo is its own git project).\n",
