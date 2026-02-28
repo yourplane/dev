@@ -135,7 +135,7 @@ class TaskManager:
         if on_progress:
             on_progress("Setting up Python environment…")
         venv_name = task_dir.name
-        venv_dir = task_dir / venv_name
+        venv_dir = task_dir / ".venv" / venv_name
         try:
             subprocess.run(
                 [sys.executable, "-m", "venv", str(venv_dir)],
@@ -177,12 +177,12 @@ class TaskManager:
             "# Testing with the task virtual environment\n\n"
             "When running or testing the cloned repo (e.g. its CLI or tests), use the tool "
             "installed in this task's virtual environment:\n\n"
-            f"- **Virtual environment path:** `{venv_name}` at the task root\n"
-            f"- **Run the installed CLI:** `{venv_name}/bin/<command>` (or `Scripts\\<command>.exe` on Windows)\n"
-            f"- **Run tests:** Use `{venv_name}/bin/python -m pytest` or `{venv_name}/bin/tox` so that the "
+            f"- **Virtual environment path:** `.venv/{venv_name}` at the task root\n"
+            f"- **Run the installed CLI:** `.venv/{venv_name}/bin/<command>` (or `Scripts\\<command>.exe` on Windows)\n"
+            f"- **Run tests:** Use `.venv/{venv_name}/bin/python -m pytest` or `.venv/{venv_name}/bin/tox` so that the "
             "editable-installed package and its dependencies are used.\n\n"
             f"Do not rely on a system-wide or other Python environment for testing; always "
-            f"invoke via this task's `{venv_name}` to ensure the correct editable installation is under test.\n",
+            f"invoke via this task's `.venv/{venv_name}` to ensure the correct editable installation is under test.\n",
             encoding="utf-8",
         )
         if on_progress:

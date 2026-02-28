@@ -232,12 +232,12 @@ def test_repo_name_from_url_without_git_suffix() -> None:
 def test_setup_pyenv_skips_when_no_python_project(
     manager: TaskManager, tmp_tasks_root: Path
 ) -> None:
-    """When repo has no pyproject.toml or setup.py, skip venv and do not create task-named venv."""
+    """When repo has no pyproject.toml or setup.py, skip venv and do not create .venv/<task-name>."""
     task_dir = tmp_tasks_root / "my-task"
     task_dir.mkdir(parents=True)
     (task_dir / "some-repo").mkdir()  # no pyproject.toml or setup.py
     manager._setup_pyenv(task_dir, "https://github.com/user/some-repo.git")
-    assert not (task_dir / "my-task").exists()
+    assert not (task_dir / ".venv" / "my-task").exists()
     assert not (task_dir / ".cursor" / "rules" / "pyenv-testing.mdc").exists()
 
 
@@ -245,7 +245,7 @@ def test_setup_pyenv_skips_when_no_python_project(
 def test_setup_pyenv_creates_venv_and_rule_when_pyproject_exists(
     mock_run: MagicMock, manager: TaskManager, tmp_tasks_root: Path
 ) -> None:
-    """When repo has pyproject.toml, create venv (named after task), pip install -e, and write Cursor rule."""
+    """When repo has pyproject.toml, create venv at .venv/<task-name>, pip install -e, and write Cursor rule."""
     task_dir = tmp_tasks_root / "my-task"
     task_dir.mkdir(parents=True)
     repo_dir = task_dir / "myrepo"
@@ -255,7 +255,7 @@ def test_setup_pyenv_creates_venv_and_rule_when_pyproject_exists(
 
     manager._setup_pyenv(task_dir, "https://github.com/user/myrepo.git")
 
-    assert (task_dir / "my-task").exists() or mock_run.call_count >= 1
+    assert (task_dir / ".venv" / "my-task").exists() or mock_run.call_count >= 1
     rule_path = task_dir / ".cursor" / "rules" / "pyenv-testing.mdc"
     assert rule_path.exists()
     content = rule_path.read_text()

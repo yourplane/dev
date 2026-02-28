@@ -94,7 +94,7 @@ def start_task(
         click.echo(f"  Task file: {task_dir / 'task.md'}")
         click.echo(f"  Chat ID file: {task_dir / AGENT_CHAT_ID_FILE}")
         click.echo(f"  Repo cloned into: {task_dir / repo_dir}")
-        venv_dir = task_dir / name
+        venv_dir = task_dir / ".venv" / name
         if venv_dir.exists():
             click.echo(f"  Venv: {venv_dir} (repo installed in editable mode)")
     except Exception as e:
@@ -274,8 +274,12 @@ def archive_task(task_name: str, tasks_dir: Path) -> None:
         raise SystemExit(1)
 
 
-VENV_DIR_NAME = "dev-activate"
 ACTIVATE_SCRIPT = "bin/activate"
+
+
+def _venv_activate_path(task_root: Path) -> Path:
+    """Return path to the task venv activate script: task_root/.venv/{task_name}/bin/activate."""
+    return task_root / ".venv" / task_root.name / ACTIVATE_SCRIPT
 
 
 @click.command("activate-path")
@@ -285,13 +289,12 @@ ACTIVATE_SCRIPT = "bin/activate"
     "task_dir",
     type=click.Path(path_type=Path),
     default=None,
-    help="Task directory (root containing dev-activate). Default: current working directory.",
+    help="Task directory (root containing .venv/<task-name>). Default: current working directory.",
 )
 def activate_path(task_dir: Path | None) -> None:
     """Print path to the task venv activate script for use with: source $(dev activate-path)."""
     task_root = (task_dir or Path.cwd()).resolve()
-    venv_dir = task_root / VENV_DIR_NAME
-    activate_script = venv_dir / ACTIVATE_SCRIPT
+    activate_script = _venv_activate_path(task_root)
     if not activate_script.exists():
         click.echo(
             f"Activate script not found: {activate_script}. Run from a task directory or use --task-dir.",

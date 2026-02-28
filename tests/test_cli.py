@@ -369,30 +369,31 @@ def test_activate_path_help() -> None:
 
 
 def test_activate_path_prints_path_when_venv_exists(runner: CliRunner, tmp_path: Path) -> None:
-    """From a task dir with dev-activate/bin/activate, prints that path."""
+    """From a task dir with .venv/<task-name>/bin/activate, prints that path."""
     task_root = tmp_path / "my-task"
     task_root.mkdir()
-    (task_root / "dev-activate" / "bin").mkdir(parents=True)
-    (task_root / "dev-activate" / "bin" / "activate").write_text("# activate script\n")
+    (task_root / ".venv" / "my-task" / "bin").mkdir(parents=True)
+    (task_root / ".venv" / "my-task" / "bin" / "activate").write_text("# activate script\n")
     result = runner.invoke(main, ["activate-path", "--task-dir", str(task_root)])
     assert result.exit_code == 0
-    assert result.output.strip().endswith("dev-activate/bin/activate")
+    assert result.output.strip().endswith(".venv/my-task/bin/activate")
     assert "activate" in result.output
 
 
 def test_activate_path_uses_cwd_when_no_task_dir(runner: CliRunner, tmp_path: Path) -> None:
-    """Without --task-dir, uses cwd; from a dir with dev-activate, prints path."""
+    """Without --task-dir, uses cwd; from a dir with .venv/<name>, prints path."""
     with runner.isolated_filesystem(tmp_path):
         cwd = Path.cwd()
-        (cwd / "dev-activate" / "bin").mkdir(parents=True)
-        (cwd / "dev-activate" / "bin" / "activate").write_text("# activate\n")
+        task_name = cwd.name
+        (cwd / ".venv" / task_name / "bin").mkdir(parents=True)
+        (cwd / ".venv" / task_name / "bin" / "activate").write_text("# activate\n")
         result = runner.invoke(main, ["activate-path"])
     assert result.exit_code == 0
-    assert "dev-activate/bin/activate" in result.output
+    assert ".venv/" in result.output and "/bin/activate" in result.output
 
 
 def test_activate_path_missing_venv_exits_nonzero(runner: CliRunner, tmp_path: Path) -> None:
-    """When dev-activate/bin/activate does not exist, exit non-zero and print error."""
+    """When .venv/<task-name>/bin/activate does not exist, exit non-zero and print error."""
     task_root = tmp_path / "empty-task"
     task_root.mkdir()
     result = runner.invoke(main, ["activate-path", "--task-dir", str(task_root)])
