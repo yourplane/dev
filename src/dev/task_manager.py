@@ -74,6 +74,11 @@ class TaskManager:
         rules_dir.mkdir(parents=True, exist_ok=True)
         path = rules_dir / "git-workspace.mdc"
         path.write_text(
+            "---\n"
+            "description: Git project location in the task workspace\n"
+            "alwaysApply: true\n"
+            "---\n\n"
+            "# Git project location\n\n"
             "The workspace root is not a git project. Git projects are one level deeper "
             "(each subdirectory that was cloned from a repo is its own git project).\n",
             encoding="utf-8",
