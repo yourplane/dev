@@ -130,8 +130,10 @@ def launch_agent(
         click.echo("Chat ID file is empty.", err=True)
         raise SystemExit(1)
 
+    # Prompt the agent to read task.md and do it
+    prompt = "Read the task.md file and do it."
     # Launch agent the same way launch-agent.sh did: exec agent --force --resume <chat_id>
-    argv = [agent_cmd, "agent", "--force", "--resume", chat_id]
+    argv = [agent_cmd, "agent", "--force", "--resume", chat_id, prompt]
     os.execvp(agent_cmd, argv)
 
 

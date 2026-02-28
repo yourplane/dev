@@ -108,4 +108,11 @@ def test_agent_launches_with_chat_id(runner: CliRunner, tmp_path: Path) -> None:
     assert mock_execvp.called
     call_args = mock_execvp.call_args[0]
     assert call_args[0] == "cursor"
-    assert call_args[1] == ["cursor", "agent", "--force", "--resume", "my-chat-uuid-123"]
+    assert call_args[1] == [
+        "cursor",
+        "agent",
+        "--force",
+        "--resume",
+        "my-chat-uuid-123",
+        "Read the task.md file and do it.",
+    ]
