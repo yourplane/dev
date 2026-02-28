@@ -97,6 +97,44 @@ def test_start_task(
     assert clone_calls[0][1].get("cwd") == tmp_tasks_root / "my-task"
 
 
+@patch("dev.task_manager.subprocess.run")
+def test_start_task_calls_on_progress(
+    mock_run: MagicMock,
+    manager: TaskManager,
+    tmp_tasks_root: Path,
+) -> None:
+    """When on_progress is provided, it is called with progress messages."""
+    messages: list[str] = []
+
+    def run_side_effect(cmd, **kwargs):
+        if cmd[0] == "cursor" and "create-chat" in cmd:
+            return MagicMock(stdout="chat-id\n", stderr="", returncode=0)
+        if cmd[0] == "git" and cmd[1] == "clone":
+            (tmp_tasks_root / "my-task" / "repo").mkdir(parents=True)
+            return MagicMock(returncode=0)
+        raise NotImplementedError(cmd)
+
+    mock_run.side_effect = run_side_effect
+
+    manager.start_task(
+        title="My Task",
+        task_name="my-task",
+        description="Build the feature.",
+        repo_url="https://github.com/user/repo.git",
+        agent_cmd="cursor",
+        agent_create_chat_args=["agent", "create-chat"],
+        on_progress=messages.append,
+    )
+
+    assert "Created task directory." in messages
+    assert "Wrote task.md." in messages
+    assert "Creating agent chat…" in messages
+    assert "Agent chat created." in messages
+    assert "Cloning repository…" in messages
+    assert "Repository cloned." in messages
+    # No pyproject in cloned repo, so no "Setting up Python environment…" / "Python environment ready."
+
+
 def test_start_task_creates_directory(manager: TaskManager, tmp_tasks_root: Path) -> None:
     with patch("dev.task_manager.subprocess.run") as mock_run:
         mock_run.side_effect = lambda cmd, **kwargs: (

@@ -237,6 +237,43 @@ def test_create_with_shorthand_uses_resolved_url(
     assert clone_calls[0][0][0][2] == "https://github.com/maxrademacher/desk.git"
 
 
+def test_create_prints_progress_messages(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """Create prints progress so it does not look like it is hanging."""
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir()
+    config_file = tmp_path / "repos.json"
+    config_file.write_text(
+        '{"desk": "https://github.com/maxrademacher/desk.git"}'
+    )
+    with patch("dev.repo_config.CONFIG_FILE", config_file):
+        with patch("dev.commands.task.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="chat-id\n")
+            result = runner.invoke(
+                main,
+                [
+                    "create",
+                    "My task",
+                    "--repo",
+                    "desk",
+                    "--description",
+                    "Do it.",
+                    "--tasks-dir",
+                    str(tasks_dir),
+                ],
+            )
+    assert result.exit_code == 0
+    output = result.output
+    assert "Created task directory." in output
+    assert "Wrote task.md." in output
+    assert "Creating agent chat…" in output
+    assert "Agent chat created." in output
+    assert "Cloning repository…" in output
+    assert "Repository cloned." in output
+    assert "Task created:" in output
+
+
 def test_repos_help() -> None:
     result = CliRunner().invoke(main, ["repos", "--help"])
     assert result.exit_code == 0

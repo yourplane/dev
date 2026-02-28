@@ -8,6 +8,9 @@ import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
+from typing import Callable
+
+ProgressCallback = Callable[[str], None]
 
 
 class TaskManager:
@@ -24,18 +27,32 @@ class TaskManager:
         repo_url: str,
         agent_cmd: str = "cursor",
         agent_create_chat_args: list[str] | None = None,
+        on_progress: ProgressCallback | None = None,
     ) -> None:
         """Create task dir, task file, agent chat + launch script, and clone repo."""
         agent_create_chat_args = agent_create_chat_args or ["agent", "create-chat"]
         task_dir = self.tasks_root / task_name
         task_dir.mkdir(parents=True, exist_ok=False)
+        if on_progress:
+            on_progress("Created task directory.")
 
         self._write_task_file(task_dir, title, description)
+        if on_progress:
+            on_progress("Wrote task.md.")
+
+        if on_progress:
+            on_progress("Creating agent chat…")
         chat_id = self._create_agent_chat(agent_cmd, agent_create_chat_args)
+        if on_progress:
+            on_progress("Agent chat created.")
         self._write_chat_id_file(task_dir, chat_id)
         self._write_cursor_rules(task_dir)
+        if on_progress:
+            on_progress("Cloning repository…")
         self._clone_repo(task_dir, repo_url)
-        self._setup_pyenv(task_dir, repo_url)
+        if on_progress:
+            on_progress("Repository cloned.")
+        self._setup_pyenv(task_dir, repo_url, on_progress=on_progress)
 
     def _write_task_file(self, task_dir: Path, title: str, description: str) -> None:
         path = task_dir / "task.md"
@@ -99,7 +116,9 @@ class TaskManager:
         name = repo_url.rstrip("/").split("/")[-1]
         return name.removesuffix(".git") if name.endswith(".git") else name or "repo"
 
-    def _setup_pyenv(self, task_dir: Path, repo_url: str) -> None:
+    def _setup_pyenv(
+        self, task_dir: Path, repo_url: str, on_progress: ProgressCallback | None = None
+    ) -> None:
         """Create a venv, install the cloned repo in editable mode, and add a Cursor rule for testing."""
         repo_name = self._repo_name_from_url(repo_url)
         repo_path = task_dir / repo_name
@@ -113,6 +132,8 @@ class TaskManager:
             )
             return
 
+        if on_progress:
+            on_progress("Setting up Python environment…")
         venv_name = task_dir.name
         venv_dir = task_dir / venv_name
         try:
@@ -164,6 +185,8 @@ class TaskManager:
             f"invoke via this task's `{venv_name}` to ensure the correct editable installation is under test.\n",
             encoding="utf-8",
         )
+        if on_progress:
+            on_progress("Python environment ready.")
 
     def list_tasks(self) -> list[str]:
         """Return sorted list of task directory names (excludes .archive and hidden dirs)."""

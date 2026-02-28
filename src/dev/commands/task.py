@@ -86,6 +86,7 @@ def start_task(
             repo_url=repo_url,
             agent_cmd=AGENT_CMD,
             agent_create_chat_args=AGENT_CREATE_CHAT_ARGS,
+            on_progress=click.echo,
         )
         task_dir = tasks_dir / name
         repo_dir = _repo_name_from_url(repo_url)
