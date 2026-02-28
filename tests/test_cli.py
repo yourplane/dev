@@ -118,6 +118,34 @@ def test_agent_launches_with_chat_id(runner: CliRunner, tmp_path: Path) -> None:
     ]
 
 
+def test_agent_plan_mode_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) -> None:
+    with runner.isolated_filesystem(tmp_path):
+        cwd = Path.cwd()
+        (cwd / "agent-chat-id").write_text("chat-456")
+        (cwd / "task.md").write_text("# Task\n\nDo something.")
+        with patch("dev.commands.task.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="# Detailed Plan\n\nStep 1.\nStep 2.",
+                stderr="",
+            )
+            result = runner.invoke(main, ["agent", "--plan"])
+    assert result.exit_code == 0
+    assert mock_run.called
+    call_args = mock_run.call_args[0][0]
+    assert call_args[0] == "cursor"
+    assert "--print" in call_args
+    assert "--plan" in call_args
+    assert "--resume" in call_args
+    assert "chat-456" in call_args
+    assert "--workspace" in call_args
+    assert "--trust" in call_args
+    draft = cwd / "task-plan-draft.md"
+    assert draft.exists()
+    assert draft.read_text() == "# Detailed Plan\n\nStep 1.\nStep 2."
+    assert "Plan written to" in result.output
+
+
 def test_create_with_unknown_shorthand_exits_nonzero(
     runner: CliRunner, tmp_path: Path
 ) -> None:
@@ -239,3 +267,55 @@ def test_repos_add_and_list(runner: CliRunner, tmp_path: Path) -> None:
     assert result2.exit_code == 0
     assert "desk" in result2.output
     assert "maxrademacher/desk" in result2.output
+
+
+def test_plan_help() -> None:
+    result = CliRunner().invoke(main, ["plan", "--help"])
+    assert result.exit_code == 0
+    assert "accept" in result.output
+
+
+def test_plan_accept_updates_task_md(runner: CliRunner, tmp_path: Path) -> None:
+    with runner.isolated_filesystem(tmp_path):
+        cwd = Path.cwd()
+        (cwd / "task.md").write_text("# Old\n\nOld description.")
+        (cwd / "task-plan-draft.md").write_text("# New Title\n\nDetailed plan here.")
+        result = runner.invoke(main, ["plan", "accept"])
+        task_content = (cwd / "task.md").read_text()
+    assert result.exit_code == 0
+    assert task_content == "# New Title\n\nDetailed plan here."
+    assert "Plan accepted" in result.output
+
+
+def test_plan_accept_missing_draft_exits_nonzero(runner: CliRunner, tmp_path: Path) -> None:
+    with runner.isolated_filesystem(tmp_path):
+        (Path.cwd() / "task.md").write_text("# Task\n\nDesc.")
+        result = runner.invoke(main, ["plan", "accept"])
+    assert result.exit_code != 0
+    assert "Draft plan not found" in result.output or "not found" in result.output
+
+
+def test_plan_accept_with_task_flag(runner: CliRunner, tmp_path: Path) -> None:
+    root = tmp_path / "tasks"
+    root.mkdir()
+    task_dir = root / "my-task"
+    task_dir.mkdir()
+    (task_dir / "task.md").write_text("# Old\n\nOld.")
+    (task_dir / "task-plan-draft.md").write_text("# New\n\nNew plan.")
+    result = runner.invoke(
+        main,
+        ["plan", "accept", "--task", "my-task", "--tasks-dir", str(root)],
+    )
+    assert result.exit_code == 0
+    assert (task_dir / "task.md").read_text() == "# New\n\nNew plan."
+
+
+def test_plan_accept_with_draft_option(runner: CliRunner, tmp_path: Path) -> None:
+    with runner.isolated_filesystem(tmp_path):
+        cwd = Path.cwd()
+        (cwd / "task.md").write_text("# Task\n\nX.")
+        (cwd / "custom-draft.md").write_text("# Custom\n\nCustom plan.")
+        result = runner.invoke(main, ["plan", "accept", "--draft", "custom-draft.md"])
+        task_content = (cwd / "task.md").read_text()
+    assert result.exit_code == 0
+    assert task_content == "# Custom\n\nCustom plan."
