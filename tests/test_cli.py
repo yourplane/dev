@@ -143,6 +143,36 @@ def test_create_with_unknown_shorthand_exits_nonzero(
     assert "Unknown repo shorthand" in result.output
 
 
+def test_create_without_description_prompts_for_input(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """When -d is omitted, create prompts for description and uses the input."""
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir()
+    config_file = tmp_path / "repos.json"
+    config_file.write_text(
+        '{"desk": "https://github.com/maxrademacher/desk.git"}'
+    )
+    with patch("dev.repo_config.CONFIG_FILE", config_file):
+        with patch("dev.commands.task.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="chat-id\n")
+            result = runner.invoke(
+                main,
+                [
+                    "create",
+                    "My task",
+                    "--repo",
+                    "desk",
+                    "--tasks-dir",
+                    str(tasks_dir),
+                ],
+                input="Typed description\n",
+            )
+    assert result.exit_code == 0
+    assert (tasks_dir / "my-task" / "task.md").exists()
+    assert "Typed description" in (tasks_dir / "my-task" / "task.md").read_text()
+
+
 def test_create_with_shorthand_uses_resolved_url(
     runner: CliRunner, tmp_path: Path
 ) -> None:

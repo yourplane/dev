@@ -44,9 +44,9 @@ def _repo_name_from_url(repo_url: str) -> str:
     "--description",
     "-d",
     "description",
-    required=True,
+    default=None,
     type=str,
-    help="Task description or goal.",
+    help="Task description or goal. If not set, you will be prompted.",
 )
 @click.option(
     "--tasks-dir",
@@ -58,10 +58,12 @@ def _repo_name_from_url(repo_url: str) -> str:
 def start_task(
     title: str,
     repo_url: str,
-    description: str,
+    description: str | None,
     tasks_dir: Path,
 ) -> None:
     """Create a new task: create directory, task file, agent chat, and clone repo."""
+    if description is None:
+        description = click.prompt("Description")
     try:
         repo_url = resolve_repo(repo_url)
     except ValueError as e:
