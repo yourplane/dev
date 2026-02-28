@@ -2,6 +2,7 @@
 
 from dev.commands.repos import repos_group
 from dev.commands.task import (
+    activate_path,
     archive_task,
     launch_agent,
     list_tasks,
@@ -10,6 +11,7 @@ from dev.commands.task import (
 )
 
 __all__ = [
+    "activate_path",
     "archive_task",
     "launch_agent",
     "list_tasks",

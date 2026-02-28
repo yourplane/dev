@@ -274,6 +274,33 @@ def archive_task(task_name: str, tasks_dir: Path) -> None:
         raise SystemExit(1)
 
 
+VENV_DIR_NAME = "dev-activate"
+ACTIVATE_SCRIPT = "bin/activate"
+
+
+@click.command("activate-path")
+@click.option(
+    "--task-dir",
+    "-t",
+    "task_dir",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Task directory (root containing dev-activate). Default: current working directory.",
+)
+def activate_path(task_dir: Path | None) -> None:
+    """Print path to the task venv activate script for use with: source $(dev activate-path)."""
+    task_root = (task_dir or Path.cwd()).resolve()
+    venv_dir = task_root / VENV_DIR_NAME
+    activate_script = venv_dir / ACTIVATE_SCRIPT
+    if not activate_script.exists():
+        click.echo(
+            f"Activate script not found: {activate_script}. Run from a task directory or use --task-dir.",
+            err=True,
+        )
+        raise SystemExit(1)
+    click.echo(str(activate_script))
+
+
 @click.group("plan")
 def plan_group() -> None:
     """Manage task plans: accept a draft plan into task.md after reviewing."""
