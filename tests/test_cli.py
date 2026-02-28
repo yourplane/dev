@@ -143,6 +143,9 @@ def test_agent_plan_mode_runs_headless_and_writes_draft(runner: CliRunner, tmp_p
     draft = cwd / "task-plan-draft.md"
     assert draft.exists()
     assert draft.read_text() == "# Detailed Plan\n\nStep 1.\nStep 2."
+    assert "Starting plan" in result.output
+    assert "Plan ready:" in result.output
+    assert "# Detailed Plan" in result.output
     assert "Plan written to" in result.output
 
 

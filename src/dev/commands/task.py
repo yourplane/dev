@@ -3,9 +3,13 @@
 import os
 import re
 import subprocess
+import sys
+import threading
 from pathlib import Path
 
 import click
+
+SPINNER_CHARS = ["|", "/", "-", "\\"]
 
 from dev.repo_config import resolve_repo
 from dev.task_manager import TaskManager
@@ -166,21 +170,49 @@ def launch_agent(
             "--trust",
             PLAN_MODE_PROMPT,
         ]
-        try:
-            result = subprocess.run(
-                argv,
-                cwd=str(task_dir),
-                capture_output=True,
-                text=True,
-                timeout=300,
-            )
-        except subprocess.TimeoutExpired:
-            click.echo("Agent plan mode timed out.", err=True)
-            raise SystemExit(1)
-        except FileNotFoundError:
-            click.echo(f"Agent command not found: {agent_cmd}", err=True)
+        result_box: list[subprocess.CompletedProcess[str] | None] = [None]
+        exc_box: list[BaseException | None] = [None]
+
+        def run_agent() -> None:
+            try:
+                result_box[0] = subprocess.run(
+                    argv,
+                    cwd=str(task_dir),
+                    capture_output=True,
+                    text=True,
+                    timeout=300,
+                )
+            except FileNotFoundError as e:
+                exc_box[0] = e
+            except subprocess.TimeoutExpired as e:
+                exc_box[0] = e
+
+        click.echo("Starting plan (running agent in headless plan-only mode)...")
+        thread = threading.Thread(target=run_agent)
+        thread.start()
+        n = 0
+        while thread.is_alive():
+            click.echo(f"\rPlanning {SPINNER_CHARS[n % 4]} ", nl=False)
+            if sys.stdout:
+                sys.stdout.flush()
+            thread.join(timeout=0.15)
+            n += 1
+        click.echo("\r" + " " * 12 + "\r", nl=False)
+        if sys.stdout:
+            sys.stdout.flush()
+
+        if exc_box[0] is not None:
+            e = exc_box[0]
+            if isinstance(e, subprocess.TimeoutExpired):
+                click.echo("Agent plan mode timed out.", err=True)
+            elif isinstance(e, FileNotFoundError):
+                click.echo(f"Agent command not found: {agent_cmd}", err=True)
+            else:
+                click.echo(str(e), err=True)
             raise SystemExit(1)
 
+        result = result_box[0]
+        assert result is not None
         out = (result.stdout or "").strip()
         if result.returncode != 0 and not out:
             click.echo(result.stderr or f"Agent exited with code {result.returncode}", err=True)
@@ -188,7 +220,9 @@ def launch_agent(
 
         draft_path = task_dir / TASK_PLAN_DRAFT
         draft_path.write_text(out, encoding="utf-8")
-        click.echo(f"Plan written to {draft_path}")
+        click.echo("Plan ready:\n")
+        click.echo(out)
+        click.echo(f"\nPlan written to {draft_path}")
         if result.returncode != 0:
             raise SystemExit(result.returncode)
         return
