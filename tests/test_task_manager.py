@@ -62,6 +62,8 @@ def test_start_task(
             # git clone with cwd creates task_dir/repo-name (repo from URL)
             (tmp_tasks_root / "my-task" / "repo").mkdir(parents=True)
             return MagicMock(returncode=0)
+        if cmd[0] == "git" and cmd[1] == "checkout" and cmd[2] == "-b":
+            return MagicMock(returncode=0)
         raise NotImplementedError(cmd)
 
     mock_run.side_effect = run_side_effect
@@ -89,12 +91,17 @@ def test_start_task(
     assert create_chat_calls[0][0][0][0] == "cursor"
     assert "create-chat" in create_chat_calls[0][0][0]
 
-    clone_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "git"]
+    clone_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "git" and c[0][0][1] == "clone"]
     assert len(clone_calls) == 1
     git_cmd = clone_calls[0][0][0]
     assert git_cmd[1] == "clone"
     assert git_cmd[2] == "https://github.com/user/repo.git"
     assert clone_calls[0][1].get("cwd") == tmp_tasks_root / "my-task"
+
+    checkout_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "git" and c[0][0][1] == "checkout"]
+    assert len(checkout_calls) == 1
+    assert checkout_calls[0][0][0] == ["git", "checkout", "-b", "task/my-task"]
+    assert checkout_calls[0][1].get("cwd") == tmp_tasks_root / "my-task" / "repo"
 
 
 @patch("dev.task_manager.subprocess.run")
@@ -111,6 +118,8 @@ def test_start_task_calls_on_progress(
             return MagicMock(stdout="chat-id\n", stderr="", returncode=0)
         if cmd[0] == "git" and cmd[1] == "clone":
             (tmp_tasks_root / "my-task" / "repo").mkdir(parents=True)
+            return MagicMock(returncode=0)
+        if cmd[0] == "git" and cmd[1] == "checkout" and cmd[2] == "-b":
             return MagicMock(returncode=0)
         raise NotImplementedError(cmd)
 
@@ -132,18 +141,22 @@ def test_start_task_calls_on_progress(
     assert "Agent chat created." in messages
     assert "Cloning repository…" in messages
     assert "Repository cloned." in messages
+    assert "Checking out feature branch…" in messages
+    assert "Feature branch created." in messages
     # No pyproject in cloned repo, so no "Setting up Python environment…" / "Python environment ready."
 
 
 def test_start_task_creates_directory(manager: TaskManager, tmp_tasks_root: Path) -> None:
     with patch("dev.task_manager.subprocess.run") as mock_run:
-        mock_run.side_effect = lambda cmd, **kwargs: (
-            MagicMock(stdout="chat-123\n", stderr="", returncode=0)
-            if cmd[0] == "cursor"
-            else (Path(tmp_tasks_root / "foo" / "y").mkdir(parents=True) or MagicMock(returncode=0))
-            if cmd[0] == "git"
-            else MagicMock(returncode=0)
-        )
+        def run_side_effect(cmd, **kwargs):
+            if cmd[0] == "cursor":
+                return MagicMock(stdout="chat-123\n", stderr="", returncode=0)
+            if cmd[0] == "git":
+                (tmp_tasks_root / "foo" / "y").mkdir(parents=True, exist_ok=True)
+                return MagicMock(returncode=0)
+            return MagicMock(returncode=0)
+
+        mock_run.side_effect = run_side_effect
         manager.start_task(
             title="Foo",
             task_name="foo",

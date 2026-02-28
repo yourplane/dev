@@ -271,6 +271,8 @@ def test_create_prints_progress_messages(
     assert "Agent chat created." in output
     assert "Cloning repository…" in output
     assert "Repository cloned." in output
+    assert "Checking out feature branch…" in output
+    assert "Feature branch created." in output
     assert "Task created:" in output
 
 

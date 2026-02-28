@@ -52,6 +52,7 @@ class TaskManager:
         self._clone_repo(task_dir, repo_url)
         if on_progress:
             on_progress("Repository cloned.")
+        self._checkout_feature_branch(task_dir, repo_url, task_name, on_progress=on_progress)
         self._setup_pyenv(task_dir, repo_url, on_progress=on_progress)
 
     def _write_task_file(self, task_dir: Path, title: str, description: str) -> None:
@@ -109,6 +110,28 @@ class TaskManager:
             check=True,
             capture_output=True,
         )
+
+    def _checkout_feature_branch(
+        self,
+        task_dir: Path,
+        repo_url: str,
+        task_name: str,
+        on_progress: ProgressCallback | None = None,
+    ) -> None:
+        """Create and checkout a feature branch in the cloned repo (branch name: task/<task_name>)."""
+        repo_name = self._repo_name_from_url(repo_url)
+        repo_path = task_dir / repo_name
+        branch_name = f"task/{task_name}"
+        if on_progress:
+            on_progress("Checking out feature branch…")
+        subprocess.run(
+            ["git", "checkout", "-b", branch_name],
+            cwd=repo_path,
+            check=True,
+            capture_output=True,
+        )
+        if on_progress:
+            on_progress("Feature branch created.")
 
     @staticmethod
     def _repo_name_from_url(repo_url: str) -> str:
