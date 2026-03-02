@@ -5,9 +5,10 @@ import click
 from dev.commands import (
     activate_path,
     archive_task,
+    comms_group,
     launch_interact,
     list_tasks,
-    plan_group,
+    plan_cmd,
     repos_group,
     start_task,
 )
@@ -25,5 +26,6 @@ main.add_command(launch_interact)
 main.add_command(list_tasks)
 main.add_command(archive_task)
 main.add_command(activate_path)
-main.add_command(plan_group)
+main.add_command(plan_cmd)
+main.add_command(comms_group)
 main.add_command(repos_group)
