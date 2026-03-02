@@ -20,7 +20,7 @@ def test_main_help() -> None:
     assert result.exit_code == 0
     assert "Dev CLI" in result.output
     assert "create" in result.output
-    assert "agent" in result.output
+    assert "interact" in result.output
 
 
 def test_create_help() -> None:
@@ -84,27 +84,27 @@ def test_archive_not_found_exits_nonzero(runner: CliRunner, tmp_path: Path) -> N
     assert "not found" in result.output
 
 
-def test_agent_help() -> None:
-    result = CliRunner().invoke(main, ["agent", "--help"])
+def test_interact_help() -> None:
+    result = CliRunner().invoke(main, ["interact", "--help"])
     assert result.exit_code == 0
-    assert "Launch" in result.output or "agent" in result.output
+    assert "Interact" in result.output or "interact" in result.output
     assert "--task" in result.output
 
 
-def test_agent_missing_chat_id_file_exits_nonzero(runner: CliRunner, tmp_path: Path) -> None:
+def test_interact_missing_chat_id_file_exits_nonzero(runner: CliRunner, tmp_path: Path) -> None:
     with runner.isolated_filesystem(tmp_path):
-        result = runner.invoke(main, ["agent"])
+        result = runner.invoke(main, ["interact"])
     assert result.exit_code != 0
     assert "Chat ID file not found" in result.output or "not found" in result.output
 
 
-def test_agent_launches_with_chat_id(runner: CliRunner, tmp_path: Path) -> None:
+def test_interact_launches_with_chat_id(runner: CliRunner, tmp_path: Path) -> None:
     with runner.isolated_filesystem(tmp_path):
-        # Create agent-chat-id in cwd (isolated fs) so "dev agent" finds it
+        # Create agent-chat-id in cwd (isolated fs) so "dev interact" finds it
         (Path.cwd() / "agent-chat-id").write_text("my-chat-uuid-123")
         with patch("dev.commands.task.os.execvp") as mock_execvp:
             mock_execvp.side_effect = SystemExit(0)
-            result = runner.invoke(main, ["agent"], catch_exceptions=True)
+            result = runner.invoke(main, ["interact"], catch_exceptions=True)
     assert mock_execvp.called
     call_args = mock_execvp.call_args[0]
     assert call_args[0] == "cursor"
@@ -118,7 +118,7 @@ def test_agent_launches_with_chat_id(runner: CliRunner, tmp_path: Path) -> None:
     ]
 
 
-def test_agent_plan_mode_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) -> None:
+def test_plan_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) -> None:
     with runner.isolated_filesystem(tmp_path):
         cwd = Path.cwd()
         (cwd / "agent-chat-id").write_text("chat-456")
@@ -129,7 +129,7 @@ def test_agent_plan_mode_runs_headless_and_writes_draft(runner: CliRunner, tmp_p
                 stdout="# Detailed Plan\n\nStep 1.\nStep 2.",
                 stderr="",
             )
-            result = runner.invoke(main, ["agent", "--plan"])
+            result = runner.invoke(main, ["plan"])
     assert result.exit_code == 0
     assert mock_run.called
     call_args = mock_run.call_args[0][0]

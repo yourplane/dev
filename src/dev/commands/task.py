@@ -23,6 +23,100 @@ TASK_PLAN_DRAFT = "task-plan-draft.md"
 PLAN_MODE_PROMPT = """Read the task.md file in this workspace. Produce a more detailed description and a step-by-step plan for the task. Ask any follow-up questions you need. Output only the detailed description and plan as markdown (no preamble or meta-commentary). Do not make any edits or run any tools—only output the plan."""
 
 
+def _run_plan_mode(
+    task_name: str | None,
+    tasks_dir: Path,
+    agent_cmd: str,
+) -> None:
+    """Run agent in headless plan-only mode; output is written to task-plan-draft.md."""
+    if task_name is not None:
+        task_dir = tasks_dir / task_name
+        chat_id_path = task_dir / AGENT_CHAT_ID_FILE
+    else:
+        task_dir = Path.cwd()
+        chat_id_path = task_dir / AGENT_CHAT_ID_FILE
+
+    if not chat_id_path.exists():
+        click.echo(
+            f"Chat ID file not found: {chat_id_path}. Run from a task directory or use --task.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    chat_id = chat_id_path.read_text(encoding="utf-8").strip()
+    if not chat_id:
+        click.echo("Chat ID file is empty.", err=True)
+        raise SystemExit(1)
+
+    argv = [
+        agent_cmd,
+        "agent",
+        "--print",
+        "--plan",
+        "--resume",
+        chat_id,
+        "--workspace",
+        str(task_dir),
+        "--trust",
+        PLAN_MODE_PROMPT,
+    ]
+    result_box: list[subprocess.CompletedProcess[str] | None] = [None]
+    exc_box: list[BaseException | None] = [None]
+
+    def run_agent() -> None:
+        try:
+            result_box[0] = subprocess.run(
+                argv,
+                cwd=str(task_dir),
+                capture_output=True,
+                text=True,
+                timeout=300,
+            )
+        except FileNotFoundError as e:
+            exc_box[0] = e
+        except subprocess.TimeoutExpired as e:
+            exc_box[0] = e
+
+    click.echo("Starting plan (running agent in headless plan-only mode)...")
+    thread = threading.Thread(target=run_agent)
+    thread.start()
+    n = 0
+    while thread.is_alive():
+        click.echo(f"\rPlanning {SPINNER_CHARS[n % 4]} ", nl=False)
+        if sys.stdout:
+            sys.stdout.flush()
+        thread.join(timeout=0.15)
+        n += 1
+    click.echo("\r" + " " * 12 + "\r", nl=False)
+    if sys.stdout:
+        sys.stdout.flush()
+
+    if exc_box[0] is not None:
+        e = exc_box[0]
+        if isinstance(e, subprocess.TimeoutExpired):
+            click.echo("Agent plan mode timed out.", err=True)
+        elif isinstance(e, FileNotFoundError):
+            click.echo(f"Agent command not found: {agent_cmd}", err=True)
+        else:
+            click.echo(str(e), err=True)
+        raise SystemExit(1)
+
+    result = result_box[0]
+    assert result is not None
+    out = (result.stdout or "").strip()
+    if result.returncode != 0 and not out:
+        click.echo(result.stderr or f"Agent exited with code {result.returncode}", err=True)
+        raise SystemExit(1)
+
+    draft_path = task_dir / TASK_PLAN_DRAFT
+    draft_path.write_text(out, encoding="utf-8")
+    click.echo("Plan ready:\n")
+    click.echo(out)
+    click.echo(f"\nPlan written to {draft_path}")
+    if result.returncode != 0:
+        raise SystemExit(result.returncode)
+
+
 def _slugify(title: str) -> str:
     """Convert task title to a safe directory name."""
     s = title.lower().strip()
@@ -102,7 +196,7 @@ def start_task(
         raise SystemExit(1)
 
 
-@click.command("agent")
+@click.command("interact")
 @click.option(
     "--task",
     "-t",
@@ -125,20 +219,12 @@ def start_task(
     envvar="DEV_AGENT_CMD",
     help="Command to run for the agent (e.g. cursor).",
 )
-@click.option(
-    "--plan",
-    "plan_mode",
-    is_flag=True,
-    default=False,
-    help="Run agent in headless plan-only mode; output is written to task-plan-draft.md. Then run 'dev plan accept' to write it into task.md.",
-)
-def launch_agent(
+def launch_interact(
     task_name: str | None,
     tasks_dir: Path,
     agent_cmd: str,
-    plan_mode: bool,
 ) -> None:
-    """Launch the agent for this task (resume chat using saved chat ID)."""
+    """Interact with the agent for this task (resume chat using saved chat ID)."""
     if task_name is not None:
         task_dir = tasks_dir / task_name
         chat_id_path = task_dir / AGENT_CHAT_ID_FILE
@@ -158,78 +244,6 @@ def launch_agent(
         click.echo("Chat ID file is empty.", err=True)
         raise SystemExit(1)
 
-    if plan_mode:
-        # Headless plan-only: run agent with --print and --plan, capture stdout, write to draft file
-        argv = [
-            agent_cmd,
-            "agent",
-            "--print",
-            "--plan",
-            "--resume",
-            chat_id,
-            "--workspace",
-            str(task_dir),
-            "--trust",
-            PLAN_MODE_PROMPT,
-        ]
-        result_box: list[subprocess.CompletedProcess[str] | None] = [None]
-        exc_box: list[BaseException | None] = [None]
-
-        def run_agent() -> None:
-            try:
-                result_box[0] = subprocess.run(
-                    argv,
-                    cwd=str(task_dir),
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                )
-            except FileNotFoundError as e:
-                exc_box[0] = e
-            except subprocess.TimeoutExpired as e:
-                exc_box[0] = e
-
-        click.echo("Starting plan (running agent in headless plan-only mode)...")
-        thread = threading.Thread(target=run_agent)
-        thread.start()
-        n = 0
-        while thread.is_alive():
-            click.echo(f"\rPlanning {SPINNER_CHARS[n % 4]} ", nl=False)
-            if sys.stdout:
-                sys.stdout.flush()
-            thread.join(timeout=0.15)
-            n += 1
-        click.echo("\r" + " " * 12 + "\r", nl=False)
-        if sys.stdout:
-            sys.stdout.flush()
-
-        if exc_box[0] is not None:
-            e = exc_box[0]
-            if isinstance(e, subprocess.TimeoutExpired):
-                click.echo("Agent plan mode timed out.", err=True)
-            elif isinstance(e, FileNotFoundError):
-                click.echo(f"Agent command not found: {agent_cmd}", err=True)
-            else:
-                click.echo(str(e), err=True)
-            raise SystemExit(1)
-
-        result = result_box[0]
-        assert result is not None
-        out = (result.stdout or "").strip()
-        if result.returncode != 0 and not out:
-            click.echo(result.stderr or f"Agent exited with code {result.returncode}", err=True)
-            raise SystemExit(1)
-
-        draft_path = task_dir / TASK_PLAN_DRAFT
-        draft_path.write_text(out, encoding="utf-8")
-        click.echo("Plan ready:\n")
-        click.echo(out)
-        click.echo(f"\nPlan written to {draft_path}")
-        if result.returncode != 0:
-            raise SystemExit(result.returncode)
-        return
-
-    # Interactive: exec into the agent
     prompt = "Read the task.md file and do it."
     argv = [agent_cmd, "agent", "--force", "--resume", chat_id, prompt]
     os.execvp(agent_cmd, argv)
@@ -304,10 +318,39 @@ def activate_path(task_dir: Path | None) -> None:
     click.echo(str(activate_script))
 
 
-@click.group("plan")
-def plan_group() -> None:
-    """Manage task plans: accept a draft plan into task.md after reviewing."""
-    pass
+@click.group("plan", invoke_without_command=True)
+@click.option(
+    "--task",
+    "-t",
+    "task_name",
+    type=str,
+    default=None,
+    help="Task name (directory name). If not set, use current directory.",
+)
+@click.option(
+    "--tasks-dir",
+    type=click.Path(path_type=Path),
+    default=TASKS_ROOT,
+    envvar="DEV_TASKS_DIR",
+    help="Root directory for tasks (used only with --task).",
+)
+@click.option(
+    "--agent-cmd",
+    type=str,
+    default=AGENT_CMD,
+    envvar="DEV_AGENT_CMD",
+    help="Command to run for the agent (e.g. cursor).",
+)
+@click.pass_context
+def plan_group(
+    ctx: click.Context,
+    task_name: str | None,
+    tasks_dir: Path,
+    agent_cmd: str,
+) -> None:
+    """Run headless plan mode or manage task plans (e.g. accept draft into task.md)."""
+    if ctx.invoked_subcommand is None:
+        _run_plan_mode(task_name=task_name, tasks_dir=tasks_dir, agent_cmd=agent_cmd)
 
 
 @plan_group.command("accept")
@@ -348,7 +391,7 @@ def plan_accept(
 
     if not draft_path.exists():
         click.echo(
-            f"Draft plan not found: {draft_path}. Run the agent in plan mode first (dev agent --plan).",
+            f"Draft plan not found: {draft_path}. Run plan mode first (dev plan).",
             err=True,
         )
         raise SystemExit(1)
