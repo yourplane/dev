@@ -10,11 +10,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
+from dev.comms import add_comms, comms_dir
+
 ProgressCallback = Callable[[str], None]
 
 
 class TaskManager:
-    """Creates task directories, task files, agent chats, and clones repos."""
+    """Creates task directories, comms dir, agent chats, and clones repos."""
 
     def __init__(self, tasks_root: Path) -> None:
         self.tasks_root = Path(tasks_root)
@@ -23,22 +25,26 @@ class TaskManager:
         self,
         title: str,
         task_name: str,
-        description: str,
+        comment: str | None,
         repo_url: str,
         agent_cmd: str = "cursor",
         agent_create_chat_args: list[str] | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> None:
-        """Create task dir, task file, agent chat + launch script, and clone repo."""
+        """Create task dir, comms dir (and optional first user comment), agent chat, and clone repo."""
         agent_create_chat_args = agent_create_chat_args or ["agent", "create-chat"]
         task_dir = self.tasks_root / task_name
         task_dir.mkdir(parents=True, exist_ok=False)
         if on_progress:
             on_progress("Created task directory.")
 
-        self._write_task_file(task_dir, title, description)
+        self._ensure_comms_dir(task_dir)
         if on_progress:
-            on_progress("Wrote task.md.")
+            on_progress("Comms directory ready.")
+        if comment and comment.strip():
+            add_comms(task_dir, "user", f"# {title}\n\n{comment.strip()}")
+            if on_progress:
+                on_progress("Added initial comment to comms.")
 
         if on_progress:
             on_progress("Creating agent chat…")
@@ -55,9 +61,25 @@ class TaskManager:
         self._checkout_feature_branch(task_dir, repo_url, task_name, on_progress=on_progress)
         self._setup_pyenv(task_dir, repo_url, on_progress=on_progress)
 
-    def _write_task_file(self, task_dir: Path, title: str, description: str) -> None:
-        path = task_dir / "task.md"
-        path.write_text(f"# {title}\n\n{description}\n", encoding="utf-8")
+    def _ensure_comms_dir(self, task_dir: Path) -> None:
+        """Create comms directory and write Cursor rule for comms context."""
+        cdir = comms_dir(task_dir)
+        cdir.mkdir(parents=True, exist_ok=True)
+        rules_dir = task_dir / ".cursor" / "rules"
+        rules_dir.mkdir(parents=True, exist_ok=True)
+        path = rules_dir / "task-comms.mdc"
+        path.write_text(
+            "---\n"
+            "description: Task context in comms directory\n"
+            "alwaysApply: true\n"
+            "---\n\n"
+            "# Task context (comms)\n\n"
+            "Look at the `comms` directory in this workspace for task context. "
+            "Read the files listed in `comms/index.txt` in order to understand the task "
+            "and prior discussion. Add agent comms (e.g. plans, implementation notes) by "
+            "creating files in `comms` and appending their filenames to `comms/index.txt`.\n",
+            encoding="utf-8",
+        )
 
     def _create_agent_chat(
         self, agent_cmd: str, agent_create_chat_args: list[str]

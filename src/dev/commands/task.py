@@ -11,6 +11,7 @@ import click
 
 SPINNER_CHARS = ["|", "/", "-", "\\"]
 
+from dev.comms import add_comms, comms_dir, read_index
 from dev.repo_config import resolve_repo
 from dev.task_manager import TaskManager
 
@@ -20,7 +21,21 @@ AGENT_CREATE_CHAT_ARGS = ["agent", "create-chat"]
 AGENT_CHAT_ID_FILE = "agent-chat-id"
 TASK_PLAN_DRAFT = "task-plan-draft.md"
 
-PLAN_MODE_PROMPT = """Read the task.md file in this workspace. Produce a more detailed description and a step-by-step plan for the task. Ask any follow-up questions you need. Output only the detailed description and plan as markdown (no preamble or meta-commentary). Do not make any edits or run any tools—only output the plan."""
+PLAN_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Produce a more detailed description and a step-by-step plan for the task. Ask any follow-up questions you need. Output only the detailed description and plan as markdown (no preamble or meta-commentary). Do not make any edits or run any tools—only output the plan."""
+
+
+def _task_dir_from_options(
+    task_name: str | None, tasks_dir: Path
+) -> tuple[Path, Path]:
+    """Resolve task directory and comms dir. Raises on missing dir or missing comms."""
+    if task_name is not None:
+        task_dir = tasks_dir / task_name
+    else:
+        task_dir = Path.cwd()
+    if not task_dir.exists() or not task_dir.is_dir():
+        click.echo(f"Task directory not found: {task_dir}", err=True)
+        raise SystemExit(1)
+    return task_dir, comms_dir(task_dir)
 
 
 def _resolve_task_dir(task_path: Path | None) -> Path:
@@ -110,9 +125,10 @@ def _run_plan_mode(
 
     draft_path = task_dir / TASK_PLAN_DRAFT
     draft_path.write_text(out, encoding="utf-8")
+    comms_path = add_comms(task_dir, "agent", out, kind="plan")
     click.echo("Plan ready:\n")
     click.echo(out)
-    click.echo(f"\nPlan written to {draft_path}")
+    click.echo(f"\nPlan written to {comms_path.relative_to(task_dir)}")
     if result.returncode != 0:
         raise SystemExit(result.returncode)
 
@@ -142,12 +158,12 @@ def _repo_name_from_url(repo_url: str) -> str:
     help="Git repository URL or shorthand (e.g. desk) from config (~/.config/dev/repos.json).",
 )
 @click.option(
-    "--description",
-    "-d",
-    "description",
+    "--comment",
+    "-c",
+    "comment",
     default=None,
     type=str,
-    help="Task description or goal. If not set, you will be prompted.",
+    help="Optional initial user comment (same as task comms comment).",
 )
 @click.option(
     "--tasks-dir",
@@ -159,12 +175,10 @@ def _repo_name_from_url(repo_url: str) -> str:
 def start_task(
     title: str,
     repo_url: str,
-    description: str | None,
+    comment: str | None,
     tasks_dir: Path,
 ) -> None:
-    """Create a new task: create directory, task file, agent chat, and clone repo."""
-    if description is None:
-        description = click.prompt("Description")
+    """Create a new task: create directory, comms dir, agent chat, and clone repo."""
     try:
         repo_url = resolve_repo(repo_url)
     except ValueError as e:
@@ -176,7 +190,7 @@ def start_task(
         manager.start_task(
             title=title,
             task_name=name,
-            description=description,
+            comment=comment,
             repo_url=repo_url,
             agent_cmd=AGENT_CMD,
             agent_create_chat_args=AGENT_CREATE_CHAT_ARGS,
@@ -185,7 +199,7 @@ def start_task(
         task_dir = tasks_dir / name
         repo_dir = _repo_name_from_url(repo_url)
         click.echo(f"Task created: {task_dir}")
-        click.echo(f"  Task file: {task_dir / 'task.md'}")
+        click.echo(f"  Comms: {comms_dir(task_dir)}")
         click.echo(f"  Chat ID file: {task_dir / AGENT_CHAT_ID_FILE}")
         click.echo(f"  Repo cloned into: {task_dir / repo_dir}")
         venv_dir = task_dir / ".venv" / name
@@ -232,8 +246,7 @@ def launch_interact(
         click.echo("Chat ID file is empty.", err=True)
         raise SystemExit(1)
 
-    prompt = "Read the task.md file and do it."
-    argv = [agent_cmd, "agent", "--force", "--resume", chat_id, prompt]
+    argv = [agent_cmd, "agent", "--force", "--resume", chat_id]
     os.execvp(agent_cmd, argv)
 
 
@@ -274,6 +287,75 @@ def archive_task(task_name: str, tasks_dir: Path) -> None:
     except FileNotFoundError as e:
         click.echo(str(e), err=True)
         raise SystemExit(1)
+
+
+@click.group("comms", invoke_without_command=True)
+@click.option(
+    "--task",
+    "-t",
+    "task_name",
+    type=str,
+    default=None,
+    help="Task name (directory name). If not set, use current directory.",
+)
+@click.option(
+    "--tasks-dir",
+    type=click.Path(path_type=Path),
+    default=TASKS_ROOT,
+    envvar="DEV_TASKS_DIR",
+    help="Root directory for tasks (used only with --task).",
+)
+@click.pass_context
+def comms_group(
+    ctx: click.Context,
+    task_name: str | None,
+    tasks_dir: Path,
+) -> None:
+    """Add or list task comms (user comments and agent notes)."""
+    if ctx.invoked_subcommand is not None:
+        return
+    # Default: list comms
+    task_dir, cdir = _task_dir_from_options(task_name, tasks_dir)
+    if not cdir.exists():
+        click.echo("No comms yet.")
+        return
+    order = read_index(task_dir)
+    if not order:
+        click.echo("No comms yet.")
+        return
+    for name in order:
+        click.echo(name)
+
+
+@comms_group.command("comment")
+@click.argument("message", type=str, required=False)
+@click.option(
+    "--task",
+    "-t",
+    "task_name",
+    type=str,
+    default=None,
+    help="Task name (directory name). If not set, use current directory.",
+)
+@click.option(
+    "--tasks-dir",
+    type=click.Path(path_type=Path),
+    default=TASKS_ROOT,
+    envvar="DEV_TASKS_DIR",
+    help="Root directory for tasks (used only with --task).",
+)
+def comms_comment(
+    message: str | None,
+    task_name: str | None,
+    tasks_dir: Path,
+) -> None:
+    """Add a user comment to the task comms."""
+    task_dir, _ = _task_dir_from_options(task_name, tasks_dir)
+    if not message or not message.strip():
+        click.echo("Provide a message: dev task comms comment \"Your message\"", err=True)
+        raise SystemExit(1)
+    path = add_comms(task_dir, "user", message.strip())
+    click.echo(f"Added: {path.relative_to(task_dir)}")
 
 
 ACTIVATE_SCRIPT = "bin/activate"
@@ -356,7 +438,7 @@ def plan_accept(
     task_dir = _resolve_task_dir(task_path)
 
     draft_path = draft if draft is not None else task_dir / TASK_PLAN_DRAFT
-    task_path = task_dir / "task.md"
+    task_md_path = task_dir / "task.md"
 
     if not draft_path.exists():
         click.echo(
@@ -366,5 +448,5 @@ def plan_accept(
         raise SystemExit(1)
 
     content = draft_path.read_text(encoding="utf-8")
-    task_path.write_text(content, encoding="utf-8")
-    click.echo(f"Plan accepted: {task_path} updated from {draft_path.name}.")
+    task_md_path.write_text(content, encoding="utf-8")
+    click.echo(f"Plan accepted: {task_md_path} updated from {draft_path.name}.")
