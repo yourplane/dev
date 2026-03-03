@@ -326,6 +326,8 @@ def _run_implement_mode(
             )
         raise SystemExit(1)
 
+    click.echo()
+
 
 def _extract_plan_from_stream_json(streamed_output: str) -> str:
     """Extract plan markdown from streamed JSON (Cursor agent stream-json format)."""
