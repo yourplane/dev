@@ -26,6 +26,9 @@ PLAN_LOGS_DIR = ".logs"
 
 PLAN_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Produce a more detailed description and a step-by-step plan for the task. Ask any follow-up questions you need. Output only the detailed description and plan as markdown (no preamble or meta-commentary)."""
 
+IMPLEMENT_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Implement the task and commit when done."""
+IMPLEMENT_STREAM_LOG_PREFIX = "dev-implement-stream-"
+
 
 def _task_dir_from_options(
     task_name: str | None, tasks_dir: Path
@@ -49,7 +52,6 @@ def _resolve_task_dir(task_path: Path | None) -> Path:
 def _run_plan_mode(
     task_path: Path | None,
     agent_cmd: str,
-    no_stream_json: bool = False,
 ) -> None:
     """Run agent in headless plan-only mode; output is written to task-plan-draft.md and comms."""
     task_dir = _resolve_task_dir(task_path)
@@ -67,80 +69,7 @@ def _run_plan_mode(
         click.echo("Chat ID file is empty.", err=True)
         raise SystemExit(1)
 
-    if no_stream_json:
-        # Legacy: run agent with --print, capture stdout, write to draft and comms
-        argv = [
-            agent_cmd,
-            "agent",
-            "--print",
-            "--mode",
-            "ask",
-            "--resume",
-            chat_id,
-            "--workspace",
-            str(task_dir),
-            "--trust",
-            PLAN_MODE_PROMPT,
-        ]
-        result_box: list[subprocess.CompletedProcess[str] | None] = [None]
-        exc_box: list[BaseException | None] = [None]
-
-        def run_agent() -> None:
-            try:
-                result_box[0] = subprocess.run(
-                    argv,
-                    cwd=str(task_dir),
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                )
-            except FileNotFoundError as e:
-                exc_box[0] = e
-            except subprocess.TimeoutExpired as e:
-                exc_box[0] = e
-
-        click.echo("Starting plan (running agent in headless plan-only mode)...")
-        thread = threading.Thread(target=run_agent)
-        thread.start()
-        n = 0
-        while thread.is_alive():
-            click.echo(f"\rPlanning {SPINNER_CHARS[n % 4]} ", nl=False)
-            if sys.stdout:
-                sys.stdout.flush()
-            thread.join(timeout=0.15)
-            n += 1
-        click.echo("\r" + " " * 12 + "\r", nl=False)
-        if sys.stdout:
-            sys.stdout.flush()
-
-        if exc_box[0] is not None:
-            e = exc_box[0]
-            if isinstance(e, subprocess.TimeoutExpired):
-                click.echo("Agent plan mode timed out.", err=True)
-            elif isinstance(e, FileNotFoundError):
-                click.echo(f"Agent command not found: {agent_cmd}", err=True)
-            else:
-                click.echo(str(e), err=True)
-            raise SystemExit(1)
-
-        result = result_box[0]
-        assert result is not None
-        out = (result.stdout or "").strip()
-        if result.returncode != 0 and not out:
-            click.echo(result.stderr or f"Agent exited with code {result.returncode}", err=True)
-            raise SystemExit(1)
-
-        draft_path = task_dir / TASK_PLAN_DRAFT
-        draft_path.write_text(out, encoding="utf-8")
-        comms_path = add_comms(task_dir, "agent", out, kind="plan")
-        click.echo()
-        click.echo()
-        click.echo(click.style(f"Plan written to {comms_path.relative_to(task_dir)}", dim=True))
-        if result.returncode != 0:
-            raise SystemExit(result.returncode)
-        return
-
-    # Stream-json: run agent with --output-format stream-json, format console output, write draft and comms
+    # Run agent with --output-format stream-json, format console output, write draft and comms
     argv = [
         agent_cmd,
         "agent",
@@ -248,7 +177,7 @@ def _run_plan_mode(
         if not streamed_output.strip() and not stderr_output:
             click.echo(f"Agent exited with code {proc.returncode} (no output).", err=True)
             click.echo(
-                "The agent may not support --output-format stream-json. Try --no-stream-json to use default output format.",
+                "The agent may not support --output-format stream-json.",
                 err=True,
             )
         raise SystemExit(1)
@@ -262,6 +191,137 @@ def _run_plan_mode(
     click.echo(click.style(f"Plan written to {comms_path.relative_to(task_dir)}", dim=True))
     if proc.returncode != 0:
         raise SystemExit(proc.returncode)
+
+
+def _run_implement_mode(
+    task_path: Path | None,
+    agent_cmd: str,
+) -> None:
+    """Run agent in headless implement mode; stream output to console and .logs only."""
+    task_dir = _resolve_task_dir(task_path)
+    chat_id_path = task_dir / AGENT_CHAT_ID_FILE
+
+    if not chat_id_path.exists():
+        click.echo(
+            f"Chat ID file not found: {chat_id_path}. Run from a task directory or use --task.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    chat_id = chat_id_path.read_text(encoding="utf-8").strip()
+    if not chat_id:
+        click.echo("Chat ID file is empty.", err=True)
+        raise SystemExit(1)
+
+    argv = [
+        agent_cmd,
+        "agent",
+        "--print",
+        "--output-format",
+        "stream-json",
+        "--stream-partial-output",
+        "--resume",
+        chat_id,
+        "--workspace",
+        str(task_dir),
+        "--trust",
+        IMPLEMENT_MODE_PROMPT,
+    ]
+    buffer: list[str] = []
+    buffer_lock = threading.Lock()
+    read_error: list[BaseException | None] = [None]
+    logs_dir = task_dir / PLAN_LOGS_DIR
+    logs_dir.mkdir(exist_ok=True)
+    stream_log_name = f"{IMPLEMENT_STREAM_LOG_PREFIX}{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.log"
+    stream_log_path = logs_dir / stream_log_name
+    thinking_started: list[bool] = [False]
+    thinking_at_line_start: list[bool] = [True]
+
+    def read_stdout(proc: subprocess.Popen[str]) -> None:
+        try:
+            assert proc.stdout is not None
+            with open(stream_log_path, "w", encoding="utf-8") as log:
+                for line in proc.stdout:
+                    decoded = line if isinstance(line, str) else line.decode("utf-8", errors="replace")
+                    log.write(decoded)
+                    if decoded and not decoded.endswith("\n"):
+                        log.write("\n")
+                    log.flush()
+                    formatted, is_thinking = _format_stream_line_for_console(decoded.strip())
+                    if formatted is not None and sys.stdout:
+                        if is_thinking:
+                            if not thinking_started[0]:
+                                thinking_started[0] = True
+                                out = "\n  Thinking:\n  "
+                                thinking_at_line_start[0] = False
+                            else:
+                                out = ""
+                            for ch in formatted:
+                                if thinking_at_line_start[0]:
+                                    out += "  "
+                                    thinking_at_line_start[0] = False
+                                out += ch
+                                if ch == "\n":
+                                    thinking_at_line_start[0] = True
+                            if out:
+                                sys.stdout.write(click.style(out, dim=True))
+                        else:
+                            sys.stdout.write(formatted)
+                        sys.stdout.flush()
+                    with buffer_lock:
+                        buffer.append(decoded)
+        except Exception as e:
+            read_error[0] = e
+
+    click.echo("Starting implement (stream-json mode)...")
+    click.echo(f"Stream log: {stream_log_path}")
+    try:
+        proc = subprocess.Popen(
+            argv,
+            cwd=str(task_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+    except FileNotFoundError:
+        click.echo(f"Agent command not found: {agent_cmd}", err=True)
+        raise SystemExit(1)
+
+    reader = threading.Thread(target=read_stdout, args=(proc,))
+    reader.start()
+    reader.join(timeout=300)
+    if reader.is_alive():
+        proc.kill()
+        proc.wait()
+        click.echo("Agent implement mode timed out.", err=True)
+        raise SystemExit(1)
+
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+    stderr_output = ""
+    if proc.stderr:
+        stderr_output = proc.stderr.read()
+
+    if read_error[0] is not None:
+        click.echo(str(read_error[0]), err=True)
+        raise SystemExit(1)
+
+    if proc.returncode != 0:
+        streamed_output = "".join(buffer)
+        if stderr_output:
+            click.echo(stderr_output, err=True)
+        if not streamed_output.strip() and not stderr_output:
+            click.echo(f"Agent exited with code {proc.returncode} (no output).", err=True)
+            click.echo(
+                "The agent may not support --output-format stream-json.",
+                err=True,
+            )
+        raise SystemExit(1)
 
 
 def _extract_plan_from_stream_json(streamed_output: str) -> str:
@@ -601,24 +661,15 @@ def activate_path(task_path: Path | None) -> None:
     envvar="DEV_AGENT_CMD",
     help="Command to run for the agent (e.g. cursor).",
 )
-@click.option(
-    "--no-stream-json",
-    "no_stream_json",
-    is_flag=True,
-    default=False,
-    envvar="DEV_AGENT_PLAN_NO_STREAM_JSON",
-    help="Use legacy --print with default output format instead of stream-json.",
-)
 @click.pass_context
 def plan_group(
     ctx: click.Context,
     task_path: Path | None,
     agent_cmd: str,
-    no_stream_json: bool,
 ) -> None:
     """Run headless plan mode or manage task plans (e.g. accept draft into task.md)."""
     if ctx.invoked_subcommand is None:
-        _run_plan_mode(task_path=task_path, agent_cmd=agent_cmd, no_stream_json=no_stream_json)
+        _run_plan_mode(task_path=task_path, agent_cmd=agent_cmd)
 
 
 @plan_group.command("accept")
@@ -656,3 +707,27 @@ def plan_accept(
     content = draft_path.read_text(encoding="utf-8")
     task_md_path.write_text(content, encoding="utf-8")
     click.echo(f"Plan accepted: {task_md_path} updated from {draft_path.name}.")
+
+
+@click.command("implement")
+@click.option(
+    "--task",
+    "-t",
+    "task_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to task directory. If not set, use current working directory.",
+)
+@click.option(
+    "--agent-cmd",
+    type=str,
+    default=AGENT_CMD,
+    envvar="DEV_AGENT_CMD",
+    help="Command to run for the agent (e.g. cursor).",
+)
+def implement_cmd(
+    task_path: Path | None,
+    agent_cmd: str,
+) -> None:
+    """Run headless implement mode: agent implements the task and commits when done."""
+    _run_implement_mode(task_path=task_path, agent_cmd=agent_cmd)

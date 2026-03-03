@@ -349,31 +349,48 @@ def test_plan_help() -> None:
     assert "plan" in result.output.lower()
 
 
-def test_plan_writes_to_comms(runner: CliRunner, tmp_path: Path) -> None:
-    """Plan mode (legacy --no-stream-json) writes output to comms dir as agent-plan."""
+def test_implement_help() -> None:
+    result = CliRunner().invoke(main, ["implement", "--help"])
+    assert result.exit_code == 0
+    assert "implement" in result.output.lower()
+
+
+def test_implement_runs_headless_stream_json(runner: CliRunner, tmp_path: Path) -> None:
+    """Implement runs agent with stream-json, no --mode ask, writes stream log to .logs."""
     with runner.isolated_filesystem(tmp_path):
         cwd = Path.cwd()
-        (cwd / "agent-chat-id").write_text("chat-456")
+        (cwd / "agent-chat-id").write_text("chat-789")
         (cwd / "comms").mkdir()
         (cwd / "comms" / "index.txt").write_text("")
-        with patch("dev.commands.task.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout="# Detailed Plan\n\nStep 1.\nStep 2.",
-                stderr="",
-            )
-            result = runner.invoke(main, ["plan", "--no-stream-json"])
+        streamed_line = '{"content": "Implementation done."}\n'
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([streamed_line])
+        mock_proc.stderr.read.return_value = ""
+        mock_proc.returncode = 0
+        mock_proc.wait.return_value = None
+        with patch("dev.commands.task.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = mock_proc
+            result = runner.invoke(main, ["implement"])
     assert result.exit_code == 0
-    argv = mock_run.call_args[0][0]
-    assert "--mode" in argv and "ask" in argv
-    assert "Plan written to" in result.output
-    comms_index = cwd / "comms" / "index.txt"
-    assert comms_index.exists()
-    order = [n.strip() for n in comms_index.read_text().splitlines() if n.strip()]
-    assert len(order) == 1
-    assert "agent-plan" in order[0]
-    plan_file = cwd / "comms" / order[0]
-    assert plan_file.read_text().strip() == "# Detailed Plan\n\nStep 1.\nStep 2."
+    assert mock_popen.called
+    argv = mock_popen.call_args[0][0]
+    assert argv[0] == "cursor"
+    assert "--output-format" in argv
+    assert "stream-json" in argv
+    assert "--stream-partial-output" in argv
+    assert "--resume" in argv
+    assert "chat-789" in argv
+    assert "--workspace" in argv
+    assert "--trust" in argv
+    # Implement must NOT use --mode ask so agent can edit and commit
+    assert "--mode" not in argv
+    assert "Starting implement" in result.output
+    assert "Stream log:" in result.output
+    assert (cwd / ".logs").is_dir()
+    assert list((cwd / ".logs").glob("dev-implement-stream-*.log"))
+    # Implement does not write to comms
+    index = cwd / "comms" / "index.txt"
+    assert not index.exists() or index.read_text().strip() == ""
 
 
 def test_plan_accept_updates_task_md(runner: CliRunner, tmp_path: Path) -> None:
