@@ -26,7 +26,7 @@ PLAN_LOGS_DIR = ".logs"
 
 PLAN_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Produce a more detailed description and a step-by-step plan for the task. Ask any follow-up questions you need. Output only the detailed description and plan as markdown (no preamble or meta-commentary)."""
 
-IMPLEMENT_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Implement the task and commit when done."""
+IMPLEMENT_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Implement the task and commit when done. When done, in the git project directory (the repo subdirectory under the task root, not the task root itself): fetch from origin, merge origin/main into the current branch, then push the current branch to origin."""
 IMPLEMENT_STREAM_LOG_PREFIX = "dev-implement-stream-"
 
 
@@ -729,5 +729,5 @@ def implement_cmd(
     task_path: Path | None,
     agent_cmd: str,
 ) -> None:
-    """Run headless implement mode: agent implements the task and commits when done."""
+    """Run headless implement mode: agent implements the task, commits, then fetches, merges origin/main, and pushes."""
     _run_implement_mode(task_path=task_path, agent_cmd=agent_cmd)
