@@ -102,11 +102,13 @@ def _ensure_clean_tree(repo_root: Path) -> None:
 
 def _ensure_pushed_and_in_sync(repo_root: Path) -> None:
     """Ensure current branch has upstream and HEAD == @{u}."""
+    branch = _current_branch(repo_root)
     try:
         _git_output(repo_root, "rev-parse", "--abbrev-ref", "@{u}")
     except subprocess.CalledProcessError:
         click.echo(
-            "Branch has no upstream. Push the branch and set upstream, then try again.",
+            "Branch has no upstream. From the repo run: "
+            f"git push -u origin {branch}",
             err=True,
         )
         raise SystemExit(1)
