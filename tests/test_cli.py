@@ -21,7 +21,7 @@ def test_main_help() -> None:
     assert result.exit_code == 0
     assert "Dev CLI" in result.output
     assert "create" in result.output
-    assert "agent" in result.output
+    assert "interact" in result.output
 
 
 def test_create_help() -> None:
@@ -30,7 +30,7 @@ def test_create_help() -> None:
     assert result.exit_code == 0
     assert "TITLE" in result.output
     assert "--repo" in result.output
-    assert "--description" in result.output
+    assert "--comment" in result.output
 
 
 def test_list_help() -> None:
@@ -63,7 +63,8 @@ def test_archive_moves_to_archive(runner: CliRunner, tmp_path: Path) -> None:
     root = tmp_path / "tasks"
     root.mkdir()
     (root / "foo").mkdir()
-    (root / "foo" / "task.md").write_text("x")
+    (root / "foo" / "comms").mkdir()
+    (root / "foo" / "comms" / "001-user.md").write_text("x")
     result = runner.invoke(main, ["archive", "foo", "--tasks-dir", str(root)])
     assert result.exit_code == 0
     assert "Archived to" in result.output
@@ -74,7 +75,7 @@ def test_archive_moves_to_archive(runner: CliRunner, tmp_path: Path) -> None:
     archived = list(archive_dir.iterdir())
     assert len(archived) == 1
     assert archived[0].name.startswith("foo-")
-    assert (archived[0] / "task.md").read_text() == "x"
+    assert (archived[0] / "comms" / "001-user.md").read_text() == "x"
 
 
 def test_archive_not_found_exits_nonzero(runner: CliRunner, tmp_path: Path) -> None:
@@ -85,27 +86,27 @@ def test_archive_not_found_exits_nonzero(runner: CliRunner, tmp_path: Path) -> N
     assert "not found" in result.output
 
 
-def test_agent_help() -> None:
-    result = CliRunner().invoke(main, ["agent", "--help"])
+def test_interact_help() -> None:
+    result = CliRunner().invoke(main, ["interact", "--help"])
     assert result.exit_code == 0
-    assert "Launch" in result.output or "agent" in result.output
+    assert "Interact" in result.output or "interact" in result.output
     assert "--task" in result.output
 
 
-def test_agent_missing_chat_id_file_exits_nonzero(runner: CliRunner, tmp_path: Path) -> None:
+def test_interact_missing_chat_id_file_exits_nonzero(runner: CliRunner, tmp_path: Path) -> None:
     with runner.isolated_filesystem(tmp_path):
-        result = runner.invoke(main, ["agent"])
+        result = runner.invoke(main, ["interact"])
     assert result.exit_code != 0
     assert "Chat ID file not found" in result.output or "not found" in result.output
 
 
-def test_agent_launches_with_chat_id(runner: CliRunner, tmp_path: Path) -> None:
+def test_interact_launches_with_chat_id(runner: CliRunner, tmp_path: Path) -> None:
     with runner.isolated_filesystem(tmp_path):
-        # Create agent-chat-id in cwd (isolated fs) so "dev agent" finds it
+        # Create agent-chat-id in cwd (isolated fs) so "dev interact" finds it
         (Path.cwd() / "agent-chat-id").write_text("my-chat-uuid-123")
         with patch("dev.commands.task.os.execvp") as mock_execvp:
             mock_execvp.side_effect = SystemExit(0)
-            result = runner.invoke(main, ["agent"], catch_exceptions=True)
+            result = runner.invoke(main, ["interact"], catch_exceptions=True)
     assert mock_execvp.called
     call_args = mock_execvp.call_args[0]
     assert call_args[0] == "cursor"
@@ -115,15 +116,15 @@ def test_agent_launches_with_chat_id(runner: CliRunner, tmp_path: Path) -> None:
         "--force",
         "--resume",
         "my-chat-uuid-123",
-        "Read the task.md file and do it.",
     ]
 
 
-def test_agent_plan_mode_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) -> None:
+def test_plan_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) -> None:
     with runner.isolated_filesystem(tmp_path):
         cwd = Path.cwd()
         (cwd / "agent-chat-id").write_text("chat-456")
-        (cwd / "task.md").write_text("# Task\n\nDo something.")
+        (cwd / "comms").mkdir()
+        (cwd / "comms" / "index.txt").write_text("")
         # Simulate stream-json output: one NDJSON line with content field
         streamed_line = '{"content": "# Detailed Plan\\n\\nStep 1.\\nStep 2."}\n'
         mock_proc = MagicMock()
@@ -133,7 +134,7 @@ def test_agent_plan_mode_runs_headless_and_writes_draft(runner: CliRunner, tmp_p
         mock_proc.wait.return_value = None
         with patch("dev.commands.task.subprocess.Popen") as mock_popen:
             mock_popen.return_value = mock_proc
-            result = runner.invoke(main, ["agent", "--plan"])
+            result = runner.invoke(main, ["plan"])
     assert result.exit_code == 0
     assert mock_popen.called
     call_kw = mock_popen.call_args[1]
@@ -151,6 +152,9 @@ def test_agent_plan_mode_runs_headless_and_writes_draft(runner: CliRunner, tmp_p
     draft = cwd / "task-plan-draft.md"
     assert draft.exists()
     assert draft.read_text() == "# Detailed Plan\n\nStep 1.\nStep 2."
+    assert (cwd / "comms" / "index.txt").exists()
+    order = [n.strip() for n in (cwd / "comms" / "index.txt").read_text().splitlines() if n.strip()]
+    assert len(order) == 1 and "agent-plan" in order[0]
     assert "Starting plan" in result.output
     assert "stream-json" in result.output
     assert "Plan written to" in result.output
@@ -173,7 +177,7 @@ def test_create_with_unknown_shorthand_exits_nonzero(
                 "Some task",
                 "--repo",
                 "unknown",
-                "--description",
+                "--comment",
                 "Do it.",
                 "--tasks-dir",
                 str(tasks_dir),
@@ -183,10 +187,10 @@ def test_create_with_unknown_shorthand_exits_nonzero(
     assert "Unknown repo shorthand" in result.output
 
 
-def test_create_without_description_prompts_for_input(
+def test_create_without_comment_creates_task_with_no_initial_comms(
     runner: CliRunner, tmp_path: Path
 ) -> None:
-    """When -d is omitted, create prompts for description and uses the input."""
+    """When -c is omitted, create does not prompt; task has comms dir but no initial comment."""
     tasks_dir = tmp_path / "tasks"
     tasks_dir.mkdir()
     config_file = tmp_path / "repos.json"
@@ -206,11 +210,13 @@ def test_create_without_description_prompts_for_input(
                     "--tasks-dir",
                     str(tasks_dir),
                 ],
-                input="Typed description\n",
             )
     assert result.exit_code == 0
-    assert (tasks_dir / "my-task" / "task.md").exists()
-    assert "Typed description" in (tasks_dir / "my-task" / "task.md").read_text()
+    task_dir = tasks_dir / "my-task"
+    assert (task_dir / "comms").is_dir()
+    assert not (task_dir / "task.md").exists()
+    index_file = task_dir / "comms" / "index.txt"
+    assert not index_file.exists() or index_file.read_text().strip() == ""
 
 
 def test_create_with_shorthand_uses_resolved_url(
@@ -232,7 +238,7 @@ def test_create_with_shorthand_uses_resolved_url(
                     "My task",
                     "--repo",
                     "desk",
-                    "--description",
+                    "--comment",
                     "Do it.",
                     "--tasks-dir",
                     str(tasks_dir),
@@ -266,7 +272,7 @@ def test_create_prints_progress_messages(
                     "My task",
                     "--repo",
                     "desk",
-                    "--description",
+                    "--comment",
                     "Do it.",
                     "--tasks-dir",
                     str(tasks_dir),
@@ -275,7 +281,8 @@ def test_create_prints_progress_messages(
     assert result.exit_code == 0
     output = result.output
     assert "Created task directory." in output
-    assert "Wrote task.md." in output
+    assert "Comms directory ready." in output
+    assert "Added initial comment to comms." in output
     assert "Creating agent chat…" in output
     assert "Agent chat created." in output
     assert "Cloning repository…" in output
@@ -320,10 +327,51 @@ def test_repos_add_and_list(runner: CliRunner, tmp_path: Path) -> None:
     assert "maxrademacher/desk" in result2.output
 
 
+def test_comms_comment_adds_user_comms(runner: CliRunner, tmp_path: Path) -> None:
+    """comms comment creates a user comms file and appends to index."""
+    with runner.isolated_filesystem(tmp_path):
+        cwd = Path.cwd()
+        (cwd / "comms").mkdir()
+        result = runner.invoke(main, ["comms", "comment", "Hello from user"])
+    assert result.exit_code == 0
+    assert "Added:" in result.output
+    index = cwd / "comms" / "index.txt"
+    assert index.exists()
+    order = [n.strip() for n in index.read_text().splitlines() if n.strip()]
+    assert len(order) == 1
+    assert order[0].startswith("001-user")
+    assert (cwd / "comms" / order[0]).read_text().strip() == "Hello from user"
+
+
 def test_plan_help() -> None:
     result = CliRunner().invoke(main, ["plan", "--help"])
     assert result.exit_code == 0
-    assert "accept" in result.output
+    assert "plan" in result.output.lower()
+
+
+def test_plan_writes_to_comms(runner: CliRunner, tmp_path: Path) -> None:
+    """Plan mode (legacy --no-stream-json) writes output to comms dir as agent-plan."""
+    with runner.isolated_filesystem(tmp_path):
+        cwd = Path.cwd()
+        (cwd / "agent-chat-id").write_text("chat-456")
+        (cwd / "comms").mkdir()
+        (cwd / "comms" / "index.txt").write_text("")
+        with patch("dev.commands.task.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(
+                returncode=0,
+                stdout="# Detailed Plan\n\nStep 1.\nStep 2.",
+                stderr="",
+            )
+            result = runner.invoke(main, ["plan", "--no-stream-json"])
+    assert result.exit_code == 0
+    assert "Plan written to" in result.output
+    comms_index = cwd / "comms" / "index.txt"
+    assert comms_index.exists()
+    order = [n.strip() for n in comms_index.read_text().splitlines() if n.strip()]
+    assert len(order) == 1
+    assert "agent-plan" in order[0]
+    plan_file = cwd / "comms" / order[0]
+    assert plan_file.read_text().strip() == "# Detailed Plan\n\nStep 1.\nStep 2."
 
 
 def test_plan_accept_updates_task_md(runner: CliRunner, tmp_path: Path) -> None:
@@ -355,7 +403,7 @@ def test_plan_accept_with_task_flag(runner: CliRunner, tmp_path: Path) -> None:
     (task_dir / "task-plan-draft.md").write_text("# New\n\nNew plan.")
     result = runner.invoke(
         main,
-        ["plan", "accept", "--task", "my-task", "--tasks-dir", str(root)],
+        ["plan", "accept", "--task", str(task_dir)],
     )
     assert result.exit_code == 0
     assert (task_dir / "task.md").read_text() == "# New\n\nNew plan."
@@ -376,7 +424,7 @@ def test_activate_path_help() -> None:
     result = CliRunner().invoke(main, ["activate-path", "--help"])
     assert result.exit_code == 0
     assert "activate" in result.output
-    assert "--task-dir" in result.output or "task-dir" in result.output
+    assert "--task" in result.output
 
 
 def test_activate_path_prints_path_when_venv_exists(runner: CliRunner, tmp_path: Path) -> None:
@@ -385,14 +433,14 @@ def test_activate_path_prints_path_when_venv_exists(runner: CliRunner, tmp_path:
     task_root.mkdir()
     (task_root / ".venv" / "my-task" / "bin").mkdir(parents=True)
     (task_root / ".venv" / "my-task" / "bin" / "activate").write_text("# activate script\n")
-    result = runner.invoke(main, ["activate-path", "--task-dir", str(task_root)])
+    result = runner.invoke(main, ["activate-path", "--task", str(task_root)])
     assert result.exit_code == 0
     assert result.output.strip().endswith(".venv/my-task/bin/activate")
     assert "activate" in result.output
 
 
 def test_activate_path_uses_cwd_when_no_task_dir(runner: CliRunner, tmp_path: Path) -> None:
-    """Without --task-dir, uses cwd; from a dir with .venv/<name>, prints path."""
+    """Without --task, uses cwd; from a dir with .venv/<name>, prints path."""
     with runner.isolated_filesystem(tmp_path):
         cwd = Path.cwd()
         task_name = cwd.name
@@ -407,6 +455,6 @@ def test_activate_path_missing_venv_exits_nonzero(runner: CliRunner, tmp_path: P
     """When .venv/<task-name>/bin/activate does not exist, exit non-zero and print error."""
     task_root = tmp_path / "empty-task"
     task_root.mkdir()
-    result = runner.invoke(main, ["activate-path", "--task-dir", str(task_root)])
+    result = runner.invoke(main, ["activate-path", "--task", str(task_root)])
     assert result.exit_code != 0
     assert "not found" in result.output or "Activate script" in result.output

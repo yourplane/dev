@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from dev.comms import read_index
 from dev.task_manager import TaskManager
 
 
@@ -33,12 +34,14 @@ def test_parse_chat_id_empty_raises(manager: TaskManager) -> None:
         manager._parse_chat_id("")
 
 
-def test_write_task_file(manager: TaskManager, tmp_tasks_root: Path) -> None:
+def test_ensure_comms_dir_creates_comms_and_rule(manager: TaskManager, tmp_tasks_root: Path) -> None:
     task_dir = tmp_tasks_root / "my-task"
     task_dir.mkdir(parents=True)
-    manager._write_task_file(task_dir, "My Title", "Do the thing.")
-    path = task_dir / "task.md"
-    assert path.read_text() == "# My Title\n\nDo the thing.\n"
+    manager._ensure_comms_dir(task_dir)
+    assert (task_dir / "comms").is_dir()
+    rule_path = task_dir / ".cursor" / "rules" / "task-comms.mdc"
+    assert rule_path.exists()
+    assert "comms" in rule_path.read_text() and "index.txt" in rule_path.read_text()
 
 
 def test_write_chat_id_file(manager: TaskManager, tmp_tasks_root: Path) -> None:
@@ -71,14 +74,19 @@ def test_start_task(
     manager.start_task(
         title="My Task",
         task_name="my-task",
-        description="Build the feature.",
+        comment="Build the feature.",
         repo_url="https://github.com/user/repo.git",
         agent_cmd="cursor",
         agent_create_chat_args=["agent", "create-chat"],
     )
 
     task_dir = tmp_tasks_root / "my-task"
-    assert (task_dir / "task.md").read_text() == "# My Task\n\nBuild the feature.\n"
+    assert (task_dir / "comms").is_dir()
+    assert (task_dir / ".cursor" / "rules" / "task-comms.mdc").exists()
+    order = read_index(task_dir)
+    assert len(order) == 1
+    first = task_dir / "comms" / order[0]
+    assert "My Task" in first.read_text() and "Build the feature" in first.read_text()
     assert (task_dir / "agent-chat-id").exists()
     assert (task_dir / "agent-chat-id").read_text().strip() == "my-chat-id-456"
     rules_file = task_dir / ".cursor" / "rules" / "git-workspace.mdc"
@@ -128,7 +136,7 @@ def test_start_task_calls_on_progress(
     manager.start_task(
         title="My Task",
         task_name="my-task",
-        description="Build the feature.",
+        comment="Build the feature.",
         repo_url="https://github.com/user/repo.git",
         agent_cmd="cursor",
         agent_create_chat_args=["agent", "create-chat"],
@@ -136,7 +144,8 @@ def test_start_task_calls_on_progress(
     )
 
     assert "Created task directory." in messages
-    assert "Wrote task.md." in messages
+    assert "Comms directory ready." in messages
+    assert "Added initial comment to comms." in messages
     assert "Creating agent chat…" in messages
     assert "Agent chat created." in messages
     assert "Cloning repository…" in messages
@@ -160,11 +169,11 @@ def test_start_task_creates_directory(manager: TaskManager, tmp_tasks_root: Path
         manager.start_task(
             title="Foo",
             task_name="foo",
-            description="Bar",
+            comment="Bar",
             repo_url="https://github.com/x/y.git",
         )
     assert (tmp_tasks_root / "foo").is_dir()
-    assert (tmp_tasks_root / "foo" / "task.md").exists()
+    assert (tmp_tasks_root / "foo" / "comms").is_dir()
     assert (tmp_tasks_root / "foo" / "agent-chat-id").exists()
     assert (tmp_tasks_root / "foo" / ".cursor" / "rules" / "git-workspace.mdc").exists()
 
@@ -176,7 +185,7 @@ def test_start_task_duplicate_name_raises(manager: TaskManager, tmp_tasks_root: 
             manager.start_task(
                 title="Existing",
                 task_name="existing",
-                description="Desc",
+                comment="Desc",
                 repo_url="https://github.com/a/b.git",
             )
 
@@ -205,13 +214,15 @@ def test_archive_task(manager: TaskManager, tmp_tasks_root: Path) -> None:
     tmp_tasks_root.mkdir(parents=True)
     task_dir = tmp_tasks_root / "my-task"
     task_dir.mkdir()
-    (task_dir / "task.md").write_text("# Task\n\nDesc.")
+    (task_dir / "comms").mkdir()
+    (task_dir / "comms" / "index.txt").write_text("001-user.md\n")
+    (task_dir / "comms" / "001-user.md").write_text("# Task\n\nDesc.")
     dest = manager.archive_task("my-task")
     assert not task_dir.exists()
     assert dest.parent == tmp_tasks_root / ".archive"
     assert dest.name.startswith("my-task-")
     assert dest.is_dir()
-    assert (dest / "task.md").read_text() == "# Task\n\nDesc."
+    assert (dest / "comms" / "001-user.md").read_text() == "# Task\n\nDesc."
     # Name should be my-task-<month>-<day>-<6 hex chars>
     parts = dest.name.split("-")
     assert len(parts) >= 4
