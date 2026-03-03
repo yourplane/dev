@@ -144,7 +144,7 @@ def test_plan_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) 
     assert "--output-format" in argv
     assert "stream-json" in argv
     assert "--stream-partial-output" in argv
-    assert "--plan" in argv
+    assert "--mode" in argv and "ask" in argv
     assert "--resume" in argv
     assert "chat-456" in argv
     assert "--workspace" in argv
@@ -364,6 +364,8 @@ def test_plan_writes_to_comms(runner: CliRunner, tmp_path: Path) -> None:
             )
             result = runner.invoke(main, ["plan", "--no-stream-json"])
     assert result.exit_code == 0
+    argv = mock_run.call_args[0][0]
+    assert "--mode" in argv and "ask" in argv
     assert "Plan written to" in result.output
     comms_index = cwd / "comms" / "index.txt"
     assert comms_index.exists()
