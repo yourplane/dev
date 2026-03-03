@@ -1,5 +1,6 @@
 """Tests for CLI entry point."""
 
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -123,30 +124,38 @@ def test_agent_plan_mode_runs_headless_and_writes_draft(runner: CliRunner, tmp_p
         cwd = Path.cwd()
         (cwd / "agent-chat-id").write_text("chat-456")
         (cwd / "task.md").write_text("# Task\n\nDo something.")
-        with patch("dev.commands.task.subprocess.run") as mock_run:
-            mock_run.return_value = MagicMock(
-                returncode=0,
-                stdout="# Detailed Plan\n\nStep 1.\nStep 2.",
-                stderr="",
-            )
+        # Simulate stream-json output: one NDJSON line with content field
+        streamed_line = '{"content": "# Detailed Plan\\n\\nStep 1.\\nStep 2."}\n'
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([streamed_line])
+        mock_proc.stderr.read.return_value = ""
+        mock_proc.returncode = 0
+        mock_proc.wait.return_value = None
+        with patch("dev.commands.task.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = mock_proc
             result = runner.invoke(main, ["agent", "--plan"])
     assert result.exit_code == 0
-    assert mock_run.called
-    call_args = mock_run.call_args[0][0]
-    assert call_args[0] == "cursor"
-    assert "--print" in call_args
-    assert "--plan" in call_args
-    assert "--resume" in call_args
-    assert "chat-456" in call_args
-    assert "--workspace" in call_args
-    assert "--trust" in call_args
+    assert mock_popen.called
+    call_kw = mock_popen.call_args[1]
+    assert call_kw["stdout"] == subprocess.PIPE
+    argv = mock_popen.call_args[0][0]
+    assert argv[0] == "cursor"
+    assert "--output-format" in argv
+    assert "stream-json" in argv
+    assert "--stream-partial-output" in argv
+    assert "--plan" in argv
+    assert "--resume" in argv
+    assert "chat-456" in argv
+    assert "--workspace" in argv
+    assert "--trust" in argv
     draft = cwd / "task-plan-draft.md"
     assert draft.exists()
     assert draft.read_text() == "# Detailed Plan\n\nStep 1.\nStep 2."
     assert "Starting plan" in result.output
-    assert "Plan ready:" in result.output
-    assert "# Detailed Plan" in result.output
+    assert "stream-json" in result.output
     assert "Plan written to" in result.output
+    assert (cwd / ".logs").is_dir()
+    assert list((cwd / ".logs").glob("dev-plan-stream-*.log"))
 
 
 def test_create_with_unknown_shorthand_exits_nonzero(

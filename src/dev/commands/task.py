@@ -1,10 +1,12 @@
 """Task management commands."""
 
+import json
 import os
 import re
 import subprocess
 import sys
 import threading
+from datetime import datetime, timezone
 from pathlib import Path
 
 import click
@@ -19,8 +21,75 @@ AGENT_CMD = "cursor"
 AGENT_CREATE_CHAT_ARGS = ["agent", "create-chat"]
 AGENT_CHAT_ID_FILE = "agent-chat-id"
 TASK_PLAN_DRAFT = "task-plan-draft.md"
+PLAN_LOGS_DIR = ".logs"
 
 PLAN_MODE_PROMPT = """Read the task.md file in this workspace. Produce a more detailed description and a step-by-step plan for the task. Ask any follow-up questions you need. Output only the detailed description and plan as markdown (no preamble or meta-commentary). Do not make any edits or run any tools—only output the plan."""
+
+
+def _extract_plan_from_stream_json(streamed_output: str) -> str:
+    """Extract plan markdown from streamed JSON (Cursor agent stream-json format)."""
+    lines = [line.strip() for line in streamed_output.splitlines() if line.strip()]
+    if not lines:
+        return streamed_output
+    # Prefer final "result" event (full plan text)
+    for line in reversed(lines):
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict) and obj.get("type") == "result" and "result" in obj:
+                result = obj["result"]
+                if isinstance(result, str) and result.strip():
+                    return result.strip()
+        except json.JSONDecodeError:
+            pass
+    # Fall back: accumulate assistant message text and content/text/delta fields
+    parts: list[str] = []
+    for line in lines:
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict):
+                if obj.get("type") == "assistant" and "message" in obj:
+                    msg = obj["message"]
+                    if isinstance(msg, dict) and "content" in msg:
+                        for item in msg["content"] if isinstance(msg["content"], list) else []:
+                            if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
+                                parts.append(item["text"])
+                        continue
+                for key in ("content", "text", "delta", "result"):
+                    if key in obj and isinstance(obj[key], str):
+                        parts.append(obj[key])
+                        break
+            elif isinstance(obj, str):
+                parts.append(obj)
+        except json.JSONDecodeError:
+            parts.append(line)
+    if parts:
+        return "".join(parts).strip() or "\n".join(parts)
+    return streamed_output
+
+
+def _format_stream_line_for_console(line: str) -> tuple[str | None, bool]:
+    """Parse stream line; return (text_to_print, is_thinking). None means skip this line."""
+    try:
+        obj = json.loads(line)
+        if not isinstance(obj, dict):
+            return None, False
+        if obj.get("type") == "assistant" and "message" in obj:
+            msg = obj["message"]
+            if isinstance(msg, dict) and "content" in msg:
+                texts: list[str] = []
+                for item in msg["content"] if isinstance(msg["content"], list) else []:
+                    if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
+                        texts.append(item["text"])
+                if texts:
+                    return "".join(texts), False
+        if obj.get("type") == "thinking" and obj.get("subtype") == "delta" and "text" in obj:
+            text = obj["text"]
+            if isinstance(text, str):
+                # Indent thinking so it’s visually distinct; indent only at line starts (done in reader to avoid spaces between deltas)
+                return text, True
+        return None, False
+    except json.JSONDecodeError:
+        return None, False
 
 
 def _slugify(title: str) -> str:
@@ -130,13 +199,22 @@ def start_task(
     "plan_mode",
     is_flag=True,
     default=False,
-    help="Run agent in headless plan-only mode; output is written to task-plan-draft.md. Then run 'dev plan accept' to write it into task.md.",
+    help="Run agent in headless plan-only mode (stream-json); streamed JSON is printed to stdout, then the extracted plan is written to task-plan-draft.md. Run 'dev plan accept' to write it into task.md.",
+)
+@click.option(
+    "--no-stream-json",
+    "plan_no_stream_json",
+    is_flag=True,
+    default=False,
+    envvar="DEV_AGENT_PLAN_NO_STREAM_JSON",
+    help="Use legacy --print with default output format instead of stream-json for plan mode.",
 )
 def launch_agent(
     task_name: str | None,
     tasks_dir: Path,
     agent_cmd: str,
     plan_mode: bool,
+    plan_no_stream_json: bool,
 ) -> None:
     """Launch the agent for this task (resume chat using saved chat ID)."""
     if task_name is not None:
@@ -159,11 +237,85 @@ def launch_agent(
         raise SystemExit(1)
 
     if plan_mode:
-        # Headless plan-only: run agent with --print and --plan, capture stdout, write to draft file
+        if plan_no_stream_json:
+            # Legacy: run agent with --print, capture stdout, write to draft
+            argv = [
+                agent_cmd,
+                "agent",
+                "--print",
+                "--plan",
+                "--resume",
+                chat_id,
+                "--workspace",
+                str(task_dir),
+                "--trust",
+                PLAN_MODE_PROMPT,
+            ]
+            result_box: list[subprocess.CompletedProcess[str] | None] = [None]
+            exc_box: list[BaseException | None] = [None]
+
+            def run_agent() -> None:
+                try:
+                    result_box[0] = subprocess.run(
+                        argv,
+                        cwd=str(task_dir),
+                        capture_output=True,
+                        text=True,
+                        timeout=300,
+                    )
+                except FileNotFoundError as e:
+                    exc_box[0] = e
+                except subprocess.TimeoutExpired as e:
+                    exc_box[0] = e
+
+            click.echo("Starting plan (running agent in headless plan-only mode)...")
+            thread = threading.Thread(target=run_agent)
+            thread.start()
+            n = 0
+            while thread.is_alive():
+                click.echo(f"\rPlanning {SPINNER_CHARS[n % 4]} ", nl=False)
+                if sys.stdout:
+                    sys.stdout.flush()
+                thread.join(timeout=0.15)
+                n += 1
+            click.echo("\r" + " " * 12 + "\r", nl=False)
+            if sys.stdout:
+                sys.stdout.flush()
+
+            if exc_box[0] is not None:
+                e = exc_box[0]
+                if isinstance(e, subprocess.TimeoutExpired):
+                    click.echo("Agent plan mode timed out.", err=True)
+                elif isinstance(e, FileNotFoundError):
+                    click.echo(f"Agent command not found: {agent_cmd}", err=True)
+                else:
+                    click.echo(str(e), err=True)
+                raise SystemExit(1)
+
+            result = result_box[0]
+            assert result is not None
+            out = (result.stdout or "").strip()
+            if result.returncode != 0 and not out:
+                click.echo(result.stderr or f"Agent exited with code {result.returncode}", err=True)
+                raise SystemExit(1)
+
+            draft_path = task_dir / TASK_PLAN_DRAFT
+            draft_path.write_text(out, encoding="utf-8")
+            click.echo("Plan ready:\n")
+            click.echo(out)
+            click.echo(f"\nPlan written to {draft_path}")
+            if result.returncode != 0:
+                raise SystemExit(result.returncode)
+            return
+
+        # Headless plan-only: run agent in stream-json mode (--print + --output-format stream-json + --stream-partial-output), then write draft
         argv = [
             agent_cmd,
             "agent",
             "--print",
+            "--output-format",
+            "stream-json",
+            "--stream-partial-output",
             "--plan",
             "--resume",
             chat_id,
@@ -172,61 +324,112 @@ def launch_agent(
             "--trust",
             PLAN_MODE_PROMPT,
         ]
-        result_box: list[subprocess.CompletedProcess[str] | None] = [None]
-        exc_box: list[BaseException | None] = [None]
+        buffer: list[str] = []
+        buffer_lock = threading.Lock()
+        read_error: list[BaseException | None] = [None]
+        logs_dir = task_dir / PLAN_LOGS_DIR
+        logs_dir.mkdir(exist_ok=True)
+        stream_log_name = f"dev-plan-stream-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.log"
+        stream_log_path = logs_dir / stream_log_name
+        thinking_started: list[bool] = [False]
+        thinking_at_line_start: list[bool] = [True]
 
-        def run_agent() -> None:
+        def read_stdout(proc: subprocess.Popen[str]) -> None:
             try:
-                result_box[0] = subprocess.run(
-                    argv,
-                    cwd=str(task_dir),
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
+                assert proc.stdout is not None
+                with open(stream_log_path, "w", encoding="utf-8") as log:
+                    for line in proc.stdout:
+                        decoded = line if isinstance(line, str) else line.decode("utf-8", errors="replace")
+                        # Always write raw line to log file
+                        log.write(decoded)
+                        if decoded and not decoded.endswith("\n"):
+                            log.write("\n")
+                        log.flush()
+                        # Console: print formatted assistant text and thinking (indent + dim thinking)
+                        formatted, is_thinking = _format_stream_line_for_console(decoded.strip())
+                        if formatted is not None and sys.stdout:
+                            if is_thinking:
+                                if not thinking_started[0]:
+                                    thinking_started[0] = True
+                                    out = "\n  Thinking:\n  "
+                                    thinking_at_line_start[0] = False
+                                else:
+                                    out = ""
+                                for ch in formatted:
+                                    if thinking_at_line_start[0]:
+                                        out += "  "
+                                        thinking_at_line_start[0] = False
+                                    out += ch
+                                    if ch == "\n":
+                                        thinking_at_line_start[0] = True
+                                if out:
+                                    sys.stdout.write(click.style(out, dim=True))
+                            else:
+                                sys.stdout.write(formatted)
+                            sys.stdout.flush()
+                        with buffer_lock:
+                            buffer.append(decoded)
+            except Exception as e:
+                read_error[0] = e
+
+        click.echo("Starting plan (stream-json mode)...")
+        click.echo(f"Stream log: {stream_log_path}")
+        try:
+            proc = subprocess.Popen(
+                argv,
+                cwd=str(task_dir),
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1,
+            )
+        except FileNotFoundError:
+            click.echo(f"Agent command not found: {agent_cmd}", err=True)
+            raise SystemExit(1)
+
+        reader = threading.Thread(target=read_stdout, args=(proc,))
+        reader.start()
+        reader.join(timeout=300)
+        if reader.is_alive():
+            proc.kill()
+            proc.wait()
+            click.echo("Agent plan mode timed out.", err=True)
+            raise SystemExit(1)
+
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+        stderr_output = ""
+        if proc.stderr:
+            stderr_output = proc.stderr.read()
+
+        if read_error[0] is not None:
+            click.echo(str(read_error[0]), err=True)
+            raise SystemExit(1)
+
+        streamed_output = "".join(buffer)
+        if proc.returncode != 0:
+            if stderr_output:
+                click.echo(stderr_output, err=True)
+            if not streamed_output.strip() and not stderr_output:
+                click.echo(f"Agent exited with code {proc.returncode} (no output).", err=True)
+                click.echo(
+                    "The agent may not support --output-format stream-json. Try --no-stream-json to use default output format.",
+                    err=True,
                 )
-            except FileNotFoundError as e:
-                exc_box[0] = e
-            except subprocess.TimeoutExpired as e:
-                exc_box[0] = e
-
-        click.echo("Starting plan (running agent in headless plan-only mode)...")
-        thread = threading.Thread(target=run_agent)
-        thread.start()
-        n = 0
-        while thread.is_alive():
-            click.echo(f"\rPlanning {SPINNER_CHARS[n % 4]} ", nl=False)
-            if sys.stdout:
-                sys.stdout.flush()
-            thread.join(timeout=0.15)
-            n += 1
-        click.echo("\r" + " " * 12 + "\r", nl=False)
-        if sys.stdout:
-            sys.stdout.flush()
-
-        if exc_box[0] is not None:
-            e = exc_box[0]
-            if isinstance(e, subprocess.TimeoutExpired):
-                click.echo("Agent plan mode timed out.", err=True)
-            elif isinstance(e, FileNotFoundError):
-                click.echo(f"Agent command not found: {agent_cmd}", err=True)
-            else:
-                click.echo(str(e), err=True)
             raise SystemExit(1)
 
-        result = result_box[0]
-        assert result is not None
-        out = (result.stdout or "").strip()
-        if result.returncode != 0 and not out:
-            click.echo(result.stderr or f"Agent exited with code {result.returncode}", err=True)
-            raise SystemExit(1)
-
+        plan_text = _extract_plan_from_stream_json(streamed_output)
         draft_path = task_dir / TASK_PLAN_DRAFT
-        draft_path.write_text(out, encoding="utf-8")
-        click.echo("Plan ready:\n")
-        click.echo(out)
-        click.echo(f"\nPlan written to {draft_path}")
-        if result.returncode != 0:
-            raise SystemExit(result.returncode)
+        draft_path.write_text(plan_text, encoding="utf-8")
+        click.echo()
+        click.echo()
+        click.echo(click.style(f"Plan written to {draft_path}", dim=True))
+        if proc.returncode != 0:
+            raise SystemExit(proc.returncode)
         return
 
     # Interactive: exec into the agent
