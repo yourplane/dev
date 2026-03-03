@@ -24,7 +24,7 @@ AGENT_CHAT_ID_FILE = "agent-chat-id"
 TASK_PLAN_DRAFT = "task-plan-draft.md"
 PLAN_LOGS_DIR = ".logs"
 
-PLAN_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Produce a more detailed description and a step-by-step plan for the task. Ask any follow-up questions you need. Output only the detailed description and plan as markdown (no preamble or meta-commentary). Do not make any edits or run any tools—only output the plan."""
+PLAN_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Produce a more detailed description and a step-by-step plan for the task. Ask any follow-up questions you need. Output only the detailed description and plan as markdown (no preamble or meta-commentary)."""
 
 
 def _task_dir_from_options(
