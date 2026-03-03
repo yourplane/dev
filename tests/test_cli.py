@@ -346,7 +346,7 @@ def test_plan_accept_with_task_flag(runner: CliRunner, tmp_path: Path) -> None:
     (task_dir / "task-plan-draft.md").write_text("# New\n\nNew plan.")
     result = runner.invoke(
         main,
-        ["plan", "accept", "--task", "my-task", "--tasks-dir", str(root)],
+        ["plan", "accept", "--task", str(task_dir)],
     )
     assert result.exit_code == 0
     assert (task_dir / "task.md").read_text() == "# New\n\nNew plan."
@@ -367,7 +367,7 @@ def test_activate_path_help() -> None:
     result = CliRunner().invoke(main, ["activate-path", "--help"])
     assert result.exit_code == 0
     assert "activate" in result.output
-    assert "--task-dir" in result.output or "task-dir" in result.output
+    assert "--task" in result.output
 
 
 def test_activate_path_prints_path_when_venv_exists(runner: CliRunner, tmp_path: Path) -> None:
@@ -376,14 +376,14 @@ def test_activate_path_prints_path_when_venv_exists(runner: CliRunner, tmp_path:
     task_root.mkdir()
     (task_root / ".venv" / "my-task" / "bin").mkdir(parents=True)
     (task_root / ".venv" / "my-task" / "bin" / "activate").write_text("# activate script\n")
-    result = runner.invoke(main, ["activate-path", "--task-dir", str(task_root)])
+    result = runner.invoke(main, ["activate-path", "--task", str(task_root)])
     assert result.exit_code == 0
     assert result.output.strip().endswith(".venv/my-task/bin/activate")
     assert "activate" in result.output
 
 
 def test_activate_path_uses_cwd_when_no_task_dir(runner: CliRunner, tmp_path: Path) -> None:
-    """Without --task-dir, uses cwd; from a dir with .venv/<name>, prints path."""
+    """Without --task, uses cwd; from a dir with .venv/<name>, prints path."""
     with runner.isolated_filesystem(tmp_path):
         cwd = Path.cwd()
         task_name = cwd.name
@@ -398,6 +398,6 @@ def test_activate_path_missing_venv_exits_nonzero(runner: CliRunner, tmp_path: P
     """When .venv/<task-name>/bin/activate does not exist, exit non-zero and print error."""
     task_root = tmp_path / "empty-task"
     task_root.mkdir()
-    result = runner.invoke(main, ["activate-path", "--task-dir", str(task_root)])
+    result = runner.invoke(main, ["activate-path", "--task", str(task_root)])
     assert result.exit_code != 0
     assert "not found" in result.output or "Activate script" in result.output

@@ -23,18 +23,18 @@ TASK_PLAN_DRAFT = "task-plan-draft.md"
 PLAN_MODE_PROMPT = """Read the task.md file in this workspace. Produce a more detailed description and a step-by-step plan for the task. Ask any follow-up questions you need. Output only the detailed description and plan as markdown (no preamble or meta-commentary). Do not make any edits or run any tools—only output the plan."""
 
 
+def _resolve_task_dir(task_path: Path | None) -> Path:
+    """Resolve task directory: given path if provided, else current working directory."""
+    return (task_path or Path.cwd()).resolve()
+
+
 def _run_plan_mode(
-    task_name: str | None,
-    tasks_dir: Path,
+    task_path: Path | None,
     agent_cmd: str,
 ) -> None:
     """Run agent in headless plan-only mode; output is written to task-plan-draft.md."""
-    if task_name is not None:
-        task_dir = tasks_dir / task_name
-        chat_id_path = task_dir / AGENT_CHAT_ID_FILE
-    else:
-        task_dir = Path.cwd()
-        chat_id_path = task_dir / AGENT_CHAT_ID_FILE
+    task_dir = _resolve_task_dir(task_path)
+    chat_id_path = task_dir / AGENT_CHAT_ID_FILE
 
     if not chat_id_path.exists():
         click.echo(
@@ -200,17 +200,10 @@ def start_task(
 @click.option(
     "--task",
     "-t",
-    "task_name",
-    type=str,
-    default=None,
-    help="Task name (directory name). If not set, use current directory.",
-)
-@click.option(
-    "--tasks-dir",
+    "task_path",
     type=click.Path(path_type=Path),
-    default=TASKS_ROOT,
-    envvar="DEV_TASKS_DIR",
-    help="Root directory for tasks (used only with --task).",
+    default=None,
+    help="Path to task directory. If not set, use current working directory.",
 )
 @click.option(
     "--agent-cmd",
@@ -220,17 +213,12 @@ def start_task(
     help="Command to run for the agent (e.g. cursor).",
 )
 def launch_interact(
-    task_name: str | None,
-    tasks_dir: Path,
+    task_path: Path | None,
     agent_cmd: str,
 ) -> None:
     """Interact with the agent for this task (resume chat using saved chat ID)."""
-    if task_name is not None:
-        task_dir = tasks_dir / task_name
-        chat_id_path = task_dir / AGENT_CHAT_ID_FILE
-    else:
-        task_dir = Path.cwd()
-        chat_id_path = task_dir / AGENT_CHAT_ID_FILE
+    task_dir = _resolve_task_dir(task_path)
+    chat_id_path = task_dir / AGENT_CHAT_ID_FILE
 
     if not chat_id_path.exists():
         click.echo(
@@ -298,20 +286,20 @@ def _venv_activate_path(task_root: Path) -> Path:
 
 @click.command("activate-path")
 @click.option(
-    "--task-dir",
+    "--task",
     "-t",
-    "task_dir",
+    "task_path",
     type=click.Path(path_type=Path),
     default=None,
-    help="Task directory (root containing .venv/<task-name>). Default: current working directory.",
+    help="Path to task directory (root containing .venv/<task-name>). Default: current working directory.",
 )
-def activate_path(task_dir: Path | None) -> None:
+def activate_path(task_path: Path | None) -> None:
     """Print path to the task venv activate script for use with: source $(dev activate-path)."""
-    task_root = (task_dir or Path.cwd()).resolve()
+    task_root = _resolve_task_dir(task_path)
     activate_script = _venv_activate_path(task_root)
     if not activate_script.exists():
         click.echo(
-            f"Activate script not found: {activate_script}. Run from a task directory or use --task-dir.",
+            f"Activate script not found: {activate_script}. Run from a task directory or use --task.",
             err=True,
         )
         raise SystemExit(1)
@@ -322,17 +310,10 @@ def activate_path(task_dir: Path | None) -> None:
 @click.option(
     "--task",
     "-t",
-    "task_name",
-    type=str,
-    default=None,
-    help="Task name (directory name). If not set, use current directory.",
-)
-@click.option(
-    "--tasks-dir",
+    "task_path",
     type=click.Path(path_type=Path),
-    default=TASKS_ROOT,
-    envvar="DEV_TASKS_DIR",
-    help="Root directory for tasks (used only with --task).",
+    default=None,
+    help="Path to task directory. If not set, use current working directory.",
 )
 @click.option(
     "--agent-cmd",
@@ -344,47 +325,35 @@ def activate_path(task_dir: Path | None) -> None:
 @click.pass_context
 def plan_group(
     ctx: click.Context,
-    task_name: str | None,
-    tasks_dir: Path,
+    task_path: Path | None,
     agent_cmd: str,
 ) -> None:
     """Run headless plan mode or manage task plans (e.g. accept draft into task.md)."""
     if ctx.invoked_subcommand is None:
-        _run_plan_mode(task_name=task_name, tasks_dir=tasks_dir, agent_cmd=agent_cmd)
+        _run_plan_mode(task_path=task_path, agent_cmd=agent_cmd)
 
 
 @plan_group.command("accept")
 @click.option(
     "--task",
     "-t",
-    "task_name",
-    type=str,
-    default=None,
-    help="Task name (directory name). If not set, use current directory.",
-)
-@click.option(
-    "--tasks-dir",
+    "task_path",
     type=click.Path(path_type=Path),
-    default=TASKS_ROOT,
-    envvar="DEV_TASKS_DIR",
-    help="Root directory for tasks (used only with --task).",
+    default=None,
+    help="Path to task directory. If not set, use current working directory.",
 )
 @click.option(
     "--draft",
     type=click.Path(path_type=Path),
     default=None,
-    help=f"Path to draft plan file (default: <task-dir>/{TASK_PLAN_DRAFT}).",
+    help=f"Path to draft plan file (default: <task directory>/{TASK_PLAN_DRAFT}).",
 )
 def plan_accept(
-    task_name: str | None,
-    tasks_dir: Path,
+    task_path: Path | None,
     draft: Path | None,
 ) -> None:
     """Write the accepted plan from task-plan-draft.md into task.md."""
-    if task_name is not None:
-        task_dir = tasks_dir / task_name
-    else:
-        task_dir = Path.cwd()
+    task_dir = _resolve_task_dir(task_path)
 
     draft_path = draft if draft is not None else task_dir / TASK_PLAN_DRAFT
     task_path = task_dir / "task.md"
