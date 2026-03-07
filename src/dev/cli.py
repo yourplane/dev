@@ -10,7 +10,8 @@ from dev.commands import (
     implement_cmd,
     launch_interact,
     list_tasks,
-    plan_group,
+    plan_implement_group,
+    plan_test_cmd,
     repos_group,
     start_task,
 )
@@ -28,7 +29,8 @@ main.add_command(launch_interact)
 main.add_command(list_tasks)
 main.add_command(archive_task)
 main.add_command(activate_path)
-main.add_command(plan_group)
+main.add_command(plan_implement_group)
+main.add_command(plan_test_cmd)
 main.add_command(implement_cmd)
 main.add_command(create_pr)
 main.add_command(comms_group)
