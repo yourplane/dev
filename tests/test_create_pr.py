@@ -184,11 +184,6 @@ def test_create_pr_success(runner: CliRunner, tmp_path: Path) -> None:
 
     def run(*args, **kwargs):
         cmd = args[0] if args else kwargs.get("args", [])
-        if cmd == ["git", "credential", "fill"]:
-            result = MagicMock()
-            result.returncode = 0
-            result.stdout = "protocol=https\nhost=github.com\npassword=secret\n"
-            return result
         return subprocess_run_mock(
             repo_root=repo_dir,
             branch="feature",
@@ -203,16 +198,19 @@ def test_create_pr_success(runner: CliRunner, tmp_path: Path) -> None:
         assert body["head"] == "feature"
         assert body["title"] == tmp_path.name
         response = MagicMock()
+        response.status = 201
         response.read.return_value = json.dumps(pr_response).encode()
         response.__enter__ = lambda self: self
         response.__exit__ = lambda *a: None
         return response
 
-    with patch("dev.commands.create_pr.subprocess.run", side_effect=run):
-        with patch(
-            "dev.commands.create_pr.urllib.request.urlopen", side_effect=urlopen
-        ):
-            result = runner.invoke(create_pr, ["--task", str(tmp_path)])
+    with patch("dev.commands.create_pr._get_github_token", return_value="secret"):
+        with patch("dev.commands.create_pr.subprocess.run", side_effect=run):
+            with patch(
+                "dev.commands.create_pr.urllib.request.urlopen",
+                side_effect=urlopen,
+            ):
+                result = runner.invoke(create_pr, ["--task", str(tmp_path)])
     assert result.exit_code == 0
     assert "https://github.com/owner/repo/pull/42" in result.output
     assert "#42" in result.output
