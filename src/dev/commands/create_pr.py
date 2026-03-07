@@ -161,7 +161,12 @@ def _get_github_app_installation_token(
 
     jwt = f"{signing_input}.{sig_b64}"
     url = f"https://api.github.com/app/installations/{installation_id}/access_tokens"
-    data = json.dumps({"permissions": {"pull_requests": "write"}}).encode()
+    data = json.dumps({
+        "permissions": {
+            "pull_requests": "write",
+            "contents": "read",  # required so API can read branch refs
+        }
+    }).encode()
     req = urllib.request.Request(
         url,
         data=data,
