@@ -78,7 +78,7 @@ class TaskManager:
             "Read the files listed in `comms/index.txt` in order to understand the task "
             "and prior discussion. Add agent comms (e.g. plans, implementation notes) by "
             "creating files in `comms` and appending their filenames to `comms/index.txt`. "
-            "Exception: when running in ask/read-only mode (e.g. `dev plan`), do not write to "
+            "Exception: when running in ask/read-only mode (e.g. `dev plan-implement`), do not write to "
             "comms; the dev CLI will add the plan entry.\n",
             encoding="utf-8",
         )

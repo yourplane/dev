@@ -29,6 +29,9 @@ PLAN_MODE_PROMPT = """Read the task context in the `comms` directory (files list
 IMPLEMENT_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Implement the task and commit when done. When done, in the git project directory (the repo subdirectory under the task root, not the task root itself): fetch from origin, merge origin/main into the current branch, then push the current branch to origin."""
 IMPLEMENT_STREAM_LOG_PREFIX = "dev-implement-stream-"
 
+PLAN_TEST_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Produce a manual, end-to-end testing plan (markdown only, no preamble). Include feature testing (steps to verify the task's goals) and regression testing (steps to verify existing behavior is unchanged). All commands in the plan must use the CLI installed in the task's virtual environment: from the task root, on Unix use .venv/<task_name>/bin/<command> and on Windows .venv/<task_name>/Scripts/<command>.exe (or activate the venv first). This is not unit or automated test code; it is a step-by-step manual test plan. Output only the plan as markdown."""
+PLAN_TEST_STREAM_LOG_PREFIX = "dev-plan-test-stream-"
+
 
 def _task_dir_from_options(
     task_name: str | None, tasks_dir: Path
@@ -191,6 +194,144 @@ def _run_plan_mode(
     click.echo(click.style(f"Plan written to {comms_path.relative_to(task_dir)}", dim=True))
     if proc.returncode != 0:
         raise SystemExit(proc.returncode)
+
+
+def _run_plan_test_mode(
+    task_path: Path | None,
+    agent_cmd: str,
+) -> None:
+    """Run agent to generate a manual E2E testing plan; output is written to comms only."""
+    task_dir = _resolve_task_dir(task_path)
+    chat_id_path = task_dir / AGENT_CHAT_ID_FILE
+
+    if not chat_id_path.exists():
+        click.echo(
+            f"Chat ID file not found: {chat_id_path}. Run from a task directory or use --task.",
+            err=True,
+        )
+        raise SystemExit(1)
+
+    chat_id = chat_id_path.read_text(encoding="utf-8").strip()
+    if not chat_id:
+        click.echo("Chat ID file is empty.", err=True)
+        raise SystemExit(1)
+
+    argv = [
+        agent_cmd,
+        "agent",
+        "--print",
+        "--output-format",
+        "stream-json",
+        "--stream-partial-output",
+        "--mode",
+        "ask",
+        "--resume",
+        chat_id,
+        "--workspace",
+        str(task_dir),
+        "--trust",
+        PLAN_TEST_MODE_PROMPT,
+    ]
+    buffer: list[str] = []
+    buffer_lock = threading.Lock()
+    read_error: list[BaseException | None] = [None]
+    logs_dir = task_dir / PLAN_LOGS_DIR
+    logs_dir.mkdir(exist_ok=True)
+    stream_log_name = f"{PLAN_TEST_STREAM_LOG_PREFIX}{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.log"
+    stream_log_path = logs_dir / stream_log_name
+    thinking_started: list[bool] = [False]
+    thinking_at_line_start: list[bool] = [True]
+
+    def read_stdout(proc: subprocess.Popen[str]) -> None:
+        try:
+            assert proc.stdout is not None
+            with open(stream_log_path, "w", encoding="utf-8") as log:
+                for line in proc.stdout:
+                    decoded = line if isinstance(line, str) else line.decode("utf-8", errors="replace")
+                    log.write(decoded)
+                    if decoded and not decoded.endswith("\n"):
+                        log.write("\n")
+                    log.flush()
+                    formatted, is_thinking = _format_stream_line_for_console(decoded.strip())
+                    if formatted is not None and sys.stdout:
+                        if is_thinking:
+                            if not thinking_started[0]:
+                                thinking_started[0] = True
+                                out = "\n  Thinking:\n  "
+                                thinking_at_line_start[0] = False
+                            else:
+                                out = ""
+                            for ch in formatted:
+                                if thinking_at_line_start[0]:
+                                    out += "  "
+                                    thinking_at_line_start[0] = False
+                                out += ch
+                                if ch == "\n":
+                                    thinking_at_line_start[0] = True
+                            if out:
+                                sys.stdout.write(click.style(out, dim=True))
+                        else:
+                            sys.stdout.write(formatted)
+                        sys.stdout.flush()
+                    with buffer_lock:
+                        buffer.append(decoded)
+        except Exception as e:
+            read_error[0] = e
+
+    click.echo("Starting plan-test (stream-json mode)...")
+    click.echo(f"Stream log: {stream_log_path}")
+    try:
+        proc = subprocess.Popen(
+            argv,
+            cwd=str(task_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+    except FileNotFoundError:
+        click.echo(f"Agent command not found: {agent_cmd}", err=True)
+        raise SystemExit(1)
+
+    reader = threading.Thread(target=read_stdout, args=(proc,))
+    reader.start()
+    reader.join(timeout=300)
+    if reader.is_alive():
+        proc.kill()
+        proc.wait()
+        click.echo("Agent plan-test mode timed out.", err=True)
+        raise SystemExit(1)
+
+    try:
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+    stderr_output = ""
+    if proc.stderr:
+        stderr_output = proc.stderr.read()
+
+    if read_error[0] is not None:
+        click.echo(str(read_error[0]), err=True)
+        raise SystemExit(1)
+
+    streamed_output = "".join(buffer)
+    if proc.returncode != 0:
+        if stderr_output:
+            click.echo(stderr_output, err=True)
+        if not streamed_output.strip() and not stderr_output:
+            click.echo(f"Agent exited with code {proc.returncode} (no output).", err=True)
+            click.echo(
+                "The agent may not support --output-format stream-json.",
+                err=True,
+            )
+        raise SystemExit(1)
+
+    plan_text = _extract_plan_from_stream_json(streamed_output)
+    comms_path = add_comms(task_dir, "agent", plan_text, kind="plan-test")
+    click.echo()
+    click.echo(click.style(f"Testing plan written to {comms_path.relative_to(task_dir)}", dim=True))
 
 
 def _run_implement_mode(
@@ -650,7 +791,7 @@ def activate_path(task_path: Path | None) -> None:
     click.echo(str(activate_script))
 
 
-@click.group("plan", invoke_without_command=True)
+@click.group("plan-implement", invoke_without_command=True)
 @click.option(
     "--task",
     "-t",
@@ -667,17 +808,17 @@ def activate_path(task_path: Path | None) -> None:
     help="Command to run for the agent (e.g. cursor).",
 )
 @click.pass_context
-def plan_group(
+def plan_implement_group(
     ctx: click.Context,
     task_path: Path | None,
     agent_cmd: str,
 ) -> None:
-    """Run headless plan mode or manage task plans (e.g. accept draft into task.md)."""
+    """Run headless plan-implement mode or manage task plans (e.g. accept draft into task.md)."""
     if ctx.invoked_subcommand is None:
         _run_plan_mode(task_path=task_path, agent_cmd=agent_cmd)
 
 
-@plan_group.command("accept")
+@plan_implement_group.command("accept")
 @click.option(
     "--task",
     "-t",
@@ -704,7 +845,7 @@ def plan_accept(
 
     if not draft_path.exists():
         click.echo(
-            f"Draft plan not found: {draft_path}. Run plan mode first (dev plan).",
+            f"Draft plan not found: {draft_path}. Run plan mode first (dev plan-implement).",
             err=True,
         )
         raise SystemExit(1)
@@ -712,6 +853,30 @@ def plan_accept(
     content = draft_path.read_text(encoding="utf-8")
     task_md_path.write_text(content, encoding="utf-8")
     click.echo(f"Plan accepted: {task_md_path} updated from {draft_path.name}.")
+
+
+@click.command("plan-test")
+@click.option(
+    "--task",
+    "-t",
+    "task_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to task directory. If not set, use current working directory.",
+)
+@click.option(
+    "--agent-cmd",
+    type=str,
+    default=AGENT_CMD,
+    envvar="DEV_AGENT_CMD",
+    help="Command to run for the agent (e.g. cursor).",
+)
+def plan_test_cmd(
+    task_path: Path | None,
+    agent_cmd: str,
+) -> None:
+    """Generate a manual E2E testing plan from task context and save it to comms."""
+    _run_plan_test_mode(task_path=task_path, agent_cmd=agent_cmd)
 
 
 @click.command("implement")

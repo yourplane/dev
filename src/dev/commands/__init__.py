@@ -9,7 +9,8 @@ from dev.commands.task import (
     implement_cmd,
     launch_interact,
     list_tasks,
-    plan_group,
+    plan_implement_group,
+    plan_test_cmd,
     start_task,
 )
 
@@ -21,7 +22,8 @@ __all__ = [
     "implement_cmd",
     "launch_interact",
     "list_tasks",
-    "plan_group",
+    "plan_implement_group",
+    "plan_test_cmd",
     "repos_group",
     "start_task",
 ]

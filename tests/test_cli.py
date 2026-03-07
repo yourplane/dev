@@ -134,7 +134,7 @@ def test_plan_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) 
         mock_proc.wait.return_value = None
         with patch("dev.commands.task.subprocess.Popen") as mock_popen:
             mock_popen.return_value = mock_proc
-            result = runner.invoke(main, ["plan"])
+            result = runner.invoke(main, ["plan-implement"])
     assert result.exit_code == 0
     assert mock_popen.called
     call_kw = mock_popen.call_args[1]
@@ -343,10 +343,10 @@ def test_comms_comment_adds_user_comms(runner: CliRunner, tmp_path: Path) -> Non
     assert (cwd / "comms" / order[0]).read_text().strip() == "Hello from user"
 
 
-def test_plan_help() -> None:
-    result = CliRunner().invoke(main, ["plan", "--help"])
+def test_plan_implement_help() -> None:
+    result = CliRunner().invoke(main, ["plan-implement", "--help"])
     assert result.exit_code == 0
-    assert "plan" in result.output.lower()
+    assert "plan-implement" in result.output.lower()
 
 
 def test_implement_help() -> None:
@@ -401,7 +401,7 @@ def test_plan_accept_updates_task_md(runner: CliRunner, tmp_path: Path) -> None:
         cwd = Path.cwd()
         (cwd / "task.md").write_text("# Old\n\nOld description.")
         (cwd / "task-plan-draft.md").write_text("# New Title\n\nDetailed plan here.")
-        result = runner.invoke(main, ["plan", "accept"])
+        result = runner.invoke(main, ["plan-implement", "accept"])
         task_content = (cwd / "task.md").read_text()
     assert result.exit_code == 0
     assert task_content == "# New Title\n\nDetailed plan here."
@@ -411,7 +411,7 @@ def test_plan_accept_updates_task_md(runner: CliRunner, tmp_path: Path) -> None:
 def test_plan_accept_missing_draft_exits_nonzero(runner: CliRunner, tmp_path: Path) -> None:
     with runner.isolated_filesystem(tmp_path):
         (Path.cwd() / "task.md").write_text("# Task\n\nDesc.")
-        result = runner.invoke(main, ["plan", "accept"])
+        result = runner.invoke(main, ["plan-implement", "accept"])
     assert result.exit_code != 0
     assert "Draft plan not found" in result.output or "not found" in result.output
 
@@ -425,7 +425,7 @@ def test_plan_accept_with_task_flag(runner: CliRunner, tmp_path: Path) -> None:
     (task_dir / "task-plan-draft.md").write_text("# New\n\nNew plan.")
     result = runner.invoke(
         main,
-        ["plan", "accept", "--task", str(task_dir)],
+        ["plan-implement", "accept", "--task", str(task_dir)],
     )
     assert result.exit_code == 0
     assert (task_dir / "task.md").read_text() == "# New\n\nNew plan."
@@ -436,10 +436,62 @@ def test_plan_accept_with_draft_option(runner: CliRunner, tmp_path: Path) -> Non
         cwd = Path.cwd()
         (cwd / "task.md").write_text("# Task\n\nX.")
         (cwd / "custom-draft.md").write_text("# Custom\n\nCustom plan.")
-        result = runner.invoke(main, ["plan", "accept", "--draft", "custom-draft.md"])
+        result = runner.invoke(main, ["plan-implement", "accept", "--draft", "custom-draft.md"])
         task_content = (cwd / "task.md").read_text()
     assert result.exit_code == 0
     assert task_content == "# Custom\n\nCustom plan."
+
+
+def test_plan_test_help() -> None:
+    result = CliRunner().invoke(main, ["plan-test", "--help"])
+    assert result.exit_code == 0
+    assert "plan-test" in result.output.lower()
+    assert "E2E" in result.output or "testing" in result.output.lower()
+
+
+def test_plan_test_runs_headless_writes_comms_only(runner: CliRunner, tmp_path: Path) -> None:
+    """plan-test uses same chat-id, writes to comms only (no task-plan-draft.md)."""
+    with runner.isolated_filesystem(tmp_path):
+        cwd = Path.cwd()
+        (cwd / "agent-chat-id").write_text("chat-plan-test")
+        (cwd / "comms").mkdir()
+        (cwd / "comms" / "index.txt").write_text("001-user.md\n")
+        streamed_line = '{"content": "# Manual test plan\\n\\n## Feature\\n\\n1. Run .venv/foo/bin/dev --help.\\n\\n## Regression\\n\\n2. Run existing commands."}\n'
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([streamed_line])
+        mock_proc.stderr.read.return_value = ""
+        mock_proc.returncode = 0
+        mock_proc.wait.return_value = None
+        with patch("dev.commands.task.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = mock_proc
+            result = runner.invoke(main, ["plan-test"])
+    assert result.exit_code == 0
+    assert mock_popen.called
+    argv = mock_popen.call_args[0][0]
+    assert argv[0] == "cursor"
+    assert "--output-format" in argv
+    assert "stream-json" in argv
+    assert "--mode" in argv and "ask" in argv
+    assert "--resume" in argv
+    assert "chat-plan-test" in argv
+    assert "--workspace" in argv
+    assert "--trust" in argv
+    # No draft file
+    assert not (cwd / "task-plan-draft.md").exists()
+    # Comms updated with plan-test entry
+    index = cwd / "comms" / "index.txt"
+    assert index.exists()
+    order = [n.strip() for n in index.read_text().splitlines() if n.strip()]
+    assert len(order) == 2
+    assert order[0] == "001-user.md"
+    assert "agent-plan-test" in order[1]
+    plan_test_file = cwd / "comms" / order[1]
+    assert plan_test_file.exists()
+    content = plan_test_file.read_text()
+    assert "Manual test plan" in content or "Feature" in content
+    assert "Starting plan-test" in result.output
+    assert "Testing plan written to" in result.output
+    assert list((cwd / ".logs").glob("dev-plan-test-stream-*.log"))
 
 
 def test_activate_path_help() -> None:
