@@ -104,26 +104,47 @@ def _ensure_clean_tree(repo_root: Path) -> None:
         raise SystemExit(1)
 
 
-def _ensure_pushed_and_in_sync(repo_root: Path) -> None:
-    """Ensure current branch has upstream and HEAD == @{u}."""
+def _ensure_branch_pushed_and_tracking(repo_root: Path) -> None:
+    """Push current branch to origin and set upstream if needed; exit on push failure."""
     branch = _current_branch(repo_root)
     try:
         _git_output(repo_root, "rev-parse", "--abbrev-ref", "@{u}")
+        has_upstream = True
     except subprocess.CalledProcessError:
-        click.echo(
-            "Branch has no upstream. From the repo run: "
-            f"git push -u origin {branch}",
-            err=True,
+        has_upstream = False
+
+    if not has_upstream:
+        click.echo(f"Pushing branch {branch!r} and setting upstream to origin/{branch}.")
+        proc = subprocess.run(
+            ["git", "push", "-u", "origin", branch],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
         )
-        raise SystemExit(1)
+        if proc.returncode != 0:
+            click.echo(
+                f"Failed to push branch: {proc.stderr or proc.stdout or 'unknown error'}",
+                err=True,
+            )
+            raise SystemExit(1)
+        return
+
     local = _git_output(repo_root, "rev-parse", "HEAD")
     remote = _git_output(repo_root, "rev-parse", "@{u}")
     if local != remote:
-        click.echo(
-            "Branch is not in sync with remote; push and try again.",
-            err=True,
+        click.echo(f"Pushing branch {branch!r} to origin.")
+        proc = subprocess.run(
+            ["git", "push"],
+            cwd=repo_root,
+            capture_output=True,
+            text=True,
         )
-        raise SystemExit(1)
+        if proc.returncode != 0:
+            click.echo(
+                f"Failed to push: {proc.stderr or proc.stdout or 'unknown error'}",
+                err=True,
+            )
+            raise SystemExit(1)
 
 
 def _base64url_encode(data: bytes) -> str:
@@ -358,8 +379,10 @@ def create_pr(
     """Create a pull request to main from the current feature branch.
 
     Run from the task root (or use --task). Requires: current branch is not main,
-    working tree is clean, and the branch is pushed and in sync with the remote.
-    PR title is the task name; PR body is built from commit messages not on main.
+    and working tree is clean (unless --allow-dirty). If the branch has no
+    upstream or is not in sync with the remote, runs git push (with -u when
+    setting upstream) automatically. PR title is the task name; PR body is
+    built from commit messages not on main.
     Token: fetches GitHub App credentials from AWS Secrets Manager (secret name
     github-desk) and obtains an installation token with pull_requests write.
     """
@@ -370,7 +393,7 @@ def create_pr(
     _ensure_not_main(repo_root)
     if not allow_dirty:
         _ensure_clean_tree(repo_root)
-    _ensure_pushed_and_in_sync(repo_root)
+    _ensure_branch_pushed_and_tracking(repo_root)
 
     token = _get_github_token()
     _debug_echo(debug, f"Token: obtained (length={len(token)}, prefix={token[:4]!r}...)")

@@ -91,39 +91,118 @@ def test_create_pr_rejects_dirty_tree(
     assert "Uncommitted" in result.output or "commit or stash" in result.output
 
 
-def test_create_pr_rejects_not_pushed(
+def test_create_pr_fails_when_push_fails_no_upstream(
     runner: CliRunner, tmp_path: Path
 ) -> None:
-    """Fails when branch has no upstream."""
+    """Fails when branch has no upstream and git push -u fails."""
     (tmp_path / "comms").mkdir(parents=True)
     (tmp_path / "comms" / "index.txt").write_text("")
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()
-
-    def run_side_effect(*args, **kwargs):
-        cmd = args[0] if args else kwargs.get("args", [])
-        if isinstance(cmd, list):
-            if cmd[:2] == ["git", "rev-parse"]:
-                if "--show-toplevel" in cmd:
-                    return MagicMock(stdout=str(repo_dir) + "\n", returncode=0)
-                if "--abbrev-ref" in cmd and "HEAD" in cmd:
-                    return MagicMock(stdout="feature\n", returncode=0)
-                if "@{u}" in cmd:
-                    raise subprocess.CalledProcessError(1, cmd)
-                if "HEAD" in cmd or "origin/main" in str(cmd):
-                    return MagicMock(stdout="abc123\n", returncode=0)
-            if cmd == ["git", "status", "--porcelain"]:
-                return MagicMock(stdout="", returncode=0)
-            if "remote" in cmd and "get-url" in cmd:
-                return MagicMock(stdout="https://github.com/o/r.git\n", returncode=0)
-            if cmd[:2] == ["git", "log"]:
-                return MagicMock(stdout="", returncode=0)
-        return MagicMock(returncode=1)
-
-    with patch("dev.commands.create_pr.subprocess.run", side_effect=run_side_effect):
+    run_mock = subprocess_run_mock(
+        repo_root=repo_dir,
+        branch="feature",
+        porcelain="",
+        upstream_ok=False,
+        push_succeeds=False,
+    )
+    with patch("dev.commands.create_pr.subprocess.run", side_effect=run_mock):
         result = runner.invoke(create_pr, ["--task", str(tmp_path)])
     assert result.exit_code != 0
-    assert "upstream" in result.output.lower() or "push" in result.output.lower()
+    assert "Failed to push" in result.output
+
+
+def test_create_pr_sets_upstream_when_no_upstream(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """When branch has no upstream, runs git push -u then creates PR."""
+    (tmp_path / "comms").mkdir(parents=True)
+    (tmp_path / "comms" / "index.txt").write_text("")
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    pr_response = {
+        "html_url": "https://github.com/owner/repo/pull/99",
+        "number": 99,
+        "title": tmp_path.name,
+    }
+
+    def run(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args", [])
+        return subprocess_run_mock(
+            repo_root=repo_dir,
+            branch="feature",
+            porcelain="",
+            upstream_ok=False,
+            push_succeeds=True,
+        )(*args, **kwargs)
+
+    def urlopen(req):
+        body = json.loads(req.data.decode())
+        assert body["head"] == "feature"
+        response = MagicMock()
+        response.status = 201
+        response.read.return_value = json.dumps(pr_response).encode()
+        response.__enter__ = lambda self: self
+        response.__exit__ = lambda *a: None
+        return response
+
+    with patch("dev.commands.create_pr._get_github_token", return_value="secret"):
+        with patch("dev.commands.create_pr.subprocess.run", side_effect=run):
+            with patch(
+                "dev.commands.create_pr.urllib.request.urlopen",
+                side_effect=urlopen,
+            ):
+                result = runner.invoke(create_pr, ["--task", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "Pushing branch" in result.output and "setting upstream" in result.output
+    assert "https://github.com/owner/repo/pull/99" in result.output
+
+
+def test_create_pr_pushes_when_out_of_sync(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    """When branch has upstream but local != remote, runs git push then creates PR."""
+    (tmp_path / "comms").mkdir(parents=True)
+    (tmp_path / "comms" / "index.txt").write_text("")
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    pr_response = {
+        "html_url": "https://github.com/owner/repo/pull/11",
+        "number": 11,
+        "title": tmp_path.name,
+    }
+
+    def run(*args, **kwargs):
+        cmd = args[0] if args else kwargs.get("args", [])
+        return subprocess_run_mock(
+            repo_root=repo_dir,
+            branch="feature",
+            porcelain="",
+            upstream_ok=True,
+            push_succeeds=True,
+            remote_sha="def456",  # differs from local abc123
+        )(*args, **kwargs)
+
+    def urlopen(req):
+        body = json.loads(req.data.decode())
+        assert body["head"] == "feature"
+        response = MagicMock()
+        response.status = 201
+        response.read.return_value = json.dumps(pr_response).encode()
+        response.__enter__ = lambda self: self
+        response.__exit__ = lambda *a: None
+        return response
+
+    with patch("dev.commands.create_pr._get_github_token", return_value="secret"):
+        with patch("dev.commands.create_pr.subprocess.run", side_effect=run):
+            with patch(
+                "dev.commands.create_pr.urllib.request.urlopen",
+                side_effect=urlopen,
+            ):
+                result = runner.invoke(create_pr, ["--task", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "Pushing branch" in result.output and "to origin" in result.output
+    assert "https://github.com/owner/repo/pull/11" in result.output
 
 
 def subprocess_run_mock(
@@ -133,6 +212,8 @@ def subprocess_run_mock(
     porcelain: str = "",
     upstream_ok: bool = True,
     remote_url: str = "https://github.com/owner/repo.git",
+    push_succeeds: bool = True,
+    remote_sha: str | None = None,
 ):
     """Build a subprocess.run mock for create_pr git calls."""
 
@@ -156,7 +237,7 @@ def subprocess_run_mock(
                         raise subprocess.CalledProcessError(1, cmd)
                     result.stdout = "origin/" + branch + "\n"
                 else:
-                    result.stdout = "abc123\n"
+                    result.stdout = (remote_sha or "abc123") + "\n"
             elif "HEAD" in cmd or "origin/main" in str(cmd):
                 result.stdout = "abc123\n"
         elif cmd == ["git", "status", "--porcelain"]:
@@ -165,6 +246,9 @@ def subprocess_run_mock(
             result.stdout = remote_url + "\n"
         elif cmd[:2] == ["git", "log"]:
             result.stdout = "---\nSubject\nBody\n"
+        elif cmd[:2] == ["git", "push"]:
+            result.returncode = 0 if push_succeeds else 1
+            result.stderr = "Failed to push" if not push_succeeds else ""
         return result
 
     return run
