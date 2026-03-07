@@ -408,9 +408,16 @@ def create_pr(
             data = json.loads(resp_body)
             msg = data.get("message", resp_body)
             docs = data.get("documentation_url", "")
+            errors = data.get("errors", [])
             click.echo(f"GitHub API error: {msg}", err=True)
             if docs:
                 click.echo(f"Docs: {docs}", err=True)
+            if errors:
+                for err in errors:
+                    if isinstance(err, dict):
+                        click.echo(f"  - {err.get('message', err)}", err=True)
+                    else:
+                        click.echo(f"  - {err}", err=True)
             if status == 403 and "integration" in msg.lower():
                 click.echo(
                     "The token may lack permission to create pull requests. "
