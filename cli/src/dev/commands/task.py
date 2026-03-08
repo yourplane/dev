@@ -13,9 +13,9 @@ import click
 
 SPINNER_CHARS = ["|", "/", "-", "\\"]
 
-from dev.comms import add_comms, comms_dir, index_path, next_sequence, read_index
-from dev.repo_config import resolve_repo
-from dev.task_manager import TaskManager
+from dev_sdk.comms import add_comms, comms_dir, index_path, next_sequence, read_index
+from dev_sdk.repo_config import resolve_repo
+from dev_sdk.task_manager import TaskManager
 
 TASKS_ROOT = Path.home() / "tasks"
 AGENT_CMD = "cursor"

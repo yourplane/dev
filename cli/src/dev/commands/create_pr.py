@@ -13,7 +13,7 @@ from pathlib import Path
 
 import click
 
-from dev.comms import comms_dir
+from dev_sdk.comms import comms_dir
 
 
 def _resolve_task_root(task_path: Path | None) -> Path:

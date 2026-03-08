@@ -10,7 +10,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from dev.comms import add_comms, comms_dir
+from dev_sdk.comms import add_comms, comms_dir
 
 ProgressCallback = Callable[[str], None]
 

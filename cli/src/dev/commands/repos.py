@@ -1,8 +1,8 @@
-"""Commands to maintain repo shorthand config."""
+"""Commands to maintain repo shorthand config (thin wrapper over dev_sdk)."""
 
 import click
 
-from dev.repo_config import load_repos, save_repos
+from dev_sdk.repo_config import load_repos, save_repos
 
 
 @click.group("repos")

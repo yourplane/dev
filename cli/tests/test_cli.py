@@ -170,7 +170,7 @@ def test_create_with_unknown_shorthand_exits_nonzero(
     tasks_dir.mkdir()
     config_file = tmp_path / "repos.json"
     config_file.write_text("{}")
-    with patch("dev.repo_config.CONFIG_FILE", config_file):
+    with patch("dev_sdk.repo_config.CONFIG_FILE", config_file):
         result = runner.invoke(
             main,
             [
@@ -198,7 +198,7 @@ def test_create_without_comment_creates_task_with_no_initial_comms(
     config_file.write_text(
         '{"desk": "https://github.com/maxrademacher/desk.git"}'
     )
-    with patch("dev.repo_config.CONFIG_FILE", config_file):
+    with patch("dev_sdk.repo_config.CONFIG_FILE", config_file):
         with patch("dev.commands.task.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="chat-id\n")
             result = runner.invoke(
@@ -229,7 +229,7 @@ def test_create_with_shorthand_uses_resolved_url(
     config_file.write_text(
         '{"desk": "https://github.com/maxrademacher/desk.git"}'
     )
-    with patch("dev.repo_config.CONFIG_FILE", config_file):
+    with patch("dev_sdk.repo_config.CONFIG_FILE", config_file):
         with patch("dev.commands.task.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="chat-id\n")
             result = runner.invoke(
@@ -263,7 +263,7 @@ def test_create_prints_progress_messages(
     config_file.write_text(
         '{"desk": "https://github.com/maxrademacher/desk.git"}'
     )
-    with patch("dev.repo_config.CONFIG_FILE", config_file):
+    with patch("dev_sdk.repo_config.CONFIG_FILE", config_file):
         with patch("dev.commands.task.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="chat-id\n")
             result = runner.invoke(
@@ -304,7 +304,7 @@ def test_repos_list_empty(runner: CliRunner, tmp_path: Path) -> None:
     config_file = tmp_path / "repos.json"
     config_file.parent.mkdir(parents=True, exist_ok=True)
     config_file.write_text("{}")
-    with patch("dev.repo_config.CONFIG_FILE", config_file):
+    with patch("dev_sdk.repo_config.CONFIG_FILE", config_file):
         result = runner.invoke(main, ["repos", "list"])
     assert result.exit_code == 0
     assert "No repo shorthands" in result.output
@@ -314,14 +314,14 @@ def test_repos_add_and_list(runner: CliRunner, tmp_path: Path) -> None:
     config_file = tmp_path / "repos.json"
     config_file.parent.mkdir(parents=True, exist_ok=True)
     config_file.write_text("{}")
-    with patch("dev.repo_config.CONFIG_FILE", config_file):
+    with patch("dev_sdk.repo_config.CONFIG_FILE", config_file):
         result = runner.invoke(
             main,
             ["repos", "add", "desk", "https://github.com/maxrademacher/desk.git"],
         )
     assert result.exit_code == 0
     assert "Added desk" in result.output
-    with patch("dev.repo_config.CONFIG_FILE", config_file):
+    with patch("dev_sdk.repo_config.CONFIG_FILE", config_file):
         result2 = runner.invoke(main, ["repos", "list"])
     assert result2.exit_code == 0
     assert "desk" in result2.output
