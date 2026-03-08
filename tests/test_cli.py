@@ -537,6 +537,110 @@ def test_plan_test_writes_executable_script_when_delimiter_present(runner: CliRu
     assert "Executable script written to" in result.output
 
 
+def test_test_fails_without_comms(runner: CliRunner, tmp_path: Path) -> None:
+    """dev test fails when comms dir is missing."""
+    with runner.isolated_filesystem(tmp_path):
+        cwd = Path.cwd()
+        (cwd / "agent-chat-id").write_text("chat-id")
+        result = runner.invoke(main, ["test"])
+    assert result.exit_code != 0
+    assert "comms" in result.output.lower()
+
+
+def test_test_fails_without_agent_chat_id(runner: CliRunner, tmp_path: Path) -> None:
+    """dev test fails when agent-chat-id is missing (after running script)."""
+    with runner.isolated_filesystem(tmp_path):
+        cwd = Path.cwd()
+        (cwd / "comms").mkdir()
+        (cwd / "comms" / "index.txt").write_text("001-run-plan.sh\n")
+        (cwd / "comms" / "001-run-plan.sh").write_text("#!/bin/bash\necho x\n")
+        (cwd / "comms" / "001-run-plan.sh").chmod(0o755)
+        with patch("dev.commands.task.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
+            result = runner.invoke(main, ["test"])
+    assert result.exit_code != 0
+    assert "chat" in result.output.lower() or "agent-chat-id" in result.output
+
+
+def test_test_fails_without_run_plan_script(runner: CliRunner, tmp_path: Path) -> None:
+    """dev test fails when comms has no *-run-plan.sh."""
+    with runner.isolated_filesystem(tmp_path):
+        cwd = Path.cwd()
+        (cwd / "agent-chat-id").write_text("chat-id")
+        (cwd / "comms").mkdir()
+        (cwd / "comms" / "index.txt").write_text("001-user.md\n")
+        result = runner.invoke(main, ["test"])
+    assert result.exit_code != 0
+    assert "run-plan" in result.output or "plan-test" in result.output
+
+
+def test_test_runs_script_then_agent_writes_comms(runner: CliRunner, tmp_path: Path) -> None:
+    """dev test runs latest run-plan script, saves log, runs agent in ask mode, adds test-results to comms."""
+    with runner.isolated_filesystem(tmp_path):
+        cwd = Path.cwd()
+        (cwd / "agent-chat-id").write_text("chat-test")
+        (cwd / "comms").mkdir()
+        (cwd / "comms" / "index.txt").write_text("001-user.md\n002-run-plan.sh\n")
+        script = cwd / "comms" / "002-run-plan.sh"
+        script.write_text("#!/usr/bin/env bash\necho 'test output'\n")
+        script.chmod(0o755)
+        script_proc = MagicMock()
+        script_proc.stdout = iter(["test output\n"])
+        script_proc.returncode = 0
+        script_proc.wait.return_value = None
+        streamed_line = json.dumps({"type": "result", "result": "# Test results\n\nAll passed."}) + "\n"
+        agent_proc = MagicMock()
+        agent_proc.stdout = iter([streamed_line])
+        agent_proc.stderr.read.return_value = ""
+        agent_proc.returncode = 0
+        agent_proc.wait.return_value = None
+        with patch("dev.commands.task.subprocess.Popen", side_effect=[script_proc, agent_proc]) as mock_popen:
+            result = runner.invoke(main, ["test"])
+    assert result.exit_code == 0
+    assert mock_popen.call_count >= 2
+    # First Popen is the test script
+    run_args = mock_popen.call_args_list[0][0][0]
+    assert str(script) in run_args or script.name in str(run_args)
+    logs = list((cwd / ".logs").glob("dev-test-run-*.log"))
+    assert len(logs) == 1
+    assert "test output" in logs[0].read_text()
+    # Second Popen is the agent
+    argv = mock_popen.call_args_list[1][0][0]
+    assert "--mode" in argv and "ask" in argv
+    assert "test-results" in str(mock_popen.call_args) or ".logs" in str(argv)
+    order = [n.strip() for n in (cwd / "comms" / "index.txt").read_text().splitlines() if n.strip()]
+    assert any("test-results" in n or "agent" in n for n in order)
+    assert "Test results written to" in result.output
+
+
+def test_test_uses_latest_script_when_multiple(runner: CliRunner, tmp_path: Path) -> None:
+    """dev test runs the script that appears last in index among *-run-plan.sh."""
+    with runner.isolated_filesystem(tmp_path):
+        cwd = Path.cwd()
+        (cwd / "agent-chat-id").write_text("chat-test")
+        (cwd / "comms").mkdir()
+        (cwd / "comms" / "index.txt").write_text("001-user.md\n002-run-plan.sh\n003-run-plan.sh\n")
+        (cwd / "comms" / "002-run-plan.sh").write_text("#!/bin/bash\necho two\n")
+        (cwd / "comms" / "002-run-plan.sh").chmod(0o755)
+        (cwd / "comms" / "003-run-plan.sh").write_text("#!/bin/bash\necho three\n")
+        (cwd / "comms" / "003-run-plan.sh").chmod(0o755)
+        script_proc = MagicMock()
+        script_proc.stdout = iter(["three\n"])
+        script_proc.returncode = 0
+        script_proc.wait.return_value = None
+        streamed_line = json.dumps({"type": "result", "result": "# Ok"}) + "\n"
+        agent_proc = MagicMock()
+        agent_proc.stdout = iter([streamed_line])
+        agent_proc.stderr.read.return_value = ""
+        agent_proc.returncode = 0
+        agent_proc.wait.return_value = None
+        with patch("dev.commands.task.subprocess.Popen", side_effect=[script_proc, agent_proc]) as mock_popen:
+            result = runner.invoke(main, ["test"])
+    assert result.exit_code == 0
+    run_args = mock_popen.call_args_list[0][0][0]
+    assert "003-run-plan.sh" in str(run_args)
+
+
 def test_activate_path_help() -> None:
     result = CliRunner().invoke(main, ["activate-path", "--help"])
     assert result.exit_code == 0

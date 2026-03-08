@@ -32,7 +32,7 @@ IMPLEMENT_STREAM_LOG_PREFIX = "dev-implement-stream-"
 
 PLAN_TEST_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Produce two artifacts in this exact order, with no other text before or after:
 
-1) A manual, end-to-end testing plan in markdown. It must validate all changes from the current task. Include feature testing (steps to verify the task's goals) and regression testing (steps to verify existing behavior is unchanged). Do not run or reference unit tests (e.g. pytest): unit tests are run separately and do not count as end-to-end regression testing. The plan is Unix-only; Windows is out of scope. Every command in the plan must use the task's virtual environment: from the task root use .venv/<task_name>/bin/<command> (or activate the venv first). This is not unit or automated test code; it is a step-by-step manual test plan. Output only the plan as markdown.
+1) A manual, end-to-end testing plan in markdown. It must validate the entire task—all work and behavior described in the task context from the beginning, not just the most recent changes. Include feature testing (steps to verify the task's goals) and regression testing (steps to verify existing behavior is unchanged). Do not run or reference unit tests (e.g. pytest): unit tests are run separately and do not count as end-to-end regression testing. The plan is Unix-only; Windows is out of scope. Every command in the plan must use the task's virtual environment: from the task root use .venv/<task_name>/bin/<command> (or activate the venv first). This is not unit or automated test code; it is a step-by-step manual test plan. Output only the plan as markdown.
 
 2) On a new line, the exact delimiter line: ---BASH SCRIPT---
 
@@ -41,6 +41,30 @@ PLAN_TEST_MODE_PROMPT = """Read the task context in the `comms` directory (files
 PLAN_TEST_BASH_DELIMITER = "\n---BASH SCRIPT---\n"
 PLAN_TEST_SCRIPT_PREFIX = "run-plan.sh"
 PLAN_TEST_STREAM_LOG_PREFIX = "dev-plan-test-stream-"
+
+DEV_TEST_RUN_LOG_PREFIX = "dev-test-run-"
+DEV_TEST_STREAM_LOG_PREFIX = "dev-test-stream-"
+
+
+def _latest_run_plan_script(task_dir: Path) -> Path | None:
+    """Return path to the latest *-run-plan.sh in comms (last in index order)."""
+    cdir = comms_dir(task_dir)
+    if not cdir.exists():
+        return None
+    order = read_index(task_dir)
+    # Last occurrence in index that is a run-plan script (matches plan-test naming).
+    script_names = [n for n in order if n.endswith("run-plan.sh") and "-run-plan" in n]
+    if not script_names:
+        return None
+    return cdir / script_names[-1]
+
+
+def _test_results_prompt(run_log_rel: str, script_exit_code: int | None) -> str:
+    """Build prompt for test-results agent; run_log_rel is path relative to task root."""
+    exit_note = ""
+    if script_exit_code is not None and script_exit_code != 0:
+        exit_note = f" The test script exited with code {script_exit_code}.\n\n"
+    return f"""Read the test run output from the file at {run_log_rel} (relative to the task workspace).{exit_note}Analyze the results: explain what passed or failed and why. Propose any fixes needed. Output only a single markdown document (no preamble or meta-commentary)."""
 
 
 def _task_dir_from_options(
@@ -263,6 +287,80 @@ def _run_plan_test_mode(
         with open(index_path(task_dir), "a", encoding="utf-8") as f:
             f.write(script_filename + "\n")
         click.echo(click.style(f"Executable script written to {script_path.relative_to(task_dir)}", dim=True))
+
+
+DEV_TEST_LEVEL_ENV = "DEV_TEST_LEVEL"
+DEV_TEST_MAX_LEVEL = 2  # Allow one nested run (level 0 and 1); level 2+ skipped
+
+
+def _run_test_mode(
+    task_path: Path | None,
+    agent_cmd: str,
+) -> None:
+    """Run latest comms test script, save output to .logs, then agent analyzes and writes comms."""
+    try:
+        current_level = int(os.environ.get(DEV_TEST_LEVEL_ENV, "0"))
+    except ValueError:
+        current_level = 0
+    if current_level >= DEV_TEST_MAX_LEVEL:
+        click.echo("Nested dev test skipped (max depth reached).")
+        raise SystemExit(0)
+    task_dir = _resolve_task_dir(task_path)
+    cdir = comms_dir(task_dir)
+    if not cdir.exists():
+        click.echo("Comms directory not found. Run from a task directory or use --task.", err=True)
+        raise SystemExit(1)
+    script_path = _latest_run_plan_script(task_dir)
+    if script_path is None or not script_path.exists():
+        click.echo(
+            "No test script found in comms (expecting *-run-plan.sh). Run dev plan-test first.",
+            err=True,
+        )
+        raise SystemExit(1)
+    logs_dir = task_dir / PLAN_LOGS_DIR
+    logs_dir.mkdir(exist_ok=True)
+    run_log_name = f"{DEV_TEST_RUN_LOG_PREFIX}{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.log"
+    run_log_path = logs_dir / run_log_name
+    run_output_parts: list[str] = []
+    script_env = {**os.environ, DEV_TEST_LEVEL_ENV: str(current_level + 1)}
+    with open(run_log_path, "w", encoding="utf-8") as log_file:
+        proc = subprocess.Popen(
+            [str(script_path)],
+            cwd=str(task_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=script_env,
+        )
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            log_file.write(line)
+            if line and not line.endswith("\n"):
+                log_file.write("\n")
+            log_file.flush()
+            run_output_parts.append(line)
+            click.echo(line, nl=False)
+        proc.wait()
+    run_output = "".join(run_output_parts)
+    run_log_rel = f"{PLAN_LOGS_DIR}/{run_log_name}"
+    if proc.returncode != 0:
+        click.echo(f"Test script exited with code {proc.returncode}. Run log: {run_log_path}", err=True)
+    else:
+        click.echo(f"Run log: {run_log_path}")
+    prompt = _test_results_prompt(run_log_rel, proc.returncode)
+    task_dir_after, streamed_output = _run_agent_ask_stream_json(
+        task_path,
+        agent_cmd,
+        prompt,
+        DEV_TEST_STREAM_LOG_PREFIX,
+        "Starting test analysis (stream-json mode)...",
+        "Agent test analysis timed out.",
+    )
+    content = _extract_plan_from_stream_json(streamed_output)
+    comms_path = add_comms(task_dir_after, "agent", content, kind="test-results")
+    click.echo()
+    click.echo(click.style(f"Test results written to {comms_path.relative_to(task_dir_after)}", dim=True))
 
 
 def _run_implement_mode(
@@ -832,3 +930,27 @@ def implement_cmd(
 ) -> None:
     """Run headless implement mode: agent implements the task, commits, then fetches, merges origin/main, and pushes."""
     _run_implement_mode(task_path=task_path, agent_cmd=agent_cmd)
+
+
+@click.command("test")
+@click.option(
+    "--task",
+    "-t",
+    "task_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to task directory. If not set, use current working directory.",
+)
+@click.option(
+    "--agent-cmd",
+    type=str,
+    default=AGENT_CMD,
+    envvar="DEV_AGENT_CMD",
+    help="Command to run for the agent (e.g. cursor).",
+)
+def test_cmd(
+    task_path: Path | None,
+    agent_cmd: str,
+) -> None:
+    """Run the latest comms test script, save output to .logs, then run an agent to analyze results and add a markdown report to comms."""
+    _run_test_mode(task_path=task_path, agent_cmd=agent_cmd)
