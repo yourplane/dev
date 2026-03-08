@@ -5,8 +5,11 @@ FastAPI server for dev task management: create, list, archive.
 ## Endpoints
 
 - `GET /tasks` — list active task names
+- `GET /repos` — list repo shorthands (from `~/.config/dev/repos.json`), for use by the frontend
 - `POST /tasks` — create a task (body: `title`, `repo` URL or shorthand, optional `comment`, optional `task_name`)
 - `POST /tasks/{task_name}/archive` — archive a task
+
+CORS is enabled for `http://localhost:5173` and `http://127.0.0.1:5173` so the dev-frontend (Vite dev server) can call the API.
 
 ## Configuration
 

@@ -5,15 +5,24 @@ import re
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from dev_sdk.repo_config import resolve_repo
+from dev_sdk.repo_config import load_repos, resolve_repo
 from dev_sdk.task_manager import TaskManager
 
 app = FastAPI(
     title="dev-server",
     description="Task management API: create, list, archive.",
     version="0.1.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
@@ -65,6 +74,12 @@ class ArchiveTaskResponse(BaseModel):
 @app.get("/")
 def root() -> dict:
     return {"service": "dev-server", "docs": "/docs"}
+
+
+@app.get("/repos")
+def list_repos() -> dict[str, str]:
+    """Return repo shorthand -> URL mapping from ~/.config/dev/repos.json."""
+    return load_repos()
 
 
 @app.get("/tasks", response_model=ListTasksResponse)
