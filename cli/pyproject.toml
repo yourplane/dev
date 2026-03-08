@@ -17,6 +17,9 @@ dependencies = [
     "dev-sdk",
 ]
 
+[tool.uv.sources]
+dev-sdk = { workspace = true }
+
 [project.optional-dependencies]
 dev = [
     "tox>=4.0",
