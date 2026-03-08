@@ -261,6 +261,11 @@ function CreateTaskForm({
   )
 }
 
+const COMMAND_LABEL: Record<string, string> = {
+  'plan-implement': 'Plan',
+  implement: 'Implement',
+}
+
 function TaskCommsPage() {
   const { taskName } = useParams<{ taskName: string }>()
   const navigate = useNavigate()
@@ -277,6 +282,40 @@ function TaskCommsPage() {
   const [commentText, setCommentText] = useState('')
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
+  const [activeCommand, setActiveCommand] = useState<string | null>(null)
+  const [commandError, setCommandError] = useState<string | null>(null)
+  const [startingCommand, setStartingCommand] = useState<string | null>(null)
+
+  const loadCommandStatus = useCallback(async () => {
+    try {
+      const res = await api.getTaskCommandStatus(taskName)
+      setActiveCommand(res.active && res.command ? res.command : null)
+    } catch {
+      // ignore; task might not exist yet
+    }
+  }, [taskName])
+
+  useEffect(() => {
+    loadCommandStatus()
+  }, [loadCommandStatus])
+
+  useEffect(() => {
+    const interval = setInterval(loadCommandStatus, 3000)
+    return () => clearInterval(interval)
+  }, [loadCommandStatus])
+
+  const handleStartCommand = async (command: string) => {
+    setCommandError(null)
+    setStartingCommand(command)
+    try {
+      await api.startTaskCommand(taskName, command)
+      await loadCommandStatus()
+    } catch (e) {
+      setCommandError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setStartingCommand(null)
+    }
+  }
 
   const loadComms = useCallback(async () => {
     setError(null)
@@ -336,6 +375,33 @@ function TaskCommsPage() {
     <section className="task-comms">
       <h2>Comms: {taskName}</h2>
       <p><Link to="/">← Back to tasks</Link></p>
+      <div className="task-commands">
+        {activeCommand ? (
+          <p className="command-status">
+            <span className="command-spinner" aria-hidden /> Running: {COMMAND_LABEL[activeCommand] ?? activeCommand}
+          </p>
+        ) : (
+          <div className="command-buttons">
+            <button
+              type="button"
+              className="command-btn"
+              disabled={!!startingCommand}
+              onClick={() => handleStartCommand('plan-implement')}
+            >
+              {startingCommand === 'plan-implement' ? 'Starting…' : 'Plan'}
+            </button>
+            <button
+              type="button"
+              className="command-btn"
+              disabled={!!startingCommand}
+              onClick={() => handleStartCommand('implement')}
+            >
+              {startingCommand === 'implement' ? 'Starting…' : 'Implement'}
+            </button>
+          </div>
+        )}
+        {commandError && <p className="inline-error">{commandError}</p>}
+      </div>
       {files.length === 0 ? (
         <p className="empty">No comms yet for this task.</p>
       ) : (
