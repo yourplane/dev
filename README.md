@@ -2,7 +2,7 @@
 
 CLI for managing AI developer tasks with Cursor agent integration. Tasks live under `~/tasks` (or `DEV_TASKS_DIR`).
 
-This repo is a uv workspace: **dev-sdk** (shared logic) and **dev-cli** (the `dev` command). The repo root is not an installable package.
+This repo is a uv workspace: **dev-sdk** (shared logic), **dev-cli** (the `dev` command), and **dev-server** (FastAPI task API). The repo root is not an installable package. **dev-frontend** is a separate Node (Vite + React) app under `dev-frontend/` for the web UI; see `dev-frontend/README.md` for run instructions.
 
 ## Install
 
@@ -79,6 +79,16 @@ Archive a task (moves it to `~/tasks/.archive` with a unique name: `<task-name>-
 ```bash
 dev archive <task-name>
 ```
+
+## Web UI (dev-frontend)
+
+To use the web UI for listing, creating, and archiving tasks:
+
+1. Start dev-server: `uv run --project dev-server uvicorn dev_server.main:app --reload`
+2. From `dev-frontend/`: `npm install && npm run dev`
+3. Open http://localhost:5173
+
+See `dev-frontend/README.md` for details.
 
 ## Development
 
