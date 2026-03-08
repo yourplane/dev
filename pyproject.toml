@@ -3,36 +3,4 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.uv.workspace]
-members = ["dev-sdk"]
-
-[project]
-name = "dev"
-version = "0.1.0"
-description = "CLI tool for managing AI developer tasks with Cursor agent integration"
-readme = "README.md"
-requires-python = ">=3.9"
-license = { text = "MIT" }
-authors = [
-    { name = "Developer" }
-]
-dependencies = [
-    "click>=8.0",
-    "dev-sdk",
-]
-
-[project.optional-dependencies]
-dev = [
-    "tox>=4.0",
-    "pytest>=7.0",
-    "pytest-cov>=4.0",
-]
-
-[project.scripts]
-dev = "dev.cli:main"
-
-[tool.setuptools.packages.find]
-where = ["src"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-pythonpath = ["src"]
+members = ["dev-sdk", "cli"]
