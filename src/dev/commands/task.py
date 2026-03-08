@@ -13,7 +13,7 @@ import click
 
 SPINNER_CHARS = ["|", "/", "-", "\\"]
 
-from dev.comms import add_comms, comms_dir, read_index
+from dev.comms import add_comms, comms_dir, index_path, next_sequence, read_index
 from dev.repo_config import resolve_repo
 from dev.task_manager import TaskManager
 
@@ -30,7 +30,16 @@ PLAN_IMPLEMENT_STREAM_LOG_PREFIX = "dev-plan-stream-"
 IMPLEMENT_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Implement the task and commit when done. When done, in the git project directory (the repo subdirectory under the task root, not the task root itself): fetch from origin, merge origin/main into the current branch, then push the current branch to origin."""
 IMPLEMENT_STREAM_LOG_PREFIX = "dev-implement-stream-"
 
-PLAN_TEST_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Produce a manual, end-to-end testing plan (markdown only, no preamble). Include feature testing (steps to verify the task's goals) and regression testing (steps to verify existing behavior is unchanged). The plan is Unix-only; Windows is out of scope. All commands in the plan must use the CLI installed in the task's virtual environment: from the task root use .venv/<task_name>/bin/<command> (or activate the venv first). This is not unit or automated test code; it is a step-by-step manual test plan. Output only the plan as markdown."""
+PLAN_TEST_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Produce two artifacts in this exact order, with no other text before or after:
+
+1) A manual, end-to-end testing plan in markdown. It must validate all changes from the current task. Include feature testing (steps to verify the task's goals) and regression testing (steps to verify existing behavior is unchanged). Do not run or reference unit tests (e.g. pytest): unit tests are run separately and do not count as end-to-end regression testing. The plan is Unix-only; Windows is out of scope. Every command in the plan must use the task's virtual environment: from the task root use .venv/<task_name>/bin/<command> (or activate the venv first). This is not unit or automated test code; it is a step-by-step manual test plan. Output only the plan as markdown.
+
+2) On a new line, the exact delimiter line: ---BASH SCRIPT---
+
+3) An executable bash script that runs the plan. The script must be very easy for a human to read: prioritize readability over fancy printouts or verification. Use shebang #!/usr/bin/env bash and set -e. Run each step from the plan using the actual venv path for CLI invocations. The script must never contain angle brackets or placeholders (e.g. do not write .venv/<task_name>/bin/<command> in the script—bash would interpret < as a redirect). Use the literal path with the real task name and command, e.g. .venv/bash-dev-plan-test/bin/dev. The script does not need to contain verification logic—it will be run by an agent that verifies the output. Use simple checks only where they are easy to read; if verification would be too complex to encode in bash, leave a comment describing the expected output instead. The script should be dead-simple: just straightforward bash commands, no progress counters or extra logic. Output only the script source (no markdown code fence)."""
+
+PLAN_TEST_BASH_DELIMITER = "\n---BASH SCRIPT---\n"
+PLAN_TEST_SCRIPT_PREFIX = "run-plan.sh"
 PLAN_TEST_STREAM_LOG_PREFIX = "dev-plan-test-stream-"
 
 
@@ -218,7 +227,7 @@ def _run_plan_test_mode(
     task_path: Path | None,
     agent_cmd: str,
 ) -> None:
-    """Run agent to generate a manual E2E testing plan; output is written to comms only."""
+    """Run agent to generate a manual E2E testing plan and executable bash script; both written to comms."""
     task_dir, streamed_output = _run_agent_ask_stream_json(
         task_path,
         agent_cmd,
@@ -227,10 +236,33 @@ def _run_plan_test_mode(
         "Starting plan-test (stream-json mode)...",
         "Agent plan-test mode timed out.",
     )
-    plan_text = _extract_plan_from_stream_json(streamed_output)
+    full_output = _extract_plan_from_stream_json(streamed_output)
+    if PLAN_TEST_BASH_DELIMITER in full_output:
+        plan_text, _, script_block = full_output.partition(PLAN_TEST_BASH_DELIMITER)
+        plan_text = plan_text.strip()
+        script_content = script_block.strip()
+    else:
+        plan_text = full_output.strip()
+        script_content = None
+
+    script_filename = None
+    if script_content:
+        plan_seq = next_sequence(task_dir)  # next add_comms will use this
+        script_seq = plan_seq + 1
+        script_filename = f"{script_seq:03d}-{PLAN_TEST_SCRIPT_PREFIX}"
+        plan_text += f"\n\n## How to run\n\nExecute: `./comms/{script_filename}` or `bash comms/{script_filename}`\n"
+
     comms_path = add_comms(task_dir, "agent", plan_text, kind="plan-test")
     click.echo()
     click.echo(click.style(f"Testing plan written to {comms_path.relative_to(task_dir)}", dim=True))
+
+    if script_content and script_filename:
+        script_path = comms_dir(task_dir) / script_filename
+        script_path.write_text(script_content.strip() + "\n", encoding="utf-8")
+        script_path.chmod(0o755)
+        with open(index_path(task_dir), "a", encoding="utf-8") as f:
+            f.write(script_filename + "\n")
+        click.echo(click.style(f"Executable script written to {script_path.relative_to(task_dir)}", dim=True))
 
 
 def _run_implement_mode(

@@ -1,5 +1,6 @@
 """Tests for CLI entry point."""
 
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -492,6 +493,48 @@ def test_plan_test_runs_headless_writes_comms_only(runner: CliRunner, tmp_path: 
     assert "Starting plan-test" in result.output
     assert "Testing plan written to" in result.output
     assert list((cwd / ".logs").glob("dev-plan-test-stream-*.log"))
+    # No script when delimiter is absent
+    assert not list((cwd / "comms").glob("*-run-plan.sh"))
+
+
+def test_plan_test_writes_executable_script_when_delimiter_present(runner: CliRunner, tmp_path: Path) -> None:
+    """When agent output contains ---BASH SCRIPT---, plan-test writes a numbered run-plan.sh and makes it executable."""
+    import dev.commands.task as task_module
+
+    with runner.isolated_filesystem(tmp_path):
+        cwd = Path.cwd()
+        (cwd / "agent-chat-id").write_text("chat-plan-test")
+        (cwd / "comms").mkdir()
+        (cwd / "comms" / "index.txt").write_text("001-user.md\n")
+        plan_part = "# Manual test plan\n\n## Step 1\nRun dev --help."
+        script_part = "#!/usr/bin/env bash\nset -e\necho Step 1\n.venv/foo/bin/dev --help"
+        full_result = plan_part + "\n---BASH SCRIPT---\n" + script_part
+        streamed_line = json.dumps({"type": "result", "result": full_result}) + "\n"
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([streamed_line])
+        mock_proc.stderr.read.return_value = ""
+        mock_proc.returncode = 0
+        mock_proc.wait.return_value = None
+        real_popen = task_module.subprocess.Popen
+
+        def selective_popen(*args, **kwargs):
+            argv = args[0] if args and args[0] else []
+            if isinstance(argv, list) and "--output-format" in argv:
+                return mock_proc
+            return real_popen(*args, **kwargs)
+
+        with patch.object(task_module.subprocess, "Popen", side_effect=selective_popen):
+            result = runner.invoke(main, ["plan-test"])
+    assert result.exit_code == 0
+    order = [n.strip() for n in (cwd / "comms" / "index.txt").read_text().splitlines() if n.strip()]
+    plan_file = cwd / "comms" / order[1]
+    assert "How to run" in plan_file.read_text()
+    script_files = list((cwd / "comms").glob("*-run-plan.sh"))
+    assert len(script_files) == 1
+    script_path = script_files[0]
+    assert script_path.stat().st_mode & 0o111
+    assert "#!/usr/bin/env bash" in script_path.read_text()
+    assert "Executable script written to" in result.output
 
 
 def test_activate_path_help() -> None:

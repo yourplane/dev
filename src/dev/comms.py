@@ -23,14 +23,20 @@ def _next_sequence(task_dir: Path) -> int:
         return 1
     max_n = 0
     for p in cdir.iterdir():
-        if p.is_file() and p.suffix == ".md" and p.name != INDEX_FILE:
-            try:
-                n = int(p.stem.split("-")[0])
-                if n > max_n:
-                    max_n = n
-            except ValueError:
-                pass
+        if p.is_file() and p.name != INDEX_FILE:
+            if p.suffix == ".md" or (p.suffix == ".sh" and "-run-plan" in p.stem):
+                try:
+                    n = int(p.name.split("-")[0])
+                    if n > max_n:
+                        max_n = n
+                except ValueError:
+                    pass
     return max_n + 1
+
+
+def next_sequence(task_dir: Path) -> int:
+    """Return next 1-based sequence number for a new comms file (plan or script)."""
+    return _next_sequence(task_dir)
 
 
 def add_comms(
