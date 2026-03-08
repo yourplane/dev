@@ -42,6 +42,30 @@ PLAN_TEST_BASH_DELIMITER = "\n---BASH SCRIPT---\n"
 PLAN_TEST_SCRIPT_PREFIX = "run-plan.sh"
 PLAN_TEST_STREAM_LOG_PREFIX = "dev-plan-test-stream-"
 
+DEV_TEST_RUN_LOG_PREFIX = "dev-test-run-"
+DEV_TEST_STREAM_LOG_PREFIX = "dev-test-stream-"
+
+
+def _latest_run_plan_script(task_dir: Path) -> Path | None:
+    """Return path to the latest *-run-plan.sh in comms (last in index order)."""
+    cdir = comms_dir(task_dir)
+    if not cdir.exists():
+        return None
+    order = read_index(task_dir)
+    # Last occurrence in index that is a run-plan script (matches plan-test naming).
+    script_names = [n for n in order if n.endswith("run-plan.sh") and "-run-plan" in n]
+    if not script_names:
+        return None
+    return cdir / script_names[-1]
+
+
+def _test_results_prompt(run_log_rel: str, script_exit_code: int | None) -> str:
+    """Build prompt for test-results agent; run_log_rel is path relative to task root."""
+    exit_note = ""
+    if script_exit_code is not None and script_exit_code != 0:
+        exit_note = f" The test script exited with code {script_exit_code}.\n\n"
+    return f"""Read the test run output from the file at {run_log_rel} (relative to the task workspace).{exit_note}Analyze the results: explain what passed or failed and why. Propose any fixes needed. Output only a single markdown document (no preamble or meta-commentary)."""
+
 
 def _task_dir_from_options(
     task_name: str | None, tasks_dir: Path
@@ -263,6 +287,55 @@ def _run_plan_test_mode(
         with open(index_path(task_dir), "a", encoding="utf-8") as f:
             f.write(script_filename + "\n")
         click.echo(click.style(f"Executable script written to {script_path.relative_to(task_dir)}", dim=True))
+
+
+def _run_test_mode(
+    task_path: Path | None,
+    agent_cmd: str,
+) -> None:
+    """Run latest comms test script, save output to .logs, then agent analyzes and writes comms."""
+    task_dir = _resolve_task_dir(task_path)
+    cdir = comms_dir(task_dir)
+    if not cdir.exists():
+        click.echo("Comms directory not found. Run from a task directory or use --task.", err=True)
+        raise SystemExit(1)
+    script_path = _latest_run_plan_script(task_dir)
+    if script_path is None or not script_path.exists():
+        click.echo(
+            "No test script found in comms (expecting *-run-plan.sh). Run dev plan-test first.",
+            err=True,
+        )
+        raise SystemExit(1)
+    result = subprocess.run(
+        [str(script_path)],
+        cwd=str(task_dir),
+        capture_output=True,
+        text=True,
+    )
+    run_output = (result.stdout or "") + ("\n" if (result.stdout or result.stderr) else "") + (result.stderr or "")
+    logs_dir = task_dir / PLAN_LOGS_DIR
+    logs_dir.mkdir(exist_ok=True)
+    run_log_name = f"{DEV_TEST_RUN_LOG_PREFIX}{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.log"
+    run_log_path = logs_dir / run_log_name
+    run_log_path.write_text(run_output, encoding="utf-8")
+    run_log_rel = f"{PLAN_LOGS_DIR}/{run_log_name}"
+    if result.returncode != 0:
+        click.echo(f"Test script exited with code {result.returncode}. Run log: {run_log_path}", err=True)
+    else:
+        click.echo(f"Run log: {run_log_path}")
+    prompt = _test_results_prompt(run_log_rel, result.returncode)
+    task_dir_after, streamed_output = _run_agent_ask_stream_json(
+        task_path,
+        agent_cmd,
+        prompt,
+        DEV_TEST_STREAM_LOG_PREFIX,
+        "Starting test analysis (stream-json mode)...",
+        "Agent test analysis timed out.",
+    )
+    content = _extract_plan_from_stream_json(streamed_output)
+    comms_path = add_comms(task_dir_after, "agent", content, kind="test-results")
+    click.echo()
+    click.echo(click.style(f"Test results written to {comms_path.relative_to(task_dir_after)}", dim=True))
 
 
 def _run_implement_mode(
@@ -832,3 +905,27 @@ def implement_cmd(
 ) -> None:
     """Run headless implement mode: agent implements the task, commits, then fetches, merges origin/main, and pushes."""
     _run_implement_mode(task_path=task_path, agent_cmd=agent_cmd)
+
+
+@click.command("test")
+@click.option(
+    "--task",
+    "-t",
+    "task_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to task directory. If not set, use current working directory.",
+)
+@click.option(
+    "--agent-cmd",
+    type=str,
+    default=AGENT_CMD,
+    envvar="DEV_AGENT_CMD",
+    help="Command to run for the agent (e.g. cursor).",
+)
+def test_cmd(
+    task_path: Path | None,
+    agent_cmd: str,
+) -> None:
+    """Run the latest comms test script, save output to .logs, then run an agent to analyze results and add a markdown report to comms."""
+    _run_test_mode(task_path=task_path, agent_cmd=agent_cmd)

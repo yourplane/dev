@@ -14,6 +14,7 @@ from dev.commands import (
     plan_test_cmd,
     repos_group,
     start_task,
+    test_cmd,
 )
 
 
@@ -32,6 +33,7 @@ main.add_command(activate_path)
 main.add_command(plan_implement_group)
 main.add_command(plan_test_cmd)
 main.add_command(implement_cmd)
+main.add_command(test_cmd)
 main.add_command(create_pr)
 main.add_command(comms_group)
 main.add_command(repos_group)
