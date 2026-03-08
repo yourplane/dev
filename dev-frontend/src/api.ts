@@ -76,6 +76,13 @@ export const api = {
     return request(`/tasks/${encodeURIComponent(taskName)}/comms`);
   },
 
+  postTaskComms(taskName: string, content: string): Promise<{ filename: string }> {
+    return request(`/tasks/${encodeURIComponent(taskName)}/comms`, {
+      method: 'POST',
+      body: JSON.stringify({ content }),
+    });
+  },
+
   async getTaskCommsFile(taskName: string, filename: string): Promise<string> {
     const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/comms/${encodeURIComponent(filename)}`;
     const res = await fetch(url);

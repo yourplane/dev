@@ -274,37 +274,53 @@ function TaskCommsPage() {
   const [contents, setContents] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [commentText, setCommentText] = useState('')
+  const [posting, setPosting] = useState(false)
+  const [postError, setPostError] = useState<string | null>(null)
+
+  const loadComms = useCallback(async () => {
+    setError(null)
+    setLoading(true)
+    try {
+      const res = await api.getTaskCommsList(taskName)
+      setFiles(res.files)
+      const pairs = await Promise.all(
+        res.files.map((filename) =>
+          api.getTaskCommsFile(taskName, filename).then((text) => ({ filename, text }))
+        )
+      )
+      const map: Record<string, string> = {}
+      for (const { filename, text } of pairs) {
+        map[filename] = text
+      }
+      setContents(map)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [taskName])
 
   useEffect(() => {
-    let cancelled = false
-    setLoading(true)
-    setError(null)
-    api.getTaskCommsList(taskName)
-      .then((res) => {
-        if (cancelled) return
-        setFiles(res.files)
-        return Promise.all(
-          res.files.map((filename) =>
-            api.getTaskCommsFile(taskName, filename).then((text) => ({ filename, text }))
-          )
-        )
-      })
-      .then((pairs) => {
-        if (cancelled || !pairs) return
-        const map: Record<string, string> = {}
-        for (const { filename, text } of pairs) {
-          map[filename] = text
-        }
-        setContents(map)
-      })
-      .catch((e) => {
-        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => { cancelled = true }
-  }, [taskName])
+    loadComms()
+  }, [loadComms])
+
+  const handlePostComment = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const content = commentText.trim()
+    if (!content) return
+    setPostError(null)
+    setPosting(true)
+    try {
+      await api.postTaskComms(taskName, content)
+      setCommentText('')
+      await loadComms()
+    } catch (e) {
+      setPostError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPosting(false)
+    }
+  }
 
   if (loading) return <p className="status">Loading comms…</p>
   if (error) {
@@ -320,6 +336,24 @@ function TaskCommsPage() {
     <section className="task-comms">
       <h2>Comms: {taskName}</h2>
       <p><Link to="/">← Back to tasks</Link></p>
+      <form className="comms-post-form" onSubmit={handlePostComment}>
+        <label>
+          Add comment
+          <textarea
+            value={commentText}
+            onChange={(e) => setCommentText(e.target.value)}
+            placeholder="Write a comment…"
+            rows={3}
+            disabled={posting}
+          />
+        </label>
+        {postError && <p className="inline-error">{postError}</p>}
+        <div className="form-actions">
+          <button type="submit" disabled={posting || !commentText.trim()}>
+            {posting ? 'Posting…' : 'Post comment'}
+          </button>
+        </div>
+      </form>
       {files.length === 0 ? (
         <p className="empty">No comms yet for this task.</p>
       ) : (
