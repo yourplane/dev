@@ -15,4 +15,4 @@ dev = ["tox", "pytest", "pytest-cov", "ruff"]
 dev = { workspace = true }
 
 [tool.uv.workspace]
-members = ["dev-sdk", "cli"]
+members = ["dev-sdk", "dev-cli"]

@@ -2,7 +2,7 @@
 
 CLI for managing AI developer tasks with Cursor agent integration. Tasks live under `~/tasks` (or `DEV_TASKS_DIR`).
 
-This repo is a uv workspace: **dev-sdk** (shared logic) and **cli** (the `dev` command). The repo root is not an installable package.
+This repo is a uv workspace: **dev-sdk** (shared logic) and **dev-cli** (the `dev` command). The repo root is not an installable package.
 
 ## Install
 
@@ -20,7 +20,7 @@ uv sync
 
 ```bash
 cd /path/to/dev
-pip install -e dev-sdk -e cli
+pip install -e dev-sdk -e dev-cli
 dev --help
 ```
 
@@ -29,7 +29,7 @@ For testing (from repo root; use the uv venv so workspace packages are available
 ```bash
 uv sync --extra dev
 .venv/bin/python -m pytest dev-sdk/tests -v
-.venv/bin/python -m pytest cli/tests -v
+.venv/bin/python -m pytest dev-cli/tests -v
 ```
 
 ## Usage
