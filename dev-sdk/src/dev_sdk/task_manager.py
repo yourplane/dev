@@ -10,9 +10,24 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from dev.comms import add_comms, comms_dir
+from dev_sdk.comms import add_comms, comms_dir
 
 ProgressCallback = Callable[[str], None]
+
+
+def slugify(title: str) -> str:
+    """Convert task title to a safe directory name."""
+    import re
+    s = title.lower().strip()
+    s = re.sub(r"[^\w\s-]", "", s)
+    s = re.sub(r"[-\s]+", "-", s)
+    return s or "task"
+
+
+def repo_name_from_url(repo_url: str) -> str:
+    """Derive repo directory name from URL (e.g. .../repo.git -> repo)."""
+    name = repo_url.rstrip("/").split("/")[-1]
+    return name.removesuffix(".git") if name.endswith(".git") else name or "repo"
 
 
 class TaskManager:
@@ -143,7 +158,7 @@ class TaskManager:
         on_progress: ProgressCallback | None = None,
     ) -> None:
         """Create and checkout a feature branch in the cloned repo (branch name: task/<task_name>)."""
-        repo_name = self._repo_name_from_url(repo_url)
+        repo_name = repo_name_from_url(repo_url)
         repo_path = task_dir / repo_name
         branch_name = f"task/{task_name}"
         if on_progress:
@@ -157,17 +172,11 @@ class TaskManager:
         if on_progress:
             on_progress("Feature branch created.")
 
-    @staticmethod
-    def _repo_name_from_url(repo_url: str) -> str:
-        """Derive repo directory name from URL (e.g. .../repo.git -> repo)."""
-        name = repo_url.rstrip("/").split("/")[-1]
-        return name.removesuffix(".git") if name.endswith(".git") else name or "repo"
-
     def _setup_pyenv(
         self, task_dir: Path, repo_url: str, on_progress: ProgressCallback | None = None
     ) -> None:
         """Create a venv, install the cloned repo in editable mode, and add a Cursor rule for testing."""
-        repo_name = self._repo_name_from_url(repo_url)
+        repo_name = repo_name_from_url(repo_url)
         repo_path = task_dir / repo_name
 
         if not (repo_path / "pyproject.toml").exists() and not (
