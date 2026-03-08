@@ -401,7 +401,6 @@ def _run_implement_mode(
         IMPLEMENT_MODE_PROMPT,
     ]
     buffer: list[str] = []
-    buffer_lock = threading.Lock()
     read_error: list[BaseException | None] = [None]
     logs_dir = task_dir / PLAN_LOGS_DIR
     logs_dir.mkdir(exist_ok=True)
@@ -441,8 +440,7 @@ def _run_implement_mode(
                         else:
                             sys.stdout.write(formatted)
                         sys.stdout.flush()
-                    with buffer_lock:
-                        buffer.append(decoded)
+                    buffer.append(decoded)
         except Exception as e:
             read_error[0] = e
 
@@ -461,20 +459,8 @@ def _run_implement_mode(
         click.echo(f"Agent command not found: {agent_cmd}", err=True)
         raise SystemExit(1)
 
-    reader = threading.Thread(target=read_stdout, args=(proc,))
-    reader.start()
-    reader.join(timeout=300)
-    if reader.is_alive():
-        proc.kill()
-        proc.wait()
-        click.echo("Agent implement mode timed out.", err=True)
-        raise SystemExit(1)
-
-    try:
-        proc.wait(timeout=5)
-    except subprocess.TimeoutExpired:
-        proc.kill()
-        proc.wait()
+    read_stdout(proc)
+    proc.wait()
 
     stderr_output = ""
     if proc.stderr:
