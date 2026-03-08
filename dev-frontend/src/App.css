@@ -270,3 +270,36 @@
   background: #fff;
   border-top: 1px solid #eee;
 }
+
+/* Post comment form at bottom of feed; same width as comms entries */
+.comms-post-form {
+  margin-top: 1.25rem;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  overflow: hidden;
+  padding: 0.75rem;
+}
+
+.comms-post-form-label {
+  display: block;
+  margin: 0 0 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.comms-post-form-textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font: inherit;
+  font-size: 0.9rem;
+  resize: vertical;
+  min-height: 4rem;
+}
+
+.comms-post-form .form-actions {
+  margin-top: 0.75rem;
+}

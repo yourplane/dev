@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from dev_sdk.comms import comms_dir, read_index
+from dev_sdk.comms import add_comms, comms_dir, read_index
 from dev_sdk.repo_config import load_repos, resolve_repo
 from dev_sdk.task_manager import TaskManager
 
@@ -72,6 +72,14 @@ class ArchiveTaskResponse(BaseModel):
 
 class ListCommsResponse(BaseModel):
     files: list[str]
+
+
+class PostCommsRequest(BaseModel):
+    content: str = Field(..., min_length=1, description="Comment content")
+
+
+class PostCommsResponse(BaseModel):
+    filename: str
 
 
 def _task_dir(task_name: str) -> Path:
@@ -153,6 +161,14 @@ def list_task_comms(task_name: str) -> ListCommsResponse:
     task_dir = _task_dir(task_name)
     files = read_index(task_dir)
     return ListCommsResponse(files=files)
+
+
+@app.post("/tasks/{task_name}/comms", response_model=PostCommsResponse, status_code=201)
+def post_task_comms(task_name: str, body: PostCommsRequest) -> PostCommsResponse:
+    """Append a user comment to the task comms. Returns the new filename."""
+    task_dir = _task_dir(task_name)
+    path = add_comms(task_dir, "user", body.content.strip())
+    return PostCommsResponse(filename=path.name)
 
 
 @app.get("/tasks/{task_name}/comms/{filename}", response_class=PlainTextResponse)
