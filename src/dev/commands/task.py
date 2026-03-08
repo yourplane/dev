@@ -30,7 +30,16 @@ PLAN_IMPLEMENT_STREAM_LOG_PREFIX = "dev-plan-stream-"
 IMPLEMENT_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Implement the task and commit when done. When done, in the git project directory (the repo subdirectory under the task root, not the task root itself): fetch from origin, merge origin/main into the current branch, then push the current branch to origin."""
 IMPLEMENT_STREAM_LOG_PREFIX = "dev-implement-stream-"
 
-PLAN_TEST_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Produce a manual, end-to-end testing plan (markdown only, no preamble). Include feature testing (steps to verify the task's goals) and regression testing (steps to verify existing behavior is unchanged). The plan is Unix-only; Windows is out of scope. All commands in the plan must use the CLI installed in the task's virtual environment: from the task root use .venv/<task_name>/bin/<command> (or activate the venv first). This is not unit or automated test code; it is a step-by-step manual test plan. Output only the plan as markdown."""
+PLAN_TEST_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Produce two artifacts in this exact order, with no other text before or after:
+
+1) A manual, end-to-end testing plan in markdown. It must validate all changes from the current task. Include feature testing (steps to verify the task's goals) and regression testing (steps to verify existing behavior is unchanged). The plan is Unix-only; Windows is out of scope. Every command in the plan must use the task's virtual environment: from the task root use .venv/<task_name>/bin/<command> (or activate the venv first). This is not unit or automated test code; it is a step-by-step manual test plan. Output only the plan as markdown.
+
+2) On a new line, the exact delimiter line: ---BASH SCRIPT---
+
+3) An executable bash script that runs the plan. The script must: use shebang #!/usr/bin/env bash; use set -e; run each step from the plan (using .venv/<task_name>/bin/... for CLI and tests); print progress (e.g. Step 1/N: ...); exit non-zero with a clear message if a step fails; print a final success message. Output only the script source (no markdown code fence)."""
+
+PLAN_TEST_BASH_DELIMITER = "\n---BASH SCRIPT---\n"
+PLAN_TEST_SCRIPT_FILENAME = "run-plan.sh"
 PLAN_TEST_STREAM_LOG_PREFIX = "dev-plan-test-stream-"
 
 
@@ -218,7 +227,7 @@ def _run_plan_test_mode(
     task_path: Path | None,
     agent_cmd: str,
 ) -> None:
-    """Run agent to generate a manual E2E testing plan; output is written to comms only."""
+    """Run agent to generate a manual E2E testing plan and executable bash script; both written to comms."""
     task_dir, streamed_output = _run_agent_ask_stream_json(
         task_path,
         agent_cmd,
@@ -227,10 +236,27 @@ def _run_plan_test_mode(
         "Starting plan-test (stream-json mode)...",
         "Agent plan-test mode timed out.",
     )
-    plan_text = _extract_plan_from_stream_json(streamed_output)
+    full_output = _extract_plan_from_stream_json(streamed_output)
+    if PLAN_TEST_BASH_DELIMITER in full_output:
+        plan_text, _, script_block = full_output.partition(PLAN_TEST_BASH_DELIMITER)
+        plan_text = plan_text.strip()
+        script_content = script_block.strip()
+    else:
+        plan_text = full_output.strip()
+        script_content = None
+
+    if script_content:
+        plan_text += "\n\n## How to run\n\nExecute: `./comms/run-plan.sh` or `bash comms/run-plan.sh`\n"
+
     comms_path = add_comms(task_dir, "agent", plan_text, kind="plan-test")
     click.echo()
     click.echo(click.style(f"Testing plan written to {comms_path.relative_to(task_dir)}", dim=True))
+
+    if script_content:
+        script_path = comms_dir(task_dir) / PLAN_TEST_SCRIPT_FILENAME
+        script_path.write_text(script_content.strip() + "\n", encoding="utf-8")
+        script_path.chmod(0o755)
+        click.echo(click.style(f"Executable script written to {script_path.relative_to(task_dir)}", dim=True))
 
 
 def _run_implement_mode(
