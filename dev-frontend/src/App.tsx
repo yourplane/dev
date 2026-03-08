@@ -336,24 +336,6 @@ function TaskCommsPage() {
     <section className="task-comms">
       <h2>Comms: {taskName}</h2>
       <p><Link to="/">← Back to tasks</Link></p>
-      <form className="comms-post-form" onSubmit={handlePostComment}>
-        <label>
-          Add comment
-          <textarea
-            value={commentText}
-            onChange={(e) => setCommentText(e.target.value)}
-            placeholder="Write a comment…"
-            rows={3}
-            disabled={posting}
-          />
-        </label>
-        {postError && <p className="inline-error">{postError}</p>}
-        <div className="form-actions">
-          <button type="submit" disabled={posting || !commentText.trim()}>
-            {posting ? 'Posting…' : 'Post comment'}
-          </button>
-        </div>
-      </form>
       {files.length === 0 ? (
         <p className="empty">No comms yet for this task.</p>
       ) : (
@@ -366,6 +348,23 @@ function TaskCommsPage() {
           ))}
         </div>
       )}
+      <form className="comms-post-form" onSubmit={handlePostComment}>
+        <label className="comms-post-form-label">Add comment</label>
+        <textarea
+          className="comms-post-form-textarea"
+          value={commentText}
+          onChange={(e) => setCommentText(e.target.value)}
+          placeholder="Write a comment…"
+          rows={3}
+          disabled={posting}
+        />
+        {postError && <p className="inline-error">{postError}</p>}
+        <div className="form-actions">
+          <button type="submit" disabled={posting || !commentText.trim()}>
+            {posting ? 'Posting…' : 'Post comment'}
+          </button>
+        </div>
+      </form>
     </section>
   )
 }
