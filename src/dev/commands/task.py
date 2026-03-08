@@ -289,11 +289,17 @@ def _run_plan_test_mode(
         click.echo(click.style(f"Executable script written to {script_path.relative_to(task_dir)}", dim=True))
 
 
+DEV_TEST_ACTIVE_ENV = "DEV_TEST_ACTIVE"
+
+
 def _run_test_mode(
     task_path: Path | None,
     agent_cmd: str,
 ) -> None:
     """Run latest comms test script, save output to .logs, then agent analyzes and writes comms."""
+    if os.environ.get(DEV_TEST_ACTIVE_ENV):
+        click.echo("Nested dev test skipped (already running).")
+        raise SystemExit(0)
     task_dir = _resolve_task_dir(task_path)
     cdir = comms_dir(task_dir)
     if not cdir.exists():
@@ -311,6 +317,7 @@ def _run_test_mode(
     run_log_name = f"{DEV_TEST_RUN_LOG_PREFIX}{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.log"
     run_log_path = logs_dir / run_log_name
     run_output_parts: list[str] = []
+    script_env = {**os.environ, DEV_TEST_ACTIVE_ENV: "1"}
     with open(run_log_path, "w", encoding="utf-8") as log_file:
         proc = subprocess.Popen(
             [str(script_path)],
@@ -319,6 +326,7 @@ def _run_test_mode(
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            env=script_env,
         )
         assert proc.stdout is not None
         for line in proc.stdout:
