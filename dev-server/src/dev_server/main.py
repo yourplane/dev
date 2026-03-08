@@ -6,8 +6,10 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
+from dev_sdk.comms import comms_dir, read_index
 from dev_sdk.repo_config import load_repos, resolve_repo
 from dev_sdk.task_manager import TaskManager
 
@@ -66,6 +68,21 @@ class ListTasksResponse(BaseModel):
 
 class ArchiveTaskResponse(BaseModel):
     archived_to: str
+
+
+class ListCommsResponse(BaseModel):
+    files: list[str]
+
+
+def _task_dir(task_name: str) -> Path:
+    """Return task directory path. Raises HTTPException 404 if task does not exist or path is invalid."""
+    if not task_name or "/" in task_name or "\\" in task_name or task_name in (".", ".."):
+        raise HTTPException(status_code=404, detail="Invalid task name")
+    root = _tasks_root()
+    task_dir = (root / task_name).resolve()
+    if not task_dir.is_dir() or (root not in task_dir.parents and task_dir != root):
+        raise HTTPException(status_code=404, detail=f"Task not found: {task_name}")
+    return task_dir
 
 
 # --- Endpoints ---
@@ -128,3 +145,24 @@ def archive_task(task_name: str) -> ArchiveTaskResponse:
         return ArchiveTaskResponse(archived_to=str(dest))
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/tasks/{task_name}/comms", response_model=ListCommsResponse)
+def list_task_comms(task_name: str) -> ListCommsResponse:
+    """List comms filenames for a task in index order."""
+    task_dir = _task_dir(task_name)
+    files = read_index(task_dir)
+    return ListCommsResponse(files=files)
+
+
+@app.get("/tasks/{task_name}/comms/{filename}", response_class=PlainTextResponse)
+def get_task_comms_file(task_name: str, filename: str) -> str:
+    """Return raw content of a single comms file. Plain text."""
+    if not filename or "/" in filename or "\\" in filename or filename in (".", ".."):
+        raise HTTPException(status_code=404, detail="Invalid filename")
+    task_dir = _task_dir(task_name)
+    cdir = comms_dir(task_dir)
+    path = cdir / filename
+    if not path.is_file() or path.resolve().parent != cdir.resolve():
+        raise HTTPException(status_code=404, detail="File not found")
+    return path.read_text(encoding="utf-8")

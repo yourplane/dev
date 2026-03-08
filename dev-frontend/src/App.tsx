@@ -1,11 +1,30 @@
 import { useState, useEffect, useCallback } from 'react'
-import { api } from './api'
+import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
+import { api, apiBaseUrl } from './api'
 import './App.css'
 
-type View = 'list' | 'create';
+function Layout() {
+  return (
+    <div className="app">
+      <header className="header">
+        <h1 className="logo"><Link to="/">Dev</Link></h1>
+        <nav>
+          <Link to="/" className="nav-link">Tasks</Link>
+          <Link to="/new" className="nav-link">New task</Link>
+        </nav>
+      </header>
+      <main className="main">
+        <Routes>
+          <Route index element={<TaskListPage />} />
+          <Route path="new" element={<CreateTaskPage />} />
+          <Route path="task/:taskName" element={<TaskCommsPage />} />
+        </Routes>
+      </main>
+    </div>
+  )
+}
 
-export default function App() {
-  const [view, setView] = useState<View>('list')
+function TaskListPage() {
   const [tasks, setTasks] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -28,46 +47,12 @@ export default function App() {
   }, [loadTasks])
 
   return (
-    <div className="app">
-      <header className="header">
-        <h1 className="logo">Dev</h1>
-        <nav>
-          <button
-            type="button"
-            className={view === 'list' ? 'active' : ''}
-            onClick={() => setView('list')}
-          >
-            Tasks
-          </button>
-          <button
-            type="button"
-            className={view === 'create' ? 'active' : ''}
-            onClick={() => setView('create')}
-          >
-            New task
-          </button>
-        </nav>
-      </header>
-      <main className="main">
-        {view === 'list' && (
-          <TaskList
-            tasks={tasks}
-            loading={loading}
-            error={error}
-            onRefresh={loadTasks}
-          />
-        )}
-        {view === 'create' && (
-          <CreateTaskForm
-            onCreated={() => {
-              setView('list')
-              loadTasks()
-            }}
-            onCancel={() => setView('list')}
-          />
-        )}
-      </main>
-    </div>
+    <TaskList
+      tasks={tasks}
+      loading={loading}
+      error={error}
+      onRefresh={loadTasks}
+    />
   )
 }
 
@@ -103,8 +88,12 @@ function TaskList({
   if (error) {
     return (
       <div className="status error">
+        <p className="error-title">Could not connect to dev-server</p>
         <p>{error}</p>
-        <p className="hint">Ensure dev-server is running (e.g. <code>uv run --project dev-server uvicorn dev_server.main:app --reload</code>).</p>
+        <p className="hint">
+          Ensure dev-server is running from the dev repo root: <code>uv run --project dev-server uvicorn dev_server.main:app --reload</code>.
+          The client uses <code>{apiBaseUrl}</code> (set via <code>VITE_DEV_SERVER_URL</code> in <code>.env</code> if needed).
+        </p>
         <button type="button" onClick={onRefresh}>Retry</button>
       </div>
     )
@@ -120,7 +109,7 @@ function TaskList({
         <ul>
           {tasks.map((name) => (
             <li key={name} className="task-row">
-              <span className="task-name">{name}</span>
+              <Link to={`/task/${encodeURIComponent(name)}`} className="task-name">{name}</Link>
               <button
                 type="button"
                 className="archive-btn"
@@ -134,6 +123,16 @@ function TaskList({
         </ul>
       )}
     </section>
+  )
+}
+
+function CreateTaskPage() {
+  const navigate = useNavigate()
+  return (
+    <CreateTaskForm
+      onCreated={() => navigate('/')}
+      onCancel={() => navigate('/')}
+    />
   )
 }
 
@@ -259,5 +258,88 @@ function CreateTaskForm({
         Repo shorthands are configured via the CLI: <code>dev repos add &lt;name&gt; &lt;url&gt;</code> (stored in <code>~/.config/dev/repos.json</code>).
       </p>
     </section>
+  )
+}
+
+function TaskCommsPage() {
+  const { taskName } = useParams<{ taskName: string }>()
+  const navigate = useNavigate()
+
+  if (!taskName) {
+    navigate('/')
+    return null
+  }
+
+  const [files, setFiles] = useState<string[]>([])
+  const [contents, setContents] = useState<Record<string, string>>({})
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    api.getTaskCommsList(taskName)
+      .then((res) => {
+        if (cancelled) return
+        setFiles(res.files)
+        return Promise.all(
+          res.files.map((filename) =>
+            api.getTaskCommsFile(taskName, filename).then((text) => ({ filename, text }))
+          )
+        )
+      })
+      .then((pairs) => {
+        if (cancelled || !pairs) return
+        const map: Record<string, string> = {}
+        for (const { filename, text } of pairs) {
+          map[filename] = text
+        }
+        setContents(map)
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : String(e))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [taskName])
+
+  if (loading) return <p className="status">Loading comms…</p>
+  if (error) {
+    return (
+      <section className="task-comms">
+        <p className="inline-error">{error}</p>
+        <p><Link to="/">← Back to tasks</Link></p>
+      </section>
+    )
+  }
+
+  return (
+    <section className="task-comms">
+      <h2>Comms: {taskName}</h2>
+      <p><Link to="/">← Back to tasks</Link></p>
+      {files.length === 0 ? (
+        <p className="empty">No comms yet for this task.</p>
+      ) : (
+        <div className="comms-history">
+          {files.map((filename) => (
+            <div key={filename} className="comms-entry">
+              <div className="comms-filename">{filename}</div>
+              <pre className="comms-content">{contents[filename] ?? '(loading…)'}</pre>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Layout />
+    </BrowserRouter>
   )
 }
