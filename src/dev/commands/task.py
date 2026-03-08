@@ -289,7 +289,8 @@ def _run_plan_test_mode(
         click.echo(click.style(f"Executable script written to {script_path.relative_to(task_dir)}", dim=True))
 
 
-DEV_TEST_ACTIVE_ENV = "DEV_TEST_ACTIVE"
+DEV_TEST_LEVEL_ENV = "DEV_TEST_LEVEL"
+DEV_TEST_MAX_LEVEL = 2  # Allow one nested run (level 0 and 1); level 2+ skipped
 
 
 def _run_test_mode(
@@ -297,8 +298,12 @@ def _run_test_mode(
     agent_cmd: str,
 ) -> None:
     """Run latest comms test script, save output to .logs, then agent analyzes and writes comms."""
-    if os.environ.get(DEV_TEST_ACTIVE_ENV):
-        click.echo("Nested dev test skipped (already running).")
+    try:
+        current_level = int(os.environ.get(DEV_TEST_LEVEL_ENV, "0"))
+    except ValueError:
+        current_level = 0
+    if current_level >= DEV_TEST_MAX_LEVEL:
+        click.echo("Nested dev test skipped (max depth reached).")
         raise SystemExit(0)
     task_dir = _resolve_task_dir(task_path)
     cdir = comms_dir(task_dir)
@@ -317,7 +322,7 @@ def _run_test_mode(
     run_log_name = f"{DEV_TEST_RUN_LOG_PREFIX}{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.log"
     run_log_path = logs_dir / run_log_name
     run_output_parts: list[str] = []
-    script_env = {**os.environ, DEV_TEST_ACTIVE_ENV: "1"}
+    script_env = {**os.environ, DEV_TEST_LEVEL_ENV: str(current_level + 1)}
     with open(run_log_path, "w", encoding="utf-8") as log_file:
         proc = subprocess.Popen(
             [str(script_path)],
