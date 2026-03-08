@@ -36,7 +36,7 @@ PLAN_TEST_MODE_PROMPT = """Read the task context in the `comms` directory (files
 
 2) On a new line, the exact delimiter line: ---BASH SCRIPT---
 
-3) An executable bash script that runs the plan. The script must be very easy for a human to read: prioritize readability over fancy printouts or verification. Use shebang #!/usr/bin/env bash and set -e. Run each step from the plan using .venv/<task_name>/bin/... for CLI invocations. The script does not need to contain verification logic—it will be run by an agent that verifies the output. Use simple checks only where they are easy to read; if verification would be too complex to encode in bash, leave a comment describing the expected output instead. Print brief progress (e.g. Step 1/N: ...) and a final success message. Output only the script source (no markdown code fence)."""
+3) An executable bash script that runs the plan. The script must be very easy for a human to read: prioritize readability over fancy printouts or verification. Use shebang #!/usr/bin/env bash and set -e. Run each step from the plan using .venv/<task_name>/bin/... for CLI invocations. The script does not need to contain verification logic—it will be run by an agent that verifies the output. Use simple checks only where they are easy to read; if verification would be too complex to encode in bash, leave a comment describing the expected output instead. The script should be dead-simple: just straightforward bash commands, no progress counters or extra logic. Output only the script source (no markdown code fence)."""
 
 PLAN_TEST_BASH_DELIMITER = "\n---BASH SCRIPT---\n"
 PLAN_TEST_SCRIPT_FILENAME = "run-plan.sh"
