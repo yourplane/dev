@@ -499,6 +499,8 @@ def test_plan_test_runs_headless_writes_comms_only(runner: CliRunner, tmp_path: 
 
 def test_plan_test_writes_executable_script_when_delimiter_present(runner: CliRunner, tmp_path: Path) -> None:
     """When agent output contains ---BASH SCRIPT---, plan-test writes comms/run-plan.sh and makes it executable."""
+    import dev.commands.task as task_module
+
     with runner.isolated_filesystem(tmp_path):
         cwd = Path.cwd()
         (cwd / "agent-chat-id").write_text("chat-plan-test")
@@ -513,8 +515,16 @@ def test_plan_test_writes_executable_script_when_delimiter_present(runner: CliRu
         mock_proc.stderr.read.return_value = ""
         mock_proc.returncode = 0
         mock_proc.wait.return_value = None
-        with patch("dev.commands.task.subprocess.Popen") as mock_popen:
-            mock_popen.return_value = mock_proc
+        real_popen = task_module.subprocess.Popen
+
+        def selective_popen(*args, **kwargs):
+            # Only mock the agent (cursor) invocation; let bash -n use real Popen
+            argv = args[0] if args and args[0] else []
+            if isinstance(argv, list) and "--output-format" in argv:
+                return mock_proc
+            return real_popen(*args, **kwargs)
+
+        with patch.object(task_module.subprocess, "Popen", side_effect=selective_popen):
             result = runner.invoke(main, ["plan-test"])
     assert result.exit_code == 0
     order = [n.strip() for n in (cwd / "comms" / "index.txt").read_text().splitlines() if n.strip()]
