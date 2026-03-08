@@ -306,24 +306,36 @@ def _run_test_mode(
             err=True,
         )
         raise SystemExit(1)
-    result = subprocess.run(
-        [str(script_path)],
-        cwd=str(task_dir),
-        capture_output=True,
-        text=True,
-    )
-    run_output = (result.stdout or "") + ("\n" if (result.stdout or result.stderr) else "") + (result.stderr or "")
     logs_dir = task_dir / PLAN_LOGS_DIR
     logs_dir.mkdir(exist_ok=True)
     run_log_name = f"{DEV_TEST_RUN_LOG_PREFIX}{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.log"
     run_log_path = logs_dir / run_log_name
-    run_log_path.write_text(run_output, encoding="utf-8")
+    run_output_parts: list[str] = []
+    with open(run_log_path, "w", encoding="utf-8") as log_file:
+        proc = subprocess.Popen(
+            [str(script_path)],
+            cwd=str(task_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        )
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            log_file.write(line)
+            if line and not line.endswith("\n"):
+                log_file.write("\n")
+            log_file.flush()
+            run_output_parts.append(line)
+            click.echo(line, nl=False)
+        proc.wait()
+    run_output = "".join(run_output_parts)
     run_log_rel = f"{PLAN_LOGS_DIR}/{run_log_name}"
-    if result.returncode != 0:
-        click.echo(f"Test script exited with code {result.returncode}. Run log: {run_log_path}", err=True)
+    if proc.returncode != 0:
+        click.echo(f"Test script exited with code {proc.returncode}. Run log: {run_log_path}", err=True)
     else:
         click.echo(f"Run log: {run_log_path}")
-    prompt = _test_results_prompt(run_log_rel, result.returncode)
+    prompt = _test_results_prompt(run_log_rel, proc.returncode)
     task_dir_after, streamed_output = _run_agent_ask_stream_json(
         task_path,
         agent_cmd,

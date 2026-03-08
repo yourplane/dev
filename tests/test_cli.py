@@ -584,25 +584,28 @@ def test_test_runs_script_then_agent_writes_comms(runner: CliRunner, tmp_path: P
         script = cwd / "comms" / "002-run-plan.sh"
         script.write_text("#!/usr/bin/env bash\necho 'test output'\n")
         script.chmod(0o755)
-        mock_run = MagicMock(return_value=MagicMock(returncode=0, stdout="test output\n", stderr=""))
+        script_proc = MagicMock()
+        script_proc.stdout = iter(["test output\n"])
+        script_proc.returncode = 0
+        script_proc.wait.return_value = None
         streamed_line = json.dumps({"type": "result", "result": "# Test results\n\nAll passed."}) + "\n"
-        mock_proc = MagicMock()
-        mock_proc.stdout = iter([streamed_line])
-        mock_proc.stderr.read.return_value = ""
-        mock_proc.returncode = 0
-        mock_proc.wait.return_value = None
-        with patch("dev.commands.task.subprocess.run", mock_run):
-            with patch("dev.commands.task.subprocess.Popen") as mock_popen:
-                mock_popen.return_value = mock_proc
-                result = runner.invoke(main, ["test"])
+        agent_proc = MagicMock()
+        agent_proc.stdout = iter([streamed_line])
+        agent_proc.stderr.read.return_value = ""
+        agent_proc.returncode = 0
+        agent_proc.wait.return_value = None
+        with patch("dev.commands.task.subprocess.Popen", side_effect=[script_proc, agent_proc]) as mock_popen:
+            result = runner.invoke(main, ["test"])
     assert result.exit_code == 0
-    assert mock_run.called
-    run_args = mock_run.call_args[0][0]
+    assert mock_popen.call_count >= 2
+    # First Popen is the test script
+    run_args = mock_popen.call_args_list[0][0][0]
     assert str(script) in run_args or script.name in str(run_args)
     logs = list((cwd / ".logs").glob("dev-test-run-*.log"))
     assert len(logs) == 1
     assert "test output" in logs[0].read_text()
-    argv = mock_popen.call_args[0][0]
+    # Second Popen is the agent
+    argv = mock_popen.call_args_list[1][0][0]
     assert "--mode" in argv and "ask" in argv
     assert "test-results" in str(mock_popen.call_args) or ".logs" in str(argv)
     order = [n.strip() for n in (cwd / "comms" / "index.txt").read_text().splitlines() if n.strip()]
@@ -621,19 +624,20 @@ def test_test_uses_latest_script_when_multiple(runner: CliRunner, tmp_path: Path
         (cwd / "comms" / "002-run-plan.sh").chmod(0o755)
         (cwd / "comms" / "003-run-plan.sh").write_text("#!/bin/bash\necho three\n")
         (cwd / "comms" / "003-run-plan.sh").chmod(0o755)
-        mock_run = MagicMock(return_value=MagicMock(returncode=0, stdout="three\n", stderr=""))
+        script_proc = MagicMock()
+        script_proc.stdout = iter(["three\n"])
+        script_proc.returncode = 0
+        script_proc.wait.return_value = None
         streamed_line = json.dumps({"type": "result", "result": "# Ok"}) + "\n"
-        mock_proc = MagicMock()
-        mock_proc.stdout = iter([streamed_line])
-        mock_proc.stderr.read.return_value = ""
-        mock_proc.returncode = 0
-        mock_proc.wait.return_value = None
-        with patch("dev.commands.task.subprocess.run", mock_run):
-            with patch("dev.commands.task.subprocess.Popen") as mock_popen:
-                mock_popen.return_value = mock_proc
-                result = runner.invoke(main, ["test"])
+        agent_proc = MagicMock()
+        agent_proc.stdout = iter([streamed_line])
+        agent_proc.stderr.read.return_value = ""
+        agent_proc.returncode = 0
+        agent_proc.wait.return_value = None
+        with patch("dev.commands.task.subprocess.Popen", side_effect=[script_proc, agent_proc]) as mock_popen:
+            result = runner.invoke(main, ["test"])
     assert result.exit_code == 0
-    run_args = mock_run.call_args[0][0]
+    run_args = mock_popen.call_args_list[0][0][0]
     assert "003-run-plan.sh" in str(run_args)
 
 
