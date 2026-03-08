@@ -133,7 +133,7 @@ def test_plan_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) 
         mock_proc.stderr.read.return_value = ""
         mock_proc.returncode = 0
         mock_proc.wait.return_value = None
-        with patch("dev_sdk.agent.subprocess.Popen") as mock_popen:
+        with patch("dev.commands.task.subprocess.Popen") as mock_popen:
             mock_popen.return_value = mock_proc
             result = runner.invoke(main, ["plan-implement"])
     assert result.exit_code == 0
@@ -199,7 +199,7 @@ def test_create_without_comment_creates_task_with_no_initial_comms(
         '{"desk": "https://github.com/maxrademacher/desk.git"}'
     )
     with patch("dev_sdk.repo_config.CONFIG_FILE", config_file):
-        with patch("dev_sdk.agent.subprocess.run") as mock_run:
+        with patch("dev.commands.task.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="chat-id\n")
             result = runner.invoke(
                 main,
@@ -230,7 +230,7 @@ def test_create_with_shorthand_uses_resolved_url(
         '{"desk": "https://github.com/maxrademacher/desk.git"}'
     )
     with patch("dev_sdk.repo_config.CONFIG_FILE", config_file):
-        with patch("dev_sdk.agent.subprocess.run") as mock_run:
+        with patch("dev.commands.task.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="chat-id\n")
             result = runner.invoke(
                 main,
@@ -264,7 +264,7 @@ def test_create_prints_progress_messages(
         '{"desk": "https://github.com/maxrademacher/desk.git"}'
     )
     with patch("dev_sdk.repo_config.CONFIG_FILE", config_file):
-        with patch("dev_sdk.agent.subprocess.run") as mock_run:
+        with patch("dev.commands.task.subprocess.run") as mock_run:
             mock_run.return_value = MagicMock(returncode=0, stdout="chat-id\n")
             result = runner.invoke(
                 main,
@@ -369,7 +369,7 @@ def test_implement_runs_headless_stream_json(runner: CliRunner, tmp_path: Path) 
         mock_proc.stderr.read.return_value = ""
         mock_proc.returncode = 0
         mock_proc.wait.return_value = None
-        with patch("dev_sdk.agent.subprocess.Popen") as mock_popen:
+        with patch("dev.commands.task.subprocess.Popen") as mock_popen:
             mock_popen.return_value = mock_proc
             result = runner.invoke(main, ["implement"])
     assert result.exit_code == 0
@@ -463,7 +463,7 @@ def test_plan_test_runs_headless_writes_comms_only(runner: CliRunner, tmp_path: 
         mock_proc.stderr.read.return_value = ""
         mock_proc.returncode = 0
         mock_proc.wait.return_value = None
-        with patch("dev_sdk.agent.subprocess.Popen") as mock_popen:
+        with patch("dev.commands.task.subprocess.Popen") as mock_popen:
             mock_popen.return_value = mock_proc
             result = runner.invoke(main, ["plan-test"])
     assert result.exit_code == 0
@@ -499,7 +499,7 @@ def test_plan_test_runs_headless_writes_comms_only(runner: CliRunner, tmp_path: 
 
 def test_plan_test_writes_executable_script_when_delimiter_present(runner: CliRunner, tmp_path: Path) -> None:
     """When agent output contains ---BASH SCRIPT---, plan-test writes a numbered run-plan.sh and makes it executable."""
-    import subprocess as real_subprocess
+    import dev.commands.task as task_module
 
     with runner.isolated_filesystem(tmp_path):
         cwd = Path.cwd()
@@ -515,14 +515,15 @@ def test_plan_test_writes_executable_script_when_delimiter_present(runner: CliRu
         mock_proc.stderr.read.return_value = ""
         mock_proc.returncode = 0
         mock_proc.wait.return_value = None
+        real_popen = task_module.subprocess.Popen
 
         def selective_popen(*args, **kwargs):
             argv = args[0] if args and args[0] else []
             if isinstance(argv, list) and "--output-format" in argv:
                 return mock_proc
-            return real_subprocess.Popen(*args, **kwargs)
+            return real_popen(*args, **kwargs)
 
-        with patch("dev_sdk.agent.subprocess.Popen", side_effect=selective_popen):
+        with patch.object(task_module.subprocess, "Popen", side_effect=selective_popen):
             result = runner.invoke(main, ["plan-test"])
     assert result.exit_code == 0
     order = [n.strip() for n in (cwd / "comms" / "index.txt").read_text().splitlines() if n.strip()]
@@ -554,11 +555,8 @@ def test_test_fails_without_agent_chat_id(runner: CliRunner, tmp_path: Path) -> 
         (cwd / "comms" / "index.txt").write_text("001-run-plan.sh\n")
         (cwd / "comms" / "001-run-plan.sh").write_text("#!/bin/bash\necho x\n")
         (cwd / "comms" / "001-run-plan.sh").chmod(0o755)
-        script_proc = MagicMock()
-        script_proc.stdout = iter(["output\n"])
-        script_proc.returncode = 0
-        script_proc.wait.return_value = None
-        with patch("dev_sdk.workflows.subprocess.Popen", return_value=script_proc):
+        with patch("dev.commands.task.subprocess.run") as mock_run:
+            mock_run.return_value = MagicMock(returncode=0, stdout="", stderr="")
             result = runner.invoke(main, ["test"])
     assert result.exit_code != 0
     assert "chat" in result.output.lower() or "agent-chat-id" in result.output
@@ -596,16 +594,20 @@ def test_test_runs_script_then_agent_writes_comms(runner: CliRunner, tmp_path: P
         agent_proc.stderr.read.return_value = ""
         agent_proc.returncode = 0
         agent_proc.wait.return_value = None
-        # Both workflows and agent use subprocess.Popen; first call is script, second is agent
-        with patch("dev_sdk.agent.subprocess.Popen", side_effect=[script_proc, agent_proc]) as mock_popen:
+        with patch("dev.commands.task.subprocess.Popen", side_effect=[script_proc, agent_proc]) as mock_popen:
             result = runner.invoke(main, ["test"])
     assert result.exit_code == 0
     assert mock_popen.call_count >= 2
+    # First Popen is the test script
+    run_args = mock_popen.call_args_list[0][0][0]
+    assert str(script) in run_args or script.name in str(run_args)
     logs = list((cwd / ".logs").glob("dev-test-run-*.log"))
     assert len(logs) == 1
     assert "test output" in logs[0].read_text()
+    # Second Popen is the agent
     argv = mock_popen.call_args_list[1][0][0]
     assert "--mode" in argv and "ask" in argv
+    assert "test-results" in str(mock_popen.call_args) or ".logs" in str(argv)
     order = [n.strip() for n in (cwd / "comms" / "index.txt").read_text().splitlines() if n.strip()]
     assert any("test-results" in n or "agent" in n for n in order)
     assert "Test results written to" in result.output
@@ -632,13 +634,11 @@ def test_test_uses_latest_script_when_multiple(runner: CliRunner, tmp_path: Path
         agent_proc.stderr.read.return_value = ""
         agent_proc.returncode = 0
         agent_proc.wait.return_value = None
-        with patch("dev_sdk.agent.subprocess.Popen", side_effect=[script_proc, agent_proc]):
+        with patch("dev.commands.task.subprocess.Popen", side_effect=[script_proc, agent_proc]) as mock_popen:
             result = runner.invoke(main, ["test"])
     assert result.exit_code == 0
-    # Script 003-run-plan.sh was run (latest in index); run log has its output
-    logs = list((cwd / ".logs").glob("dev-test-run-*.log"))
-    assert len(logs) == 1
-    assert "three" in logs[0].read_text()
+    run_args = mock_popen.call_args_list[0][0][0]
+    assert "003-run-plan.sh" in str(run_args)
 
 
 def test_activate_path_help() -> None:
