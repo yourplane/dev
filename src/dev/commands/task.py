@@ -13,7 +13,7 @@ import click
 
 SPINNER_CHARS = ["|", "/", "-", "\\"]
 
-from dev.comms import add_comms, comms_dir, read_index
+from dev.comms import add_comms, comms_dir, index_path, next_sequence, read_index
 from dev.repo_config import resolve_repo
 from dev.task_manager import TaskManager
 
@@ -39,7 +39,7 @@ PLAN_TEST_MODE_PROMPT = """Read the task context in the `comms` directory (files
 3) An executable bash script that runs the plan. The script must be very easy for a human to read: prioritize readability over fancy printouts or verification. Use shebang #!/usr/bin/env bash and set -e. Run each step from the plan using the actual venv path for CLI invocations. The script must never contain angle brackets or placeholders (e.g. do not write .venv/<task_name>/bin/<command> in the script—bash would interpret < as a redirect). Use the literal path with the real task name and command, e.g. .venv/bash-dev-plan-test/bin/dev. The script does not need to contain verification logic—it will be run by an agent that verifies the output. Use simple checks only where they are easy to read; if verification would be too complex to encode in bash, leave a comment describing the expected output instead. The script should be dead-simple: just straightforward bash commands, no progress counters or extra logic. Output only the script source (no markdown code fence)."""
 
 PLAN_TEST_BASH_DELIMITER = "\n---BASH SCRIPT---\n"
-PLAN_TEST_SCRIPT_FILENAME = "run-plan.sh"
+PLAN_TEST_SCRIPT_PREFIX = "run-plan.sh"
 PLAN_TEST_STREAM_LOG_PREFIX = "dev-plan-test-stream-"
 
 
@@ -245,39 +245,24 @@ def _run_plan_test_mode(
         plan_text = full_output.strip()
         script_content = None
 
+    script_filename = None
     if script_content:
-        plan_text += "\n\n## How to run\n\nExecute: `./comms/run-plan.sh` or `bash comms/run-plan.sh`\n"
+        plan_seq = next_sequence(task_dir)  # next add_comms will use this
+        script_seq = plan_seq + 1
+        script_filename = f"{script_seq:03d}-{PLAN_TEST_SCRIPT_PREFIX}"
+        plan_text += f"\n\n## How to run\n\nExecute: `./comms/{script_filename}` or `bash comms/{script_filename}`\n"
 
     comms_path = add_comms(task_dir, "agent", plan_text, kind="plan-test")
     click.echo()
     click.echo(click.style(f"Testing plan written to {comms_path.relative_to(task_dir)}", dim=True))
 
-    if script_content:
-        script_path = comms_dir(task_dir) / PLAN_TEST_SCRIPT_FILENAME
-        content = script_content.strip() + "\n"
-        candidate_path = script_path.with_suffix(".sh.new")
-        candidate_path.write_text(content, encoding="utf-8")
-        try:
-            subprocess.run(
-                ["bash", "-n", str(candidate_path)],
-                check=True,
-                capture_output=True,
-                cwd=str(task_dir),
-            )
-        except subprocess.CalledProcessError:
-            click.echo(
-                click.style(
-                    f"Generated script failed bash -n; wrote to {candidate_path.relative_to(task_dir)} (not overwriting run-plan.sh).",
-                    fg="yellow",
-                ),
-                err=True,
-            )
-        else:
-            script_path.write_text(content, encoding="utf-8")
-            script_path.chmod(0o755)
-            if candidate_path.exists():
-                candidate_path.unlink()
-            click.echo(click.style(f"Executable script written to {script_path.relative_to(task_dir)}", dim=True))
+    if script_content and script_filename:
+        script_path = comms_dir(task_dir) / script_filename
+        script_path.write_text(script_content.strip() + "\n", encoding="utf-8")
+        script_path.chmod(0o755)
+        with open(index_path(task_dir), "a", encoding="utf-8") as f:
+            f.write(script_filename + "\n")
+        click.echo(click.style(f"Executable script written to {script_path.relative_to(task_dir)}", dim=True))
 
 
 def _run_implement_mode(

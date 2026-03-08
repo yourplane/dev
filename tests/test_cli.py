@@ -494,11 +494,11 @@ def test_plan_test_runs_headless_writes_comms_only(runner: CliRunner, tmp_path: 
     assert "Testing plan written to" in result.output
     assert list((cwd / ".logs").glob("dev-plan-test-stream-*.log"))
     # No script when delimiter is absent
-    assert not (cwd / "comms" / "run-plan.sh").exists()
+    assert not list((cwd / "comms").glob("*-run-plan.sh"))
 
 
 def test_plan_test_writes_executable_script_when_delimiter_present(runner: CliRunner, tmp_path: Path) -> None:
-    """When agent output contains ---BASH SCRIPT---, plan-test writes comms/run-plan.sh and makes it executable."""
+    """When agent output contains ---BASH SCRIPT---, plan-test writes a numbered run-plan.sh and makes it executable."""
     import dev.commands.task as task_module
 
     with runner.isolated_filesystem(tmp_path):
@@ -518,7 +518,6 @@ def test_plan_test_writes_executable_script_when_delimiter_present(runner: CliRu
         real_popen = task_module.subprocess.Popen
 
         def selective_popen(*args, **kwargs):
-            # Only mock the agent (cursor) invocation; let bash -n use real Popen
             argv = args[0] if args and args[0] else []
             if isinstance(argv, list) and "--output-format" in argv:
                 return mock_proc
@@ -530,8 +529,9 @@ def test_plan_test_writes_executable_script_when_delimiter_present(runner: CliRu
     order = [n.strip() for n in (cwd / "comms" / "index.txt").read_text().splitlines() if n.strip()]
     plan_file = cwd / "comms" / order[1]
     assert "How to run" in plan_file.read_text()
-    script_path = cwd / "comms" / "run-plan.sh"
-    assert script_path.exists()
+    script_files = list((cwd / "comms").glob("*-run-plan.sh"))
+    assert len(script_files) == 1
+    script_path = script_files[0]
     assert script_path.stat().st_mode & 0o111
     assert "#!/usr/bin/env bash" in script_path.read_text()
     assert "Executable script written to" in result.output
