@@ -32,11 +32,11 @@ IMPLEMENT_STREAM_LOG_PREFIX = "dev-implement-stream-"
 
 PLAN_TEST_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Produce two artifacts in this exact order, with no other text before or after:
 
-1) A manual, end-to-end testing plan in markdown. It must validate all changes from the current task. Include feature testing (steps to verify the task's goals) and regression testing (steps to verify existing behavior is unchanged). The plan is Unix-only; Windows is out of scope. Every command in the plan must use the task's virtual environment: from the task root use .venv/<task_name>/bin/<command> (or activate the venv first). This is not unit or automated test code; it is a step-by-step manual test plan. Output only the plan as markdown.
+1) A manual, end-to-end testing plan in markdown. It must validate all changes from the current task. Include feature testing (steps to verify the task's goals) and regression testing (steps to verify existing behavior is unchanged). Do not run or reference unit tests (e.g. pytest): unit tests are run separately and do not count as end-to-end regression testing. The plan is Unix-only; Windows is out of scope. Every command in the plan must use the task's virtual environment: from the task root use .venv/<task_name>/bin/<command> (or activate the venv first). This is not unit or automated test code; it is a step-by-step manual test plan. Output only the plan as markdown.
 
 2) On a new line, the exact delimiter line: ---BASH SCRIPT---
 
-3) An executable bash script that runs the plan. The script must: use shebang #!/usr/bin/env bash; use set -e; run each step from the plan (using .venv/<task_name>/bin/... for CLI and tests); print progress (e.g. Step 1/N: ...); exit non-zero with a clear message if a step fails; print a final success message. Output only the script source (no markdown code fence)."""
+3) An executable bash script that runs the plan. The script must be very easy for a human to read: prioritize readability over fancy printouts or verification. Use shebang #!/usr/bin/env bash and set -e. Run each step from the plan using .venv/<task_name>/bin/... for CLI invocations. The script does not need to contain verification logic—it will be run by an agent that verifies the output. Use simple checks only where they are easy to read; if verification would be too complex to encode in bash, leave a comment describing the expected output instead. Print brief progress (e.g. Step 1/N: ...) and a final success message. Output only the script source (no markdown code fence)."""
 
 PLAN_TEST_BASH_DELIMITER = "\n---BASH SCRIPT---\n"
 PLAN_TEST_SCRIPT_FILENAME = "run-plan.sh"
