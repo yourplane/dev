@@ -463,12 +463,7 @@ def _run_implement_mode(
 
     reader = threading.Thread(target=read_stdout, args=(proc,))
     reader.start()
-    reader.join(timeout=300)
-    if reader.is_alive():
-        proc.kill()
-        proc.wait()
-        click.echo("Agent implement mode timed out.", err=True)
-        raise SystemExit(1)
+    reader.join()
 
     try:
         proc.wait(timeout=5)
