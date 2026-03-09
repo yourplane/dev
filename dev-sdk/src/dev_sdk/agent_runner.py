@@ -47,6 +47,11 @@ def _stream_log_path(task_dir: Path, command_id: str) -> Path:
     return logs_dir / name
 
 
+def get_stream_log_path(task_dir: Path, command_id: str) -> Path:
+    """Return path for the stream log file for this command (creates .logs dir)."""
+    return _stream_log_path(task_dir, command_id)
+
+
 def build_agent_argv(
     task_dir: Path,
     command_id: str,
@@ -168,13 +173,13 @@ def extract_plan_from_stream_json(streamed_output: str) -> str:
     return streamed_output
 
 
-def post_process_plan_implement(task_dir: Path, stream_log_path: Path) -> None:
+def post_process_plan_implement(task_dir: Path, stream_log_path: Path) -> Path:
     """
     After plan-implement process has exited: read stream log, extract plan,
-    write task-plan-draft.md and add plan to comms.
+    write task-plan-draft.md and add plan to comms. Returns path to the comms file.
     """
     content = stream_log_path.read_text(encoding="utf-8")
     plan_text = extract_plan_from_stream_json(content)
     draft_path = task_dir / TASK_PLAN_DRAFT
     draft_path.write_text(plan_text, encoding="utf-8")
-    add_comms(task_dir, "agent", plan_text, kind="plan")
+    return add_comms(task_dir, "agent", plan_text, kind="plan")
