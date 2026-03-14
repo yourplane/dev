@@ -84,6 +84,20 @@ export const api = {
     });
   },
 
+  getTaskCommandStatus(taskName: string): Promise<{ active: boolean; command: string | null }> {
+    return request(`/tasks/${encodeURIComponent(taskName)}/commands`);
+  },
+
+  startTaskCommand(
+    taskName: string,
+    command: string
+  ): Promise<{ command: string; status: string }> {
+    return request(`/tasks/${encodeURIComponent(taskName)}/commands`, {
+      method: 'POST',
+      body: JSON.stringify({ command }),
+    });
+  },
+
   async getTaskCommsFile(taskName: string, filename: string): Promise<string> {
     const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/comms/${encodeURIComponent(filename)}`;
     const res = await fetch(url);
