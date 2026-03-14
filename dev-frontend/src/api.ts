@@ -76,6 +76,27 @@ export const api = {
     return request(`/tasks/${encodeURIComponent(taskName)}/comms`);
   },
 
+  getTaskFeed(taskName: string): Promise<{ entries: Array<{ type: string; id: string; created_at: number }> }> {
+    return request(`/tasks/${encodeURIComponent(taskName)}/feed`);
+  },
+
+  async getTaskLogFile(taskName: string, filename: string): Promise<string> {
+    const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/logs/${encodeURIComponent(filename)}`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const text = await res.text();
+      let detail = text;
+      try {
+        const j = JSON.parse(text);
+        if (typeof j.detail === 'string') detail = j.detail;
+      } catch {
+        // use raw text
+      }
+      throw new Error(detail || `HTTP ${res.status}`);
+    }
+    return res.text();
+  },
+
   postTaskComms(taskName: string, content: string): Promise<{ filename: string }> {
     return request(`/tasks/${encodeURIComponent(taskName)}/comms`, {
       method: 'POST',

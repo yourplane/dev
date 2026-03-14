@@ -10,8 +10,10 @@ vi.mock('./api', () => ({
     createTask: vi.fn(),
     archiveTask: vi.fn(),
     getTaskCommsList: vi.fn(),
-    postTaskComms: vi.fn(),
+    getTaskFeed: vi.fn(),
     getTaskCommsFile: vi.fn(),
+    getTaskLogFile: vi.fn(),
+    postTaskComms: vi.fn(),
     getTaskCommandStatus: vi.fn(),
     startTaskCommand: vi.fn(),
     createTaskPr: vi.fn(),
@@ -25,6 +27,7 @@ describe('App', () => {
     vi.mocked(api.getTasks).mockResolvedValue({ tasks: [] })
     vi.mocked(api.getRepos).mockResolvedValue({})
     vi.mocked(api.getTaskCommsList).mockResolvedValue({ files: [] })
+    vi.mocked(api.getTaskFeed).mockResolvedValue({ entries: [] })
     vi.mocked(api.getTaskCommandStatus).mockResolvedValue({ active: false, command: null })
   })
 
@@ -37,14 +40,14 @@ describe('App', () => {
     await expect(screen.findByRole('heading', { name: 'Tasks' })).resolves.toBeInTheDocument()
   })
 
-  it('renders task comms page without throwing (loadComms used after definition)', async () => {
+  it('renders task comms page without throwing (loadFeed used after definition)', async () => {
     const noop = () => {}
     const { container } = render(
       <MemoryRouter>
         <TaskCommsPageContent taskName="test-task" navigate={noop} />
       </MemoryRouter>
     )
-    // Wait for effects (loadComms, etc.) to run; TDZ would throw before this resolves
+    // Wait for effects (loadFeed, etc.) to run; TDZ would throw before this resolves
     await waitFor(() => {
       expect(container.textContent?.toLowerCase()).toMatch(/comms|loading/)
     }, { timeout: 2000 })
