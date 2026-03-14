@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { api, apiBaseUrl } from './api'
 import { parseLogToSegments, type LogSegment } from './logParser'
 import './App.css'
+
+const FEED_POLL_INTERVAL_MS = 15000
 
 export function Layout() {
   return (
@@ -429,6 +431,69 @@ const COMMAND_LABEL: Record<string, string> = {
   implement: 'Implement',
 }
 
+const FeedEntryRow = memo(function FeedEntryRow({
+  entry,
+  contents,
+  loadingContentKeys,
+  isCollapsed,
+  entryKey,
+  toggleCollapsed,
+  loadEntryContent,
+  activeLogFilename,
+  isLast,
+  lastEntryRef,
+}: {
+  entry: { type: string; id: string; created_at: number }
+  contents: Record<string, string>
+  loadingContentKeys: Set<string>
+  isCollapsed: boolean
+  entryKey: string
+  toggleCollapsed: (key: string) => void
+  loadEntryContent: (entryId: string, type: string) => void
+  activeLogFilename: string | null
+  isLast: boolean
+  lastEntryRef: React.RefObject<HTMLDivElement | null>
+}) {
+  useEffect(() => {
+    if (!isCollapsed && contents[entry.id] === undefined && !loadingContentKeys.has(entryKey)) {
+      loadEntryContent(entry.id, entry.type)
+    }
+  }, [isCollapsed, entry.id, entry.type, entryKey, contents[entry.id], loadEntryContent, loadingContentKeys])
+
+  const title =
+    entry.type === 'log'
+      ? `Agent log: ${entry.id}${entry.id === activeLogFilename ? ' (live)' : ''}`
+      : entry.id
+
+  return (
+    <div
+      ref={isLast ? lastEntryRef : undefined}
+      className={entry.type === 'log' ? 'feed-entry feed-log-entry' : 'comms-entry'}
+    >
+      <button
+        type="button"
+        className="feed-entry-header"
+        onClick={() => toggleCollapsed(entryKey)}
+        aria-expanded={!isCollapsed}
+      >
+        <span className="feed-entry-chevron" aria-hidden>
+          {isCollapsed ? '▶' : '▼'}
+        </span>
+        <span className="feed-entry-title">{title}</span>
+      </button>
+      {!isCollapsed && (
+        <div className="comms-content">
+          {entry.type === 'log' ? (
+            <ParsedLogView raw={contents[entry.id] ?? ''} />
+          ) : (
+            <ReactMarkdown>{contents[entry.id] ?? '(loading…)'}</ReactMarkdown>
+          )}
+        </div>
+      )}
+    </div>
+  )
+})
+
 function ParsedLogView({ raw }: { raw: string }) {
   const segments = parseLogToSegments(raw)
   if (segments.length === 0) {
@@ -507,11 +572,20 @@ export function TaskCommsPageContent({
   const [prUrl, setPrUrl] = useState<string | null>(null)
   const [prError, setPrError] = useState<string | null>(null)
   const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false)
+  const [lockedToBottom, setLockedToBottom] = useState(false)
+  const programmaticScrollRef = useRef(false)
+  const feedLengthRef = useRef(0)
+  const lastLockedScrollTimeRef = useRef(0)
   const lastCommsEntryRef = useRef<HTMLDivElement | null>(null)
+  const feedEntriesRef = useRef(feedEntries)
+  feedEntriesRef.current = feedEntries
+  const activeLogFilenameRef = useRef(activeLogFilename)
+  activeLogFilenameRef.current = activeLogFilename
   const hasScrolledInitialRef = useRef(false)
   const [archiving, setArchiving] = useState(false)
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set())
+  const [loadingContentKeys, setLoadingContentKeys] = useState<Set<string>>(new Set())
 
   const toggleCollapsed = useCallback((key: string) => {
     setCollapsedKeys((prev) => {
@@ -548,41 +622,101 @@ export function TaskCommsPageContent({
     }
   }, [taskName])
 
-  const loadFeed = useCallback(async () => {
-    setError(null)
-    setLoading(true)
-    try {
-      const res = await api.getTaskFeed(taskName)
-      setFeedEntries(res.entries)
-      const map: Record<string, string> = {}
-      await Promise.all(
-        res.entries.map(async (entry) => {
-          // Skip fetching the active log file; its content is streamed instead
-          if (entry.type === 'log' && entry.id === activeLogFilename) {
-            map[entry.id] = ''
-            return
-          }
-          const text =
-            entry.type === 'comms'
-              ? await api.getTaskCommsFile(taskName, entry.id)
-              : await api.getTaskLogFile(taskName, entry.id)
-          map[entry.id] = text
+  const loadEntryContent = useCallback(
+    async (entryId: string, type: string) => {
+      if (type === 'log' && entryId === activeLogFilename) {
+        setContents((prev) => ({ ...prev, [entryId]: prev[entryId] ?? '' }))
+        return
+      }
+      const key = `${type}:${entryId}`
+      setLoadingContentKeys((prev) => new Set(prev).add(key))
+      try {
+        const text =
+          type === 'comms'
+            ? await api.getTaskCommsFile(taskName, entryId)
+            : await api.getTaskLogFile(taskName, entryId)
+        setContents((prev) => ({ ...prev, [entryId]: text }))
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setLoadingContentKeys((prev) => {
+          const next = new Set(prev)
+          next.delete(key)
+          return next
         })
-      )
-      setContents((prev) => {
-        const next = { ...map }
-        // Preserve streamed content for the active log when reloading feed
-        if (activeLogFilename && (prev[activeLogFilename] ?? '').length > 0) {
-          next[activeLogFilename] = prev[activeLogFilename]
+      }
+    },
+    [taskName, activeLogFilename]
+  )
+
+  const loadFeed = useCallback(
+    async (opts?: { incremental?: boolean; prefetchNew?: boolean }) => {
+      const current = feedEntriesRef.current
+      const isIncremental = opts?.incremental && current.length > 0
+      if (!isIncremental) {
+        setError(null)
+        if (current.length === 0) setLoading(true)
+      }
+      try {
+        if (isIncremental) {
+          const after = Math.max(...current.map((e) => e.created_at))
+          const res = await api.getTaskFeed(taskName, { after })
+          const existingKeys = new Set(current.map((e) => `${e.type}:${e.id}`))
+          const newEntries = res.entries.filter((e) => !existingKeys.has(`${e.type}:${e.id}`))
+          if (newEntries.length === 0) return
+          setFeedEntries((prev) => {
+            const keys = new Set(prev.map((e) => `${e.type}:${e.id}`))
+            const toAdd = newEntries.filter((e) => !keys.has(`${e.type}:${e.id}`))
+            return toAdd.length ? [...prev, ...toAdd] : prev
+          })
+          if (opts?.prefetchNew && newEntries.length > 0) {
+            const activeLog = activeLogFilenameRef.current
+            const toFetch = newEntries.filter(
+              (entry) => !(entry.type === 'log' && entry.id === activeLog)
+            )
+            const texts = await Promise.all(
+              toFetch.map((entry) =>
+                entry.type === 'comms'
+                  ? api.getTaskCommsFile(taskName, entry.id)
+                  : api.getTaskLogFile(taskName, entry.id)
+              )
+            )
+            setContents((prev) => {
+              const next = { ...prev }
+              toFetch.forEach((entry, i) => {
+                next[entry.id] = texts[i]
+              })
+              newEntries.forEach((entry) => {
+                if (entry.type === 'log' && entry.id === activeLog) {
+                  next[entry.id] = prev[entry.id] ?? ''
+                }
+              })
+              return next
+            })
+          }
+        } else {
+          const res = await api.getTaskFeed(taskName)
+          setFeedEntries(res.entries)
+          setContents((prev) => {
+            const next: Record<string, string> = {}
+            res.entries.forEach((e) => {
+              if (prev[e.id] !== undefined) next[e.id] = prev[e.id]
+            })
+            const activeLog = activeLogFilenameRef.current
+            if (activeLog && (prev[activeLog] ?? '').length > 0) {
+              next[activeLog] = prev[activeLog]
+            }
+            return next
+          })
         }
-        return next
-      })
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLoading(false)
-    }
-  }, [taskName, activeLogFilename])
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setLoading(false)
+      }
+    },
+    [taskName]
+  )
 
   useEffect(() => {
     loadCommandStatus()
@@ -596,15 +730,23 @@ export function TaskCommsPageContent({
   const prevActiveCommandRef = useRef<string | null>(null)
   useEffect(() => {
     if (prevActiveCommandRef.current !== null && activeCommand === null) {
-      loadFeed()
+      loadFeed({ incremental: true, prefetchNew: true })
     }
     prevActiveCommandRef.current = activeCommand
   }, [activeCommand, loadFeed])
 
+  useEffect(() => {
+    const interval = setInterval(
+      () => loadFeed({ incremental: true, prefetchNew: true }),
+      FEED_POLL_INTERVAL_MS
+    )
+    return () => clearInterval(interval)
+  }, [loadFeed])
+
   // When a command becomes active with an active log, reload feed so the new log entry appears
   useEffect(() => {
     if (activeCommand && activeLogFilename) {
-      loadFeed()
+      loadFeed({ incremental: true, prefetchNew: true })
     }
   }, [activeCommand, activeLogFilename, loadFeed])
 
@@ -685,8 +827,8 @@ export function TaskCommsPageContent({
     try {
       await api.postTaskComms(taskName, content)
       setCommentText('')
+      await loadFeed({ incremental: true, prefetchNew: true })
       setScrollToBottomAfterLoad(true)
-      await loadFeed()
     } catch (e) {
       setPostError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -694,11 +836,26 @@ export function TaskCommsPageContent({
     }
   }
 
+  const PROGRAMMATIC_SCROLL_MS = 150
+  const PROGRAMMATIC_SCROLL_SMOOTH_MS = 800
+
   useEffect(() => {
     if (!loading && feedEntries.length > 0) {
       if (scrollToBottomAfterLoad) {
-        lastCommsEntryRef.current?.scrollIntoView({ behavior: 'instant' })
         setScrollToBottomAfterLoad(false)
+        const scrollToBottom = () => {
+          programmaticScrollRef.current = true
+          window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
+          setTimeout(() => {
+            programmaticScrollRef.current = false
+          }, PROGRAMMATIC_SCROLL_MS)
+        }
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            scrollToBottom()
+            setTimeout(scrollToBottom, 50)
+          })
+        })
       } else if (!hasScrolledInitialRef.current) {
         lastCommsEntryRef.current?.scrollIntoView({ behavior: 'instant' })
         hasScrolledInitialRef.current = true
@@ -706,18 +863,79 @@ export function TaskCommsPageContent({
     }
   }, [loading, scrollToBottomAfterLoad, feedEntries.length])
 
-  // Keep scrolled to bottom of page when active log content is streaming
+  const SCROLL_NEAR_BOTTOM_PX = 80
+  const SCROLL_BEHIND_THRESHOLD_PX = 24
+  const LOCKED_SCROLL_THROTTLE_MS = 80
+
+  // Bottom lock: enter when really close to bottom, leave only when user scrolls up (ignore programmatic scrolls)
   useEffect(() => {
-    if (activeLogFilename && contents[activeLogFilename]) {
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
+    const onScroll = () => {
+      if (programmaticScrollRef.current) return
+      const nearBottom =
+        window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - SCROLL_NEAR_BOTTOM_PX
+      setLockedToBottom(nearBottom)
     }
-  }, [activeLogFilename, contents[activeLogFilename]])
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
+  // When locked and feed grows (e.g. command started, new log entry), scroll to bottom so we stay locked
+  useEffect(() => {
+    const len = feedEntries.length
+    if (!lockedToBottom || len === 0) {
+      feedLengthRef.current = len
+      return
+    }
+    if (len > feedLengthRef.current) {
+      feedLengthRef.current = len
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          programmaticScrollRef.current = true
+          window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
+          setTimeout(() => {
+            programmaticScrollRef.current = false
+          }, PROGRAMMATIC_SCROLL_MS)
+        })
+      })
+    } else {
+      feedLengthRef.current = len
+    }
+  }, [lockedToBottom, feedEntries.length])
+
+  // When streaming: if locked or near bottom, scroll to bottom (throttled + only when behind to reduce jitter)
+  useEffect(() => {
+    if (!activeLogFilename || !contents[activeLogFilename] || feedEntries.length === 0) return
+    const scrollHeight = document.documentElement.scrollHeight
+    const nearBottom =
+      window.scrollY + window.innerHeight >= scrollHeight - SCROLL_NEAR_BOTTOM_PX
+    const behind = window.scrollY + window.innerHeight < scrollHeight - SCROLL_BEHIND_THRESHOLD_PX
+    const now = Date.now()
+    const throttled = now - lastLockedScrollTimeRef.current < LOCKED_SCROLL_THROTTLE_MS
+    if (lockedToBottom || nearBottom) {
+      if (behind && !throttled) {
+        lastLockedScrollTimeRef.current = now
+        programmaticScrollRef.current = true
+        window.scrollTo({ top: scrollHeight, behavior: 'instant' })
+        setTimeout(() => {
+          programmaticScrollRef.current = false
+        }, PROGRAMMATIC_SCROLL_MS)
+      }
+    }
+  }, [activeLogFilename, contents[activeLogFilename], feedEntries.length, lockedToBottom])
 
   const scrollToTop = () => {
+    programmaticScrollRef.current = true
     window.scrollTo({ top: 0, behavior: 'smooth' })
+    setTimeout(() => {
+      programmaticScrollRef.current = false
+    }, PROGRAMMATIC_SCROLL_SMOOTH_MS)
   }
-  const scrollToBottom = () => {
+  const scrollToBottomClick = () => {
+    programmaticScrollRef.current = true
     window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })
+    setTimeout(() => {
+      programmaticScrollRef.current = false
+    }, PROGRAMMATIC_SCROLL_SMOOTH_MS)
   }
 
   if (loading) return <p className="status">Loading feed…</p>
@@ -734,14 +952,16 @@ export function TaskCommsPageContent({
     <section className="task-comms">
       <div className="task-comms-header">
         <h2>{taskName}</h2>
-        <button
-          type="button"
-          className="archive-btn archive-btn-task-view"
-          onClick={handleArchive}
-          disabled={archiving}
-        >
-          {archiving ? 'Archiving…' : 'Archive'}
-        </button>
+        <div className="task-comms-header-actions">
+          <button
+            type="button"
+            className="archive-btn archive-btn-task-view"
+            onClick={handleArchive}
+            disabled={archiving}
+          >
+            {archiving ? 'Archiving…' : 'Archive'}
+          </button>
+        </div>
       </div>
       {archiveError && <p className="inline-error">{archiveError}</p>}
       <p><Link to="/">← Back to tasks</Link></p>
@@ -751,38 +971,21 @@ export function TaskCommsPageContent({
         <div className="comms-history">
           {feedEntries.map((entry, i) => {
             const entryKey = `${entry.type}:${entry.id}`
-            const isCollapsed = collapsedKeys.has(entryKey)
+            const isLast = i === feedEntries.length - 1
             return (
-              <div
+              <FeedEntryRow
                 key={entryKey}
-                className={entry.type === 'log' ? 'feed-entry feed-log-entry' : 'comms-entry'}
-                ref={i === feedEntries.length - 1 ? lastCommsEntryRef : undefined}
-              >
-                <button
-                  type="button"
-                  className="feed-entry-header"
-                  onClick={() => toggleCollapsed(entryKey)}
-                  aria-expanded={!isCollapsed}
-                >
-                  <span className="feed-entry-chevron" aria-hidden>
-                    {isCollapsed ? '▶' : '▼'}
-                  </span>
-                  <span className="feed-entry-title">
-                    {entry.type === 'log'
-                      ? `Agent log: ${entry.id}${entry.id === activeLogFilename ? ' (live)' : ''}`
-                      : entry.id}
-                  </span>
-                </button>
-                {!isCollapsed && (
-                  <div className="comms-content">
-                    {entry.type === 'log' ? (
-                      <ParsedLogView raw={contents[entry.id] ?? ''} />
-                    ) : (
-                      <ReactMarkdown>{contents[entry.id] ?? '(loading…)'}</ReactMarkdown>
-                    )}
-                  </div>
-                )}
-              </div>
+                entry={entry}
+                contents={contents}
+                loadingContentKeys={loadingContentKeys}
+                isCollapsed={collapsedKeys.has(entryKey)}
+                entryKey={entryKey}
+                toggleCollapsed={toggleCollapsed}
+                loadEntryContent={loadEntryContent}
+                activeLogFilename={activeLogFilename}
+                isLast={isLast}
+                lastEntryRef={lastCommsEntryRef}
+              />
             )
           })}
         </div>
@@ -869,8 +1072,8 @@ export function TaskCommsPageContent({
         </button>
         <button
           type="button"
-          className="task-comms-scroll-btn"
-          onClick={scrollToBottom}
+          className={`task-comms-scroll-btn task-comms-scroll-btn-bottom ${lockedToBottom ? 'task-comms-scroll-btn-locked' : ''}`}
+          onClick={scrollToBottomClick}
           aria-label="Scroll to bottom"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
