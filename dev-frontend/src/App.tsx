@@ -25,10 +25,17 @@ export function Layout() {
   )
 }
 
+const DEFAULT_TAB_TITLE = 'Dev – Task management'
+
 function TaskListPage() {
   const [tasks, setTasks] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    document.title = 'Dev – Tasks'
+    return () => { document.title = DEFAULT_TAB_TITLE }
+  }, [])
 
   const loadTasks = useCallback(async () => {
     setError(null)
@@ -129,6 +136,10 @@ function TaskList({
 
 function CreateTaskPage() {
   const navigate = useNavigate()
+  useEffect(() => {
+    document.title = 'Dev – New task'
+    return () => { document.title = DEFAULT_TAB_TITLE }
+  }, [])
   return (
     <CreateTaskForm
       onCreated={(taskName) => navigate(`/task/${encodeURIComponent(taskName)}`)}
@@ -300,6 +311,7 @@ export function TaskCommsPageContent({
   const [prError, setPrError] = useState<string | null>(null)
   const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false)
   const lastCommsEntryRef = useRef<HTMLDivElement | null>(null)
+  const hasScrolledInitialRef = useRef(false)
   const [archiving, setArchiving] = useState(false)
   const [archiveError, setArchiveError] = useState<string | null>(null)
 
@@ -398,6 +410,11 @@ export function TaskCommsPageContent({
     loadFeed()
   }, [loadFeed])
 
+  useEffect(() => {
+    document.title = `Dev – ${taskName}`
+    return () => { document.title = DEFAULT_TAB_TITLE }
+  }, [taskName])
+
   const handlePostComment = async (e: React.FormEvent) => {
     e.preventDefault()
     const content = commentText.trim()
@@ -417,9 +434,14 @@ export function TaskCommsPageContent({
   }
 
   useEffect(() => {
-    if (!loading && scrollToBottomAfterLoad && feedEntries.length > 0) {
-      lastCommsEntryRef.current?.scrollIntoView({ behavior: 'smooth' })
-      setScrollToBottomAfterLoad(false)
+    if (!loading && feedEntries.length > 0) {
+      if (scrollToBottomAfterLoad) {
+        lastCommsEntryRef.current?.scrollIntoView({ behavior: 'instant' })
+        setScrollToBottomAfterLoad(false)
+      } else if (!hasScrolledInitialRef.current) {
+        lastCommsEntryRef.current?.scrollIntoView({ behavior: 'smooth' })
+        hasScrolledInitialRef.current = true
+      }
     }
   }, [loading, scrollToBottomAfterLoad, feedEntries.length])
 
@@ -436,7 +458,7 @@ export function TaskCommsPageContent({
   return (
     <section className="task-comms">
       <div className="task-comms-header">
-        <h2>Comms: {taskName}</h2>
+        <h2>{taskName}</h2>
         <button
           type="button"
           className="archive-btn archive-btn-task-view"
