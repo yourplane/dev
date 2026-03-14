@@ -821,6 +821,7 @@ export function TaskCommsPageContent({
   }
 
   const PROGRAMMATIC_SCROLL_MS = 150
+  const PROGRAMMATIC_SCROLL_SMOOTH_MS = 800
 
   useEffect(() => {
     if (!loading && feedEntries.length > 0) {
@@ -853,19 +854,21 @@ export function TaskCommsPageContent({
     }
   }, [activeCommand, activeLogFilename])
 
-  // Leave locked when user scrolls (ignore programmatic scrolls)
+  const SCROLL_NEAR_BOTTOM_PX = 80
+
+  // User scroll: at bottom → enter locked; not at bottom → leave locked (ignore programmatic scrolls)
   useEffect(() => {
     const onScroll = () => {
-      if (!programmaticScrollRef.current) {
-        setLockedToBottom(false)
-      }
+      if (programmaticScrollRef.current) return
+      const nearBottom =
+        window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - SCROLL_NEAR_BOTTOM_PX
+      setLockedToBottom(nearBottom)
     }
     window.addEventListener('scroll', onScroll, { passive: true })
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
   // When streaming: if locked to bottom, always scroll to bottom; else only if user was near bottom
-  const SCROLL_NEAR_BOTTOM_PX = 80
   useEffect(() => {
     if (!activeLogFilename || !contents[activeLogFilename] || feedEntries.length === 0) return
     const nearBottom =
@@ -889,7 +892,7 @@ export function TaskCommsPageContent({
     window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })
     setTimeout(() => {
       programmaticScrollRef.current = false
-    }, PROGRAMMATIC_SCROLL_MS)
+    }, PROGRAMMATIC_SCROLL_SMOOTH_MS)
   }
   const scrollToBottomDoubleClick = () => {
     setLockedToBottom(true)
