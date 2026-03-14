@@ -189,7 +189,9 @@
 
 .repo-radio-option {
   display: flex;
+  flex-direction: row;
   align-items: center;
+  justify-content: flex-start;
   gap: 0.5rem;
   cursor: pointer;
   font-weight: normal;
