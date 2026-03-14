@@ -15,12 +15,14 @@ export function Layout() {
         <nav>
           <Link to="/" className="nav-link">Tasks</Link>
           <Link to="/new" className="nav-link">New task</Link>
+          <Link to="/archive" className="nav-link">Archive</Link>
         </nav>
       </header>
       <main className="main">
         <Routes>
           <Route index element={<TaskListPage />} />
           <Route path="new" element={<CreateTaskPage />} />
+          <Route path="archive" element={<ArchivePage />} />
           <Route path="task/:taskName" element={<TaskCommsPage />} />
         </Routes>
       </main>
@@ -34,11 +36,18 @@ function TaskListPage() {
   const [tasks, setTasks] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    document.title = 'Dev – Tasks'
-    return () => { document.title = DEFAULT_TAB_TITLE }
-  }, [])
+  const [lastArchived, setLastArchived] = useState<{ archivedName: string; taskName: string } | null>(() => {
+    try {
+      const raw = sessionStorage.getItem('dev_undo_archive')
+      if (raw) {
+        sessionStorage.removeItem('dev_undo_archive')
+        return JSON.parse(raw) as { archivedName: string; taskName: string }
+      }
+    } catch {
+      // ignore
+    }
+    return null
+  })
 
   const loadTasks = useCallback(async () => {
     setError(null)
@@ -57,13 +66,34 @@ function TaskListPage() {
     loadTasks()
   }, [loadTasks])
 
+  const handleUndoArchive = useCallback(async () => {
+    if (!lastArchived) return
+    try {
+      await api.unarchiveTask(lastArchived.archivedName)
+      setLastArchived(null)
+      loadTasks()
+    } catch {
+      // leave banner so user can retry or dismiss
+    }
+  }, [lastArchived, loadTasks])
+
   return (
-    <TaskList
-      tasks={tasks}
-      loading={loading}
-      error={error}
-      onRefresh={loadTasks}
-    />
+    <>
+      {lastArchived && (
+        <div className="archive-undo-banner">
+          <span>Task {lastArchived.taskName} archived.</span>
+          <button type="button" className="archive-undo-btn" onClick={handleUndoArchive}>Undo</button>
+          <button type="button" className="archive-dismiss-btn" onClick={() => setLastArchived(null)}>Dismiss</button>
+        </div>
+      )}
+      <TaskList
+        tasks={tasks}
+        loading={loading}
+        error={error}
+        onRefresh={loadTasks}
+        onArchived={setLastArchived}
+      />
+    </>
   )
 }
 
@@ -72,11 +102,13 @@ function TaskList({
   loading,
   error,
   onRefresh,
+  onArchived,
 }: {
   tasks: string[]
   loading: boolean
   error: string | null
   onRefresh: () => void
+  onArchived?: (info: { archivedName: string; taskName: string }) => void
 }) {
   const [archiving, setArchiving] = useState<string | null>(null)
   const [archiveError, setArchiveError] = useState<string | null>(null)
@@ -86,8 +118,10 @@ function TaskList({
     setArchiveError(null)
     setArchiving(taskName)
     try {
-      await api.archiveTask(taskName)
+      const res = await api.archiveTask(taskName)
       onRefresh()
+      const archivedName = res.archived_to.split('/').pop() ?? ''
+      onArchived?.({ archivedName, taskName })
     } catch (e) {
       setArchiveError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -113,6 +147,7 @@ function TaskList({
   return (
     <section className="task-list">
       <h2>Tasks</h2>
+      <p className="task-list-archive-link"><Link to="/archive">View archive</Link></p>
       {archiveError && <p className="inline-error">{archiveError}</p>}
       {tasks.length === 0 ? (
         <p className="empty">No tasks yet. Create one from “New task”.</p>
@@ -148,6 +183,120 @@ function CreateTaskPage() {
       onCreated={(taskName) => navigate(`/task/${encodeURIComponent(taskName)}`)}
       onCancel={() => navigate('/')}
     />
+  )
+}
+
+function formatArchiveDateLabel(dateStr: string): string {
+  if (!dateStr) return 'Unknown date'
+  const [month, day] = dateStr.split('-')
+  const months: Record<string, string> = {
+    jan: 'Jan', feb: 'Feb', mar: 'Mar', apr: 'Apr', may: 'May', jun: 'Jun',
+    jul: 'Jul', aug: 'Aug', sep: 'Sep', oct: 'Oct', nov: 'Nov', dec: 'Dec',
+  }
+  return `${day} ${months[month] ?? month}`
+}
+
+function ArchivePage() {
+  const [entries, setEntries] = useState<Array<{ archived_name: string; task_name: string; archived_date: string }>>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [unarchiving, setUnarchiving] = useState<string | null>(null)
+  const [unarchiveError, setUnarchiveError] = useState<string | null>(null)
+  const [restoredTask, setRestoredTask] = useState<string | null>(null)
+
+  const loadArchive = useCallback(async () => {
+    setError(null)
+    setLoading(true)
+    try {
+      const res = await api.getArchive()
+      setEntries(res.entries)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    document.title = 'Dev – Archive'
+    return () => { document.title = DEFAULT_TAB_TITLE }
+  }, [])
+
+  useEffect(() => {
+    loadArchive()
+  }, [loadArchive])
+
+  const handleUnarchive = async (archivedName: string) => {
+    if (!confirm(`Unarchive this task?`)) return
+    setUnarchiveError(null)
+    setUnarchiving(archivedName)
+    setRestoredTask(null)
+    try {
+      const res = await api.unarchiveTask(archivedName)
+      setRestoredTask(res.restored_task_name)
+      await loadArchive()
+    } catch (e) {
+      setUnarchiveError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setUnarchiving(null)
+    }
+  }
+
+  const byDate = entries.reduce<Record<string, typeof entries>>((acc, e) => {
+    const d = e.archived_date || 'unknown'
+    if (!acc[d]) acc[d] = []
+    acc[d].push(e)
+    return acc
+  }, {})
+  const dateOrder = [...new Set(entries.map((e) => e.archived_date || 'unknown'))].sort().reverse()
+
+  if (loading) return <p className="status">Loading archive…</p>
+  if (error) {
+    return (
+      <section className="archive-view">
+        <p className="inline-error">{error}</p>
+        <p><Link to="/">← Back to tasks</Link></p>
+      </section>
+    )
+  }
+
+  return (
+    <section className="archive-view">
+      <h2>Archive</h2>
+      <p><Link to="/">← Back to tasks</Link></p>
+      {unarchiveError && <p className="inline-error">{unarchiveError}</p>}
+      {restoredTask && (
+        <p className="archive-restored">
+          Restored. <Link to={`/task/${encodeURIComponent(restoredTask)}`}>Open {restoredTask}</Link>
+        </p>
+      )}
+      {entries.length === 0 ? (
+        <p className="empty">No archived tasks.</p>
+      ) : (
+        <div className="archive-by-date">
+          {dateOrder.map((dateKey) => (
+            <div key={dateKey} className="archive-date-group">
+              <h3>{formatArchiveDateLabel(dateKey)}</h3>
+              <ul>
+                {byDate[dateKey].map((e) => (
+                  <li key={e.archived_name} className="task-row">
+                    <span className="task-name">{e.task_name}</span>
+                    <button
+                      type="button"
+                      className="unarchive-btn"
+                      onClick={() => handleUnarchive(e.archived_name)}
+                      disabled={unarchiving === e.archived_name}
+                    >
+                      {unarchiving === e.archived_name ? 'Unarchiving…' : 'Unarchive'}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -448,7 +597,9 @@ export function TaskCommsPageContent({
     setArchiveError(null)
     setArchiving(true)
     try {
-      await api.archiveTask(taskName)
+      const res = await api.archiveTask(taskName)
+      const archivedName = res.archived_to.split('/').pop() ?? ''
+      sessionStorage.setItem('dev_undo_archive', JSON.stringify({ archivedName, taskName }))
       navigate('/')
     } catch (e) {
       setArchiveError(e instanceof Error ? e.message : String(e))
