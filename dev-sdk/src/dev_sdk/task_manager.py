@@ -3,18 +3,30 @@
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 import shutil
 import subprocess
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, NamedTuple
 
 from dev_sdk.comms import add_comms, comms_dir
+
+
+class ArchivedTaskEntry(NamedTuple):
+    """A single entry in the archive listing."""
+
+    archived_name: str
+    task_name: str
+    archived_date: str
 
 logger = logging.getLogger("dev_sdk")
 
 ProgressCallback = Callable[[str], None]
+
+# Archive dir name suffix: -<month>-<day>-<6 hex chars>, e.g. -mar-14-a1b2c3
+_ARCHIVE_SUFFIX_RE = re.compile(r"-[a-z]{3}-\d{1,2}-[a-f0-9]{6}$")
 
 
 class TaskManager:
@@ -214,4 +226,55 @@ class TaskManager:
         dest_name = f"{task_name}-{date_str}-{random_suffix}"
         dest = archive_root / dest_name
         shutil.move(str(task_dir), str(dest))
+        return dest
+
+    @staticmethod
+    def parse_archive_name(archived_name: str) -> tuple[str, str]:
+        """Parse archive dir name into (task_name, archived_date). Date is '' if suffix not recognized."""
+        m = _ARCHIVE_SUFFIX_RE.search(archived_name)
+        if not m:
+            return (archived_name, "")
+        suffix = m.group(0)
+        task_name = archived_name[: -len(suffix)]
+        # suffix is like -mar-14-a1b2c3; date part is -mar-14
+        date_part = suffix[: -7]  # strip -a1b2c3
+        archived_date = date_part.lstrip("-")  # mar-14
+        return (task_name, archived_date)
+
+    def list_archived_tasks(self) -> list[ArchivedTaskEntry]:
+        """List directories in .archive, parsed into task name and date. Sorted by date (newest first) then name."""
+        archive_root = self.tasks_root / ".archive"
+        if not archive_root.is_dir():
+            return []
+        entries: list[ArchivedTaskEntry] = []
+        for p in archive_root.iterdir():
+            if p.is_dir() and not p.name.startswith("."):
+                task_name, archived_date = self.parse_archive_name(p.name)
+                entries.append(
+                    ArchivedTaskEntry(
+                        archived_name=p.name,
+                        task_name=task_name,
+                        archived_date=archived_date,
+                    )
+                )
+        entries.sort(key=lambda e: e.task_name)
+        entries.sort(key=lambda e: e.archived_date, reverse=True)
+        return entries
+
+    def unarchive_task(self, archived_name: str) -> Path:
+        """Move .archive/<archived_name> back to tasks_root/<task_name>, stripping -date-random suffix."""
+        archived_name = archived_name.strip("/")
+        if not archived_name or ".." in archived_name or "/" in archived_name or "\\" in archived_name:
+            raise FileNotFoundError(f"Invalid archive name: {archived_name}")
+        archive_root = self.tasks_root / ".archive"
+        src = (archive_root / archived_name).resolve()
+        if not src.is_dir() or src.parent != archive_root.resolve():
+            raise FileNotFoundError(f"Archived task not found: {archived_name}")
+        task_name, _ = self.parse_archive_name(archived_name)
+        if not task_name:
+            raise FileNotFoundError(f"Invalid archive name: {archived_name}")
+        dest = self.tasks_root / task_name
+        if dest.exists():
+            raise FileExistsError(f"Task already exists: {task_name}")
+        shutil.move(str(src), str(dest))
         return dest
