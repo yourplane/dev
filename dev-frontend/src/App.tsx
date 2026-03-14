@@ -1,14 +1,11 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
-import { VariableSizeList as List } from 'react-window'
 import { api, apiBaseUrl } from './api'
 import { parseLogToSegments, type LogSegment } from './logParser'
 import './App.css'
 
 const FEED_POLL_INTERVAL_MS = 15000
-const FEED_ENTRY_HEIGHT_COLLAPSED = 52
-const FEED_ENTRY_HEIGHT_EXPANDED = 420
 
 export function Layout() {
   return (
@@ -285,40 +282,34 @@ const COMMAND_LABEL: Record<string, string> = {
   implement: 'Implement',
 }
 
-type FeedEntryItem = { type: string; id: string; created_at: number }
-type FeedListData = {
-  feedEntries: FeedEntryItem[]
+function FeedEntryRow({
+  entry,
+  contents,
+  loadingContentKeys,
+  isCollapsed,
+  entryKey,
+  toggleCollapsed,
+  loadEntryContent,
+  activeLogFilename,
+  isLast,
+  lastEntryRef,
+}: {
+  entry: { type: string; id: string; created_at: number }
   contents: Record<string, string>
   loadingContentKeys: Set<string>
-  collapsedKeys: Set<string>
+  isCollapsed: boolean
+  entryKey: string
   toggleCollapsed: (key: string) => void
   loadEntryContent: (entryId: string, type: string) => void
   activeLogFilename: string | null
-}
-
-function FeedRow({
-  index,
-  style,
-  data,
-}: {
-  index: number
-  style: React.CSSProperties
-  data: FeedListData
+  isLast: boolean
+  lastEntryRef: React.RefObject<HTMLDivElement | null>
 }) {
-  const { feedEntries, contents, loadingContentKeys, collapsedKeys, toggleCollapsed, loadEntryContent, activeLogFilename } = data
-  const entry = feedEntries[index]
-  const entryKey = `${entry.type}:${entry.id}`
-  const isCollapsed = collapsedKeys.has(entryKey)
-  const contentLoaded = contents[entry.id] !== undefined
   useEffect(() => {
-    if (!isCollapsed && !contentLoaded && !loadingContentKeys.has(entryKey)) {
+    if (!isCollapsed && contents[entry.id] === undefined && !loadingContentKeys.has(entryKey)) {
       loadEntryContent(entry.id, entry.type)
     }
-  }, [isCollapsed, contentLoaded, entryKey, entry.id, entry.type, loadEntryContent, loadingContentKeys])
-
-  const handleToggle = () => {
-    toggleCollapsed(entryKey)
-  }
+  }, [isCollapsed, entry.id, entry.type, entryKey, contents[entry.id], loadEntryContent, loadingContentKeys])
 
   const title =
     entry.type === 'log'
@@ -326,33 +317,30 @@ function FeedRow({
       : entry.id
 
   return (
-    <div style={style} className="feed-row-wrapper">
-      <div
-        className={entry.type === 'log' ? 'feed-entry feed-log-entry' : 'comms-entry'}
+    <div
+      ref={isLast ? lastEntryRef : undefined}
+      className={entry.type === 'log' ? 'feed-entry feed-log-entry' : 'comms-entry'}
+    >
+      <button
+        type="button"
+        className="feed-entry-header"
+        onClick={() => toggleCollapsed(entryKey)}
+        aria-expanded={!isCollapsed}
       >
-        <button
-          type="button"
-          className="feed-entry-header"
-          onClick={handleToggle}
-          aria-expanded={!isCollapsed}
-        >
-          <span className="feed-entry-chevron" aria-hidden>
-            {isCollapsed ? '▶' : '▼'}
-          </span>
-          <span className="feed-entry-title">
-            {title}
-          </span>
-        </button>
-        {!isCollapsed && (
-          <div className="comms-content">
-            {entry.type === 'log' ? (
-              <ParsedLogView raw={contents[entry.id] ?? ''} />
-            ) : (
-              <ReactMarkdown>{contents[entry.id] ?? '(loading…)'}</ReactMarkdown>
-            )}
-          </div>
-        )}
-      </div>
+        <span className="feed-entry-chevron" aria-hidden>
+          {isCollapsed ? '▶' : '▼'}
+        </span>
+        <span className="feed-entry-title">{title}</span>
+      </button>
+      {!isCollapsed && (
+        <div className="comms-content">
+          {entry.type === 'log' ? (
+            <ParsedLogView raw={contents[entry.id] ?? ''} />
+          ) : (
+            <ReactMarkdown>{contents[entry.id] ?? '(loading…)'}</ReactMarkdown>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -435,18 +423,7 @@ export function TaskCommsPageContent({
   const [prUrl, setPrUrl] = useState<string | null>(null)
   const [prError, setPrError] = useState<string | null>(null)
   const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false)
-  const listRef = useRef<List>(null)
-  const listContainerRef = useRef<HTMLDivElement>(null)
-  const [listHeight, setListHeight] = useState(400)
-  useEffect(() => {
-    const el = listContainerRef.current
-    if (!el) return
-    const set = () => setListHeight(el.clientHeight)
-    set()
-    const ro = new ResizeObserver(set)
-    ro.observe(el)
-    return () => ro.disconnect()
-  }, [])
+  const lastCommsEntryRef = useRef<HTMLDivElement | null>(null)
   const feedEntriesRef = useRef(feedEntries)
   feedEntriesRef.current = feedEntries
   const activeLogFilenameRef = useRef(activeLogFilename)
@@ -465,10 +442,6 @@ export function TaskCommsPageContent({
       return next
     })
   }, [])
-
-  useEffect(() => {
-    listRef.current?.resetAfterIndex(0)
-  }, [collapsedKeys])
 
   const handleArchive = async () => {
     if (!confirm(`Archive task "${taskName}"?`)) return
@@ -700,19 +673,19 @@ export function TaskCommsPageContent({
   useEffect(() => {
     if (!loading && feedEntries.length > 0) {
       if (scrollToBottomAfterLoad) {
-        listRef.current?.scrollToItem(feedEntries.length - 1, 'end')
+        lastCommsEntryRef.current?.scrollIntoView({ behavior: 'instant' })
         setScrollToBottomAfterLoad(false)
       } else if (!hasScrolledInitialRef.current) {
-        listRef.current?.scrollToItem(feedEntries.length - 1, 'end')
+        lastCommsEntryRef.current?.scrollIntoView({ behavior: 'smooth' })
         hasScrolledInitialRef.current = true
       }
     }
   }, [loading, scrollToBottomAfterLoad, feedEntries.length])
 
-  // Keep list scrolled to bottom when active log content is streaming
+  // Keep scrolled to bottom when active log content is streaming
   useEffect(() => {
     if (activeLogFilename && contents[activeLogFilename] && feedEntries.length > 0) {
-      listRef.current?.scrollToItem(feedEntries.length - 1, 'end')
+      lastCommsEntryRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
   }, [activeLogFilename, contents[activeLogFilename], feedEntries.length])
 
@@ -755,29 +728,26 @@ export function TaskCommsPageContent({
       {feedEntries.length === 0 ? (
         <p className="empty">No comms or agent logs yet for this task.</p>
       ) : (
-        <div ref={listContainerRef} className="comms-history comms-history-virtual" style={{ height: '60vh' }}>
-          <List
-            ref={listRef}
-            height={listHeight}
-            width="100%"
-            itemCount={feedEntries.length}
-            itemSize={(index) => {
-              const e = feedEntries[index]
-              const k = `${e.type}:${e.id}`
-              return collapsedKeys.has(k) ? FEED_ENTRY_HEIGHT_COLLAPSED : FEED_ENTRY_HEIGHT_EXPANDED
-            }}
-            itemData={{
-              feedEntries,
-              contents,
-              loadingContentKeys,
-              collapsedKeys,
-              toggleCollapsed,
-              loadEntryContent,
-              activeLogFilename,
-            }}
-          >
-            {FeedRow}
-          </List>
+        <div className="comms-history">
+          {feedEntries.map((entry, i) => {
+            const entryKey = `${entry.type}:${entry.id}`
+            const isLast = i === feedEntries.length - 1
+            return (
+              <FeedEntryRow
+                key={entryKey}
+                entry={entry}
+                contents={contents}
+                loadingContentKeys={loadingContentKeys}
+                isCollapsed={collapsedKeys.has(entryKey)}
+                entryKey={entryKey}
+                toggleCollapsed={toggleCollapsed}
+                loadEntryContent={loadEntryContent}
+                activeLogFilename={activeLogFilename}
+                isLast={isLast}
+                lastEntryRef={lastCommsEntryRef}
+              />
+            )
+          })}
         </div>
       )}
       <div className="task-commands">

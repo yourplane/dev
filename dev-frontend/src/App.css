@@ -379,19 +379,6 @@
   margin-top: 1rem;
 }
 
-.comms-history-virtual {
-  min-height: 200px;
-}
-
-.feed-row-wrapper {
-  padding-bottom: 0.25rem;
-}
-
-.feed-row-wrapper .comms-entry,
-.feed-row-wrapper .feed-entry {
-  margin-bottom: 0;
-}
-
 .comms-entry,
 .feed-entry {
   margin-bottom: 1.25rem;
