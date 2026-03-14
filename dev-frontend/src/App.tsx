@@ -822,7 +822,11 @@ export function TaskCommsPageContent({
     if (!loading && feedEntries.length > 0) {
       if (scrollToBottomAfterLoad) {
         setScrollToBottomAfterLoad(false)
-        window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
+          })
+        })
       } else if (!hasScrolledInitialRef.current) {
         lastCommsEntryRef.current?.scrollIntoView({ behavior: 'smooth' })
         hasScrolledInitialRef.current = true
@@ -830,10 +834,14 @@ export function TaskCommsPageContent({
     }
   }, [loading, scrollToBottomAfterLoad, feedEntries.length])
 
-  // Keep scrolled to bottom when active log content is streaming
+  // When streaming active log: only auto-scroll if user is already at bottom (follow mode); otherwise stay in place
+  const SCROLL_NEAR_BOTTOM_PX = 80
   useEffect(() => {
-    if (activeLogFilename && contents[activeLogFilename] && feedEntries.length > 0) {
-      lastCommsEntryRef.current?.scrollIntoView({ behavior: 'smooth' })
+    if (!activeLogFilename || !contents[activeLogFilename] || feedEntries.length === 0) return
+    const nearBottom =
+      window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - SCROLL_NEAR_BOTTOM_PX
+    if (nearBottom) {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
     }
   }, [activeLogFilename, contents[activeLogFilename], feedEntries.length])
 
