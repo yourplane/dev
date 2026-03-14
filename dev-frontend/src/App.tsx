@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
 import { api, apiBaseUrl } from './api'
 import './App.css'
 
@@ -382,7 +383,9 @@ function TaskCommsPage() {
           {files.map((filename) => (
             <div key={filename} className="comms-entry">
               <div className="comms-filename">{filename}</div>
-              <pre className="comms-content">{contents[filename] ?? '(loading…)'}</pre>
+              <div className="comms-content">
+                <ReactMarkdown>{contents[filename] ?? '(loading…)'}</ReactMarkdown>
+              </div>
             </div>
           ))}
         </div>
