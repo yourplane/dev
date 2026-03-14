@@ -131,7 +131,7 @@ function CreateTaskPage() {
   const navigate = useNavigate()
   return (
     <CreateTaskForm
-      onCreated={() => navigate('/')}
+      onCreated={(taskName) => navigate(`/task/${encodeURIComponent(taskName)}`)}
       onCancel={() => navigate('/')}
     />
   )
@@ -141,7 +141,7 @@ function CreateTaskForm({
   onCreated,
   onCancel,
 }: {
-  onCreated: () => void
+  onCreated: (taskName: string) => void
   onCancel: () => void
 }) {
   const [repos, setRepos] = useState<Record<string, string>>({})
@@ -172,12 +172,12 @@ function CreateTaskForm({
     if (!repoValue.trim()) { setError('Repo is required (select a shorthand or enter a URL)'); return }
     setSubmitting(true)
     try {
-      await api.createTask({
+      const res = await api.createTask({
         title: title.trim(),
         repo: repoValue.trim(),
         comment: comment.trim() || undefined,
       })
-      onCreated()
+      onCreated(res.task_name)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
