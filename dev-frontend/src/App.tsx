@@ -25,10 +25,17 @@ export function Layout() {
   )
 }
 
+const DEFAULT_TAB_TITLE = 'Dev – Task management'
+
 function TaskListPage() {
   const [tasks, setTasks] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    document.title = 'Dev – Tasks'
+    return () => { document.title = DEFAULT_TAB_TITLE }
+  }, [])
 
   const loadTasks = useCallback(async () => {
     setError(null)
@@ -129,6 +136,10 @@ function TaskList({
 
 function CreateTaskPage() {
   const navigate = useNavigate()
+  useEffect(() => {
+    document.title = 'Dev – New task'
+    return () => { document.title = DEFAULT_TAB_TITLE }
+  }, [])
   return (
     <CreateTaskForm
       onCreated={(taskName) => navigate(`/task/${encodeURIComponent(taskName)}`)}
@@ -396,6 +407,11 @@ export function TaskCommsPageContent({
   useEffect(() => {
     loadComms()
   }, [loadComms])
+
+  useEffect(() => {
+    document.title = `Dev – ${taskName}`
+    return () => { document.title = DEFAULT_TAB_TITLE }
+  }, [taskName])
 
   const handlePostComment = async (e: React.FormEvent) => {
     e.preventDefault()
