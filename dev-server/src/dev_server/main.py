@@ -2,7 +2,6 @@
 
 import os
 import re
-import subprocess
 import threading
 from pathlib import Path
 
@@ -13,34 +12,32 @@ from pydantic import BaseModel, Field
 
 from dev_sdk.agent_run import (
     AgentRunError,
-    SUPPORTED_COMMANDS,
-    post_process_plan_implement,
-    start_agent_process,
+    run_implement,
+    run_plan_implement,
 )
 from dev_sdk.comms import add_comms, comms_dir, read_index
 from dev_sdk.repo_config import load_repos, resolve_repo
 from dev_sdk.task_manager import TaskManager
 
-# In-memory registry: task_name -> { "command_id", "process", "stream_log_path", "task_dir" }
+SUPPORTED_COMMANDS = ("plan-implement", "implement")
+
+# In-memory registry: task_name -> { "command_id", "thread" }
 _command_registry: dict[str, dict] = {}
 _command_registry_lock = threading.Lock()
 
 
-def _reaper(
-    task_name: str,
-    command_id: str,
-    task_dir: Path,
-    stream_log_path: Path,
-    process: subprocess.Popen[str],
-) -> None:
-    process.wait()
-    if command_id == "plan-implement":
-        try:
-            post_process_plan_implement(task_dir, stream_log_path)
-        except Exception:
-            pass
-    with _command_registry_lock:
-        _command_registry.pop(task_name, None)
+def _run_command_in_thread(task_name: str, command_id: str, task_dir: Path) -> None:
+    """Run run_plan_implement or run_implement in this thread; clear registry when done."""
+    try:
+        if command_id == "plan-implement":
+            run_plan_implement(task_dir)
+        else:
+            run_implement(task_dir)
+    except AgentRunError:
+        pass
+    finally:
+        with _command_registry_lock:
+            _command_registry.pop(task_name, None)
 
 app = FastAPI(
     title="dev-server",
@@ -236,33 +233,22 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
             detail=f"Unsupported command: {body.command!r}. Supported: {list(SUPPORTED_COMMANDS)}",
         )
     task_dir = _task_dir(task_name)
+    if "DEV_TASKS_DIR" not in os.environ:
+        os.environ["DEV_TASKS_DIR"] = str(_tasks_root())
     with _command_registry_lock:
         if task_name in _command_registry:
             raise HTTPException(
                 status_code=409,
                 detail="A command is already running for this task.",
             )
-        try:
-            env = dict(os.environ)
-            if "DEV_TASKS_DIR" not in env:
-                env["DEV_TASKS_DIR"] = str(_tasks_root())
-            proc, stream_log_path = start_agent_process(
-                task_dir, body.command, agent_cmd=None, env=env
-            )
-        except AgentRunError as e:
-            raise HTTPException(status_code=400, detail=str(e))
-        _command_registry[task_name] = {
-            "command_id": body.command,
-            "process": proc,
-            "stream_log_path": stream_log_path,
-            "task_dir": task_dir,
-        }
-    thread = threading.Thread(
-        target=_reaper,
-        args=(task_name, body.command, task_dir, stream_log_path, proc),
-        daemon=True,
-    )
-    thread.start()
+        # Run in background thread; thread clears registry when done
+        thread = threading.Thread(
+            target=_run_command_in_thread,
+            args=(task_name, body.command, task_dir),
+            daemon=True,
+        )
+        thread.start()
+        _command_registry[task_name] = {"command_id": body.command, "thread": thread}
     return StartCommandResponse(command=body.command)
 
 
