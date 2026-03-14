@@ -350,6 +350,7 @@ export function TaskCommsPageContent({
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
+  const [activeLogFilename, setActiveLogFilename] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [startingCommand, setStartingCommand] = useState<string | null>(null)
   const [creatingPr, setCreatingPr] = useState(false)
@@ -389,6 +390,7 @@ export function TaskCommsPageContent({
     try {
       const res = await api.getTaskCommandStatus(taskName)
       setActiveCommand(res.active && res.command ? res.command : null)
+      setActiveLogFilename(res.active && res.active_log_filename ? res.active_log_filename : null)
     } catch {
       // ignore; task might not exist yet
     }
@@ -403,6 +405,11 @@ export function TaskCommsPageContent({
       const map: Record<string, string> = {}
       await Promise.all(
         res.entries.map(async (entry) => {
+          // Skip fetching the active log file; its content is streamed instead
+          if (entry.type === 'log' && entry.id === activeLogFilename) {
+            map[entry.id] = ''
+            return
+          }
           const text =
             entry.type === 'comms'
               ? await api.getTaskCommsFile(taskName, entry.id)
@@ -410,13 +417,20 @@ export function TaskCommsPageContent({
           map[entry.id] = text
         })
       )
-      setContents(map)
+      setContents((prev) => {
+        const next = { ...map }
+        // Preserve streamed content for the active log when reloading feed
+        if (activeLogFilename && (prev[activeLogFilename] ?? '').length > 0) {
+          next[activeLogFilename] = prev[activeLogFilename]
+        }
+        return next
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }
-  }, [taskName])
+  }, [taskName, activeLogFilename])
 
   useEffect(() => {
     loadCommandStatus()
@@ -434,6 +448,32 @@ export function TaskCommsPageContent({
     }
     prevActiveCommandRef.current = activeCommand
   }, [activeCommand, loadFeed])
+
+  // When a command becomes active with an active log, reload feed so the new log entry appears
+  useEffect(() => {
+    if (activeCommand && activeLogFilename) {
+      loadFeed()
+    }
+  }, [activeCommand, activeLogFilename, loadFeed])
+
+  // Stream the active log via SSE while command is running
+  useEffect(() => {
+    if (!activeCommand || !activeLogFilename) return
+    const es = api.openTaskLogStream(taskName)
+    es.onmessage = (e: MessageEvent) => {
+      const data = e.data != null ? String(e.data) : ''
+      setContents((prev) => ({
+        ...prev,
+        [activeLogFilename]: (prev[activeLogFilename] ?? '') + data + (data && !data.endsWith('\n') ? '\n' : ''),
+      }))
+    }
+    es.onerror = () => {
+      es.close()
+    }
+    return () => {
+      es.close()
+    }
+  }, [taskName, activeCommand, activeLogFilename])
 
   const handleStartCommand = async (command: string) => {
     setCommandError(null)
@@ -501,6 +541,13 @@ export function TaskCommsPageContent({
     }
   }, [loading, scrollToBottomAfterLoad, feedEntries.length])
 
+  // Keep scrolled to bottom of page when active log content is streaming
+  useEffect(() => {
+    if (activeLogFilename && contents[activeLogFilename]) {
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })
+    }
+  }, [activeLogFilename, contents[activeLogFilename]])
+
   if (loading) return <p className="status">Loading feed…</p>
   if (error) {
     return (
@@ -549,7 +596,9 @@ export function TaskCommsPageContent({
                     {isCollapsed ? '▶' : '▼'}
                   </span>
                   <span className="feed-entry-title">
-                    {entry.type === 'log' ? `Agent log: ${entry.id}` : entry.id}
+                    {entry.type === 'log'
+                      ? `Agent log: ${entry.id}${entry.id === activeLogFilename ? ' (live)' : ''}`
+                      : entry.id}
                   </span>
                 </button>
                 {!isCollapsed && (

@@ -50,6 +50,8 @@ def test_start_command_returns_201_and_status_active(client_with_tasks: TestClie
     assert resp2.status_code == 200
     assert resp2.json()["active"] is True
     assert resp2.json()["command"] == "plan-implement"
+    # active_log_filename is set only after on_start is called by the real run; with mock it stays None
+    assert "active_log_filename" in resp2.json()
 
     block.set()
     time.sleep(0.3)
