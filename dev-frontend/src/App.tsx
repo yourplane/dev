@@ -502,6 +502,7 @@ export function TaskCommsPageContent({
   const [activeLogFilename, setActiveLogFilename] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [startingCommand, setStartingCommand] = useState<string | null>(null)
+  const [cancelling, setCancelling] = useState(false)
   const [creatingPr, setCreatingPr] = useState(false)
   const [prUrl, setPrUrl] = useState<string | null>(null)
   const [prError, setPrError] = useState<string | null>(null)
@@ -636,6 +637,19 @@ export function TaskCommsPageContent({
       setCommandError(e instanceof Error ? e.message : String(e))
     } finally {
       setStartingCommand(null)
+    }
+  }
+
+  const handleCancelCommand = async () => {
+    setCommandError(null)
+    setCancelling(true)
+    try {
+      await api.cancelTaskCommand(taskName)
+      // Poll will clear activeCommand when the command actually stops
+    } catch (e) {
+      setCommandError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCancelling(false)
     }
   }
 
@@ -775,9 +789,19 @@ export function TaskCommsPageContent({
       )}
       <div className="task-commands">
         {activeCommand ? (
-          <p className="command-status">
-            <span className="command-spinner" aria-hidden /> Running: {COMMAND_LABEL[activeCommand] ?? activeCommand}
-          </p>
+          <div className="command-status-row">
+            <p className="command-status">
+              <span className="command-spinner" aria-hidden /> Running: {COMMAND_LABEL[activeCommand] ?? activeCommand}
+            </p>
+            <button
+              type="button"
+              className="command-btn command-cancel-btn"
+              disabled={cancelling}
+              onClick={handleCancelCommand}
+            >
+              {cancelling ? 'Cancelling…' : 'Cancel'}
+            </button>
+          </div>
         ) : (
           <div className="command-buttons">
             <button

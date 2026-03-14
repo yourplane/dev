@@ -29,7 +29,12 @@ _command_registry: dict[str, dict] = {}
 _command_registry_lock = threading.Lock()
 
 
-def _run_command_in_thread(task_name: str, command_id: str, task_dir: Path) -> None:
+def _run_command_in_thread(
+    task_name: str,
+    command_id: str,
+    task_dir: Path,
+    cancel_requested: threading.Event,
+) -> None:
     """Run run_plan_implement or run_implement in this thread; clear registry when done."""
 
     def on_start(stream_log_path: Path) -> None:
@@ -39,9 +44,9 @@ def _run_command_in_thread(task_name: str, command_id: str, task_dir: Path) -> N
 
     try:
         if command_id == "plan-implement":
-            run_plan_implement(task_dir, on_start=on_start)
+            run_plan_implement(task_dir, on_start=on_start, cancel_event=cancel_requested)
         else:
-            run_implement(task_dir, on_start=on_start)
+            run_implement(task_dir, on_start=on_start, cancel_event=cancel_requested)
     except AgentRunError:
         pass
     finally:
@@ -388,13 +393,17 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
                 status_code=409,
                 detail="A command is already running for this task.",
             )
-        # Run in background thread; thread clears registry when done
+        cancel_requested = threading.Event()
         thread = threading.Thread(
             target=_run_command_in_thread,
-            args=(task_name, body.command, task_dir),
+            args=(task_name, body.command, task_dir, cancel_requested),
             daemon=True,
         )
-        _command_registry[task_name] = {"command_id": body.command, "thread": thread}
+        _command_registry[task_name] = {
+            "command_id": body.command,
+            "thread": thread,
+            "cancel_requested": cancel_requested,
+        }
         thread.start()
     return StartCommandResponse(command=body.command)
 
@@ -412,6 +421,20 @@ def get_task_command_status(task_name: str) -> CommandStatusResponse:
         command=entry["command_id"],
         active_log_filename=entry.get("active_log_filename"),
     )
+
+
+@app.post("/tasks/{task_name}/commands/cancel", status_code=204)
+def cancel_task_command(task_name: str) -> None:
+    """Request cancellation of the running command for the task. No-op if no command is running."""
+    _task_dir(task_name)
+    with _command_registry_lock:
+        entry = _command_registry.get(task_name)
+    if entry is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No command is running for this task.",
+        )
+    entry["cancel_requested"].set()
 
 
 @app.post("/tasks/{task_name}/create-pr", response_model=CreatePRResponse)

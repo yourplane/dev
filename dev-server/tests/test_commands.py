@@ -100,6 +100,44 @@ def test_get_commands_404_for_nonexistent_task(client_with_tasks: TestClient) ->
     assert resp.status_code == 404
 
 
+def test_cancel_command_sets_event_and_status_becomes_inactive(
+    client_with_tasks: TestClient, task_dir: Path
+) -> None:
+    """POST cancel sets cancel event; blocking run receives it and exits, status becomes inactive."""
+    run_finished = threading.Event()
+
+    def blocking_until_cancel(*args: object, cancel_event: threading.Event | None = None, **kwargs: object) -> None:
+        (cancel_event or threading.Event()).wait()
+        run_finished.set()
+
+    with patch("dev_server.main.run_plan_implement", side_effect=blocking_until_cancel):
+        resp = client_with_tasks.post(
+            "/tasks/mytask/commands",
+            json={"command": "plan-implement"},
+        )
+    assert resp.status_code == 201
+
+    resp2 = client_with_tasks.get("/tasks/mytask/commands")
+    assert resp2.status_code == 200
+    assert resp2.json()["active"] is True
+
+    resp_cancel = client_with_tasks.post("/tasks/mytask/commands/cancel")
+    assert resp_cancel.status_code == 204
+
+    run_finished.wait(timeout=2.0)
+    time.sleep(0.2)
+    resp3 = client_with_tasks.get("/tasks/mytask/commands")
+    assert resp3.status_code == 200
+    assert resp3.json()["active"] is False
+
+
+def test_cancel_command_404_when_no_command_running(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """POST cancel when no command is running returns 404."""
+    resp = client_with_tasks.post("/tasks/mytask/commands/cancel")
+    assert resp.status_code == 404
+    assert "No command" in resp.json()["detail"]
+
+
 def test_create_pr_returns_pr_url(client_with_tasks: TestClient, task_dir: Path) -> None:
     """POST create-pr returns 200 and pr_url when create_pull_request succeeds."""
     with patch("dev_server.main.create_pull_request", return_value="https://github.com/owner/repo/pull/1"):
