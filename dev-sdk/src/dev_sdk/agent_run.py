@@ -504,3 +504,110 @@ def run_test(
         comms_path=comms_path,
         script_exit_code=script_exit_code,
     )
+
+
+# --- Async server API: start process, post-process when done ---
+
+SUPPORTED_COMMANDS = ("plan-implement", "implement")
+
+
+def _stream_log_path_for_command(task_dir: Path, command_id: str) -> Path:
+    logs_dir = task_dir / PLAN_LOGS_DIR
+    logs_dir.mkdir(exist_ok=True)
+    prefix = (
+        PLAN_IMPLEMENT_STREAM_LOG_PREFIX
+        if command_id == "plan-implement"
+        else IMPLEMENT_STREAM_LOG_PREFIX
+    )
+    name = f"{prefix}{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.log"
+    return logs_dir / name
+
+
+def _build_agent_argv_for_command(
+    task_dir: Path,
+    command_id: str,
+    agent_cmd: str,
+) -> list[str]:
+    """Build argv for plan-implement or implement. Raises AgentRunError if chat ID missing."""
+    chat_id = _read_chat_id(task_dir)
+    if command_id == "plan-implement":
+        return [
+            agent_cmd,
+            "agent",
+            "--print",
+            "--output-format",
+            "stream-json",
+            "--stream-partial-output",
+            "--mode",
+            "ask",
+            "--resume",
+            chat_id,
+            "--workspace",
+            str(task_dir),
+            "--trust",
+            PLAN_MODE_PROMPT,
+        ]
+    if command_id == "implement":
+        return [
+            agent_cmd,
+            "agent",
+            "--print",
+            "--force",
+            "--sandbox",
+            "disabled",
+            "--output-format",
+            "stream-json",
+            "--stream-partial-output",
+            "--resume",
+            chat_id,
+            "--workspace",
+            str(task_dir),
+            "--trust",
+            IMPLEMENT_MODE_PROMPT,
+        ]
+    raise AgentRunError(f"Unsupported command: {command_id!r}")
+
+
+def start_agent_process(
+    task_dir: Path,
+    command_id: str,
+    agent_cmd: str | None = None,
+    env: dict[str, str] | None = None,
+) -> tuple[subprocess.Popen[str], Path]:
+    """
+    Start the agent subprocess for the given command (plan-implement or implement).
+    Stdout is written to a new stream log file. Returns (process, stream_log_path).
+    Caller must wait on the process and may call post_process_plan_implement when
+    command_id is plan-implement after process exits.
+    """
+    cmd = agent_cmd or _agent_cmd()
+    argv = _build_agent_argv_for_command(task_dir, command_id, cmd)
+    stream_log_path = _stream_log_path_for_command(task_dir, command_id)
+    run_env = dict(env) if env else {}
+    log_file = open(stream_log_path, "w", encoding="utf-8")
+    try:
+        proc = subprocess.Popen(
+            argv,
+            cwd=str(task_dir),
+            stdout=log_file,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            env=run_env,
+        )
+    except Exception:
+        log_file.close()
+        raise
+    return proc, stream_log_path
+
+
+def post_process_plan_implement(task_dir: Path, stream_log_path: Path) -> Path:
+    """
+    After plan-implement process has exited: read stream log, extract plan,
+    write task-plan-draft.md and add plan to comms. Returns path to the comms file.
+    """
+    content = stream_log_path.read_text(encoding="utf-8")
+    plan_text = extract_plan_from_stream_json(content)
+    draft_path = task_dir / TASK_PLAN_DRAFT
+    draft_path.write_text(plan_text, encoding="utf-8")
+    return add_comms(task_dir, "agent", plan_text, kind="plan")

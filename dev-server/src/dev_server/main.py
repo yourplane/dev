@@ -11,7 +11,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, Field
 
-from dev_sdk.agent_runner import (
+from dev_sdk.agent_run import (
+    AgentRunError,
     SUPPORTED_COMMANDS,
     post_process_plan_implement,
     start_agent_process,
@@ -242,14 +243,13 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
                 detail="A command is already running for this task.",
             )
         try:
-            agent_cmd = os.environ.get("DEV_AGENT_CMD", "cursor")
             env = dict(os.environ)
             if "DEV_TASKS_DIR" not in env:
                 env["DEV_TASKS_DIR"] = str(_tasks_root())
             proc, stream_log_path = start_agent_process(
-                task_dir, body.command, agent_cmd=agent_cmd, env=env
+                task_dir, body.command, agent_cmd=None, env=env
             )
-        except (FileNotFoundError, ValueError) as e:
+        except AgentRunError as e:
             raise HTTPException(status_code=400, detail=str(e))
         _command_registry[task_name] = {
             "command_id": body.command,
