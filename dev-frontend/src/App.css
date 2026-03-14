@@ -486,6 +486,17 @@
   border-color: #999;
 }
 
+.task-comms-scroll-btn-bottom.task-comms-scroll-btn-locked {
+  background: linear-gradient(to bottom, #e8f4fc, #0088ff);
+  border-color: #0088ff;
+  color: #fff;
+}
+
+.task-comms-scroll-btn-bottom.task-comms-scroll-btn-locked:hover {
+  background: linear-gradient(to bottom, #d0ebfc, #0077dd);
+  border-color: #0077dd;
+}
+
 .comms-history {
   margin-top: 1rem;
 }

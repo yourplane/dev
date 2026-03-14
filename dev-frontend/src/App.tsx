@@ -571,6 +571,8 @@ export function TaskCommsPageContent({
   const [prUrl, setPrUrl] = useState<string | null>(null)
   const [prError, setPrError] = useState<string | null>(null)
   const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false)
+  const [lockedToBottom, setLockedToBottom] = useState(false)
+  const programmaticScrollRef = useRef(false)
   const lastCommsEntryRef = useRef<HTMLDivElement | null>(null)
   const feedEntriesRef = useRef(feedEntries)
   feedEntriesRef.current = feedEntries
@@ -838,22 +840,51 @@ export function TaskCommsPageContent({
     }
   }, [loading, scrollToBottomAfterLoad, feedEntries.length])
 
-  // When streaming active log: only auto-scroll if user is already at bottom (follow mode); otherwise stay in place
+  // Enter locked-to-bottom when a streaming command is running (on load or when command starts)
+  useEffect(() => {
+    if (activeCommand && activeLogFilename) {
+      setLockedToBottom(true)
+    }
+  }, [activeCommand, activeLogFilename])
+
+  // Leave locked when user scrolls (ignore programmatic scrolls)
+  useEffect(() => {
+    const onScroll = () => {
+      if (!programmaticScrollRef.current) {
+        setLockedToBottom(false)
+      }
+    }
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [])
+
+  // When streaming: if locked to bottom, always scroll to bottom; else only if user was near bottom
   const SCROLL_NEAR_BOTTOM_PX = 80
   useEffect(() => {
     if (!activeLogFilename || !contents[activeLogFilename] || feedEntries.length === 0) return
     const nearBottom =
       window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - SCROLL_NEAR_BOTTOM_PX
-    if (nearBottom) {
+    if (lockedToBottom || nearBottom) {
+      programmaticScrollRef.current = true
       window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          programmaticScrollRef.current = false
+        })
+      })
     }
-  }, [activeLogFilename, contents[activeLogFilename], feedEntries.length])
+  }, [activeLogFilename, contents[activeLogFilename], feedEntries.length, lockedToBottom])
 
   const scrollToTop = () => {
+    setLockedToBottom(false)
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }
-  const scrollToBottom = () => {
+  const scrollToBottomClick = () => {
+    setLockedToBottom(false)
     window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })
+  }
+  const scrollToBottomDoubleClick = () => {
+    setLockedToBottom(true)
   }
 
   if (loading) return <p className="status">Loading feed…</p>
@@ -980,8 +1011,9 @@ export function TaskCommsPageContent({
         </button>
         <button
           type="button"
-          className="task-comms-scroll-btn"
-          onClick={scrollToBottom}
+          className={`task-comms-scroll-btn task-comms-scroll-btn-bottom ${lockedToBottom ? 'task-comms-scroll-btn-locked' : ''}`}
+          onClick={scrollToBottomClick}
+          onDoubleClick={scrollToBottomDoubleClick}
           aria-label="Scroll to bottom"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
