@@ -809,8 +809,8 @@ export function TaskCommsPageContent({
     try {
       await api.postTaskComms(taskName, content)
       setCommentText('')
-      setScrollToBottomAfterLoad(true)
       await loadFeed({ incremental: true, prefetchNew: true })
+      setScrollToBottomAfterLoad(true)
     } catch (e) {
       setPostError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -822,9 +822,13 @@ export function TaskCommsPageContent({
     if (!loading && feedEntries.length > 0) {
       if (scrollToBottomAfterLoad) {
         setScrollToBottomAfterLoad(false)
+        const scrollToBottom = () => {
+          window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
+        }
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
-            window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
+            scrollToBottom()
+            setTimeout(scrollToBottom, 50)
           })
         })
       } else if (!hasScrolledInitialRef.current) {
