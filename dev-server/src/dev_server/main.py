@@ -16,6 +16,7 @@ from dev_sdk.agent_run import (
     run_plan_implement,
 )
 from dev_sdk.comms import add_comms, comms_dir, read_index
+from dev_sdk.feed import LOGS_DIR, read_feed
 from dev_sdk.create_pr import CreatePRError, create_pull_request
 from dev_sdk.repo_config import load_repos, resolve_repo
 from dev_sdk.task_manager import TaskManager
@@ -127,6 +128,16 @@ class CreatePRResponse(BaseModel):
     pr_url: str
 
 
+class FeedEntryModel(BaseModel):
+    type: str  # "comms" | "log"
+    id: str
+    created_at: float
+
+
+class ListFeedResponse(BaseModel):
+    entries: list[FeedEntryModel]
+
+
 def _task_dir(task_name: str) -> Path:
     """Return task directory path. Raises HTTPException 404 if task does not exist or path is invalid."""
     if not task_name or "/" in task_name or "\\" in task_name or task_name in (".", ".."):
@@ -227,6 +238,29 @@ def get_task_comms_file(task_name: str, filename: str) -> str:
     if not path.is_file() or path.resolve().parent != cdir.resolve():
         raise HTTPException(status_code=404, detail="File not found")
     return path.read_text(encoding="utf-8")
+
+
+@app.get("/tasks/{task_name}/feed", response_model=ListFeedResponse)
+def list_task_feed(task_name: str) -> ListFeedResponse:
+    """List feed entries (comms + agent logs) sorted by file creation date."""
+    task_dir = _task_dir(task_name)
+    entries = read_feed(task_dir)
+    return ListFeedResponse(
+        entries=[FeedEntryModel(type=e.type, id=e.id, created_at=e.created_at) for e in entries]
+    )
+
+
+@app.get("/tasks/{task_name}/logs/{filename}", response_class=PlainTextResponse)
+def get_task_log_file(task_name: str, filename: str) -> str:
+    """Return raw content of a single agent log file under task .logs directory."""
+    if not filename or "/" in filename or "\\" in filename or filename in (".", ".."):
+        raise HTTPException(status_code=404, detail="Invalid filename")
+    task_dir = _task_dir(task_name)
+    logs_path = task_dir / LOGS_DIR
+    path = logs_path / filename
+    if not path.is_file() or path.resolve().parent != logs_path.resolve():
+        raise HTTPException(status_code=404, detail="File not found")
+    return path.read_text(encoding="utf-8", errors="replace")
 
 
 @app.post("/tasks/{task_name}/commands", response_model=StartCommandResponse, status_code=201)

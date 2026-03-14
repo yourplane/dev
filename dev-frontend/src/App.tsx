@@ -285,7 +285,7 @@ export function TaskCommsPageContent({
   taskName: string
   navigate: (to: string) => void
 }) {
-  const [files, setFiles] = useState<string[]>([])
+  const [feedEntries, setFeedEntries] = useState<Array<{ type: string; id: string; created_at: number }>>([])
   const [contents, setContents] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -326,21 +326,22 @@ export function TaskCommsPageContent({
     }
   }, [taskName])
 
-  const loadComms = useCallback(async () => {
+  const loadFeed = useCallback(async () => {
     setError(null)
     setLoading(true)
     try {
-      const res = await api.getTaskCommsList(taskName)
-      setFiles(res.files)
-      const pairs = await Promise.all(
-        res.files.map((filename) =>
-          api.getTaskCommsFile(taskName, filename).then((text) => ({ filename, text }))
-        )
-      )
+      const res = await api.getTaskFeed(taskName)
+      setFeedEntries(res.entries)
       const map: Record<string, string> = {}
-      for (const { filename, text } of pairs) {
-        map[filename] = text
-      }
+      await Promise.all(
+        res.entries.map(async (entry) => {
+          const text =
+            entry.type === 'comms'
+              ? await api.getTaskCommsFile(taskName, entry.id)
+              : await api.getTaskLogFile(taskName, entry.id)
+          map[entry.id] = text
+        })
+      )
       setContents(map)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -361,10 +362,10 @@ export function TaskCommsPageContent({
   const prevActiveCommandRef = useRef<string | null>(null)
   useEffect(() => {
     if (prevActiveCommandRef.current !== null && activeCommand === null) {
-      loadComms()
+      loadFeed()
     }
     prevActiveCommandRef.current = activeCommand
-  }, [activeCommand, loadComms])
+  }, [activeCommand, loadFeed])
 
   const handleStartCommand = async (command: string) => {
     setCommandError(null)
@@ -394,8 +395,8 @@ export function TaskCommsPageContent({
   }
 
   useEffect(() => {
-    loadComms()
-  }, [loadComms])
+    loadFeed()
+  }, [loadFeed])
 
   const handlePostComment = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -407,7 +408,7 @@ export function TaskCommsPageContent({
       await api.postTaskComms(taskName, content)
       setCommentText('')
       setScrollToBottomAfterLoad(true)
-      await loadComms()
+      await loadFeed()
     } catch (e) {
       setPostError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -416,13 +417,13 @@ export function TaskCommsPageContent({
   }
 
   useEffect(() => {
-    if (!loading && scrollToBottomAfterLoad && files.length > 0) {
+    if (!loading && scrollToBottomAfterLoad && feedEntries.length > 0) {
       lastCommsEntryRef.current?.scrollIntoView({ behavior: 'smooth' })
       setScrollToBottomAfterLoad(false)
     }
-  }, [loading, scrollToBottomAfterLoad, files.length])
+  }, [loading, scrollToBottomAfterLoad, feedEntries.length])
 
-  if (loading) return <p className="status">Loading comms…</p>
+  if (loading) return <p className="status">Loading feed…</p>
   if (error) {
     return (
       <section className="task-comms">
@@ -447,19 +448,25 @@ export function TaskCommsPageContent({
       </div>
       {archiveError && <p className="inline-error">{archiveError}</p>}
       <p><Link to="/">← Back to tasks</Link></p>
-      {files.length === 0 ? (
-        <p className="empty">No comms yet for this task.</p>
+      {feedEntries.length === 0 ? (
+        <p className="empty">No comms or agent logs yet for this task.</p>
       ) : (
         <div className="comms-history">
-          {files.map((filename, i) => (
+          {feedEntries.map((entry, i) => (
             <div
-              key={filename}
-              className="comms-entry"
-              ref={i === files.length - 1 ? lastCommsEntryRef : undefined}
+              key={`${entry.type}:${entry.id}`}
+              className={entry.type === 'log' ? 'feed-entry feed-log-entry' : 'comms-entry'}
+              ref={i === feedEntries.length - 1 ? lastCommsEntryRef : undefined}
             >
-              <div className="comms-filename">{filename}</div>
+              <div className="comms-filename">
+                {entry.type === 'log' ? `Agent log: ${entry.id}` : entry.id}
+              </div>
               <div className="comms-content">
-                <ReactMarkdown>{contents[filename] ?? '(loading…)'}</ReactMarkdown>
+                {entry.type === 'log' ? (
+                  <pre className="feed-log-content">{contents[entry.id] ?? '(loading…)'}</pre>
+                ) : (
+                  <ReactMarkdown>{contents[entry.id] ?? '(loading…)'}</ReactMarkdown>
+                )}
               </div>
             </div>
           ))}

@@ -354,11 +354,24 @@
   margin-top: 1rem;
 }
 
-.comms-entry {
+.comms-entry,
+.feed-entry {
   margin-bottom: 1.25rem;
   border: 1px solid #eee;
   border-radius: 6px;
   overflow: hidden;
+}
+
+.feed-log-entry .feed-log-content {
+  max-height: 20rem;
+  overflow: auto;
+  margin: 0;
+  padding: 0.75rem;
+  font-size: 0.8rem;
+  white-space: pre;
+  word-break: break-all;
+  background: #f8f8f8;
+  border-radius: 4px;
 }
 
 .comms-filename {
