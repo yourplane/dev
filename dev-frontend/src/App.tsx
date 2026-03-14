@@ -541,10 +541,10 @@ export function TaskCommsPageContent({
     }
   }, [loading, scrollToBottomAfterLoad, feedEntries.length])
 
-  // Keep scrolled to bottom when active log content is streaming (active log is last in feed)
+  // Keep scrolled to bottom of page when active log content is streaming
   useEffect(() => {
     if (activeLogFilename && contents[activeLogFilename]) {
-      lastCommsEntryRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
+      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })
     }
   }, [activeLogFilename, contents[activeLogFilename]])
 
