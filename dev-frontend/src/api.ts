@@ -157,6 +157,13 @@ export const api = {
     });
   },
 
+  cancelTaskCommand(taskName: string): Promise<void> {
+    return request(`/tasks/${encodeURIComponent(taskName)}/commands/cancel`, {
+      method: 'POST',
+      parseJson: false,
+    });
+  },
+
   createTaskPr(taskName: string): Promise<{ pr_url: string }> {
     return request(`/tasks/${encodeURIComponent(taskName)}/create-pr`, {
       method: 'POST',

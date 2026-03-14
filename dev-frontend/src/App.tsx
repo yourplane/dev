@@ -567,6 +567,7 @@ export function TaskCommsPageContent({
   const [activeLogFilename, setActiveLogFilename] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [startingCommand, setStartingCommand] = useState<string | null>(null)
+  const [cancelling, setCancelling] = useState(false)
   const [creatingPr, setCreatingPr] = useState(false)
   const [prUrl, setPrUrl] = useState<string | null>(null)
   const [prError, setPrError] = useState<string | null>(null)
@@ -614,7 +615,9 @@ export function TaskCommsPageContent({
   const loadCommandStatus = useCallback(async () => {
     try {
       const res = await api.getTaskCommandStatus(taskName)
-      setActiveCommand(res.active && res.command ? res.command : null)
+      const nextActive = res.active && res.command ? res.command : null
+      setActiveCommand(nextActive)
+      if (!nextActive) setCancelling(false)
       setActiveLogFilename(res.active && res.active_log_filename ? res.active_log_filename : null)
     } catch {
       // ignore; task might not exist yet
@@ -778,6 +781,18 @@ export function TaskCommsPageContent({
       setCommandError(e instanceof Error ? e.message : String(e))
     } finally {
       setStartingCommand(null)
+    }
+  }
+
+  const handleCancelCommand = async () => {
+    setCommandError(null)
+    setCancelling(true)
+    try {
+      await api.cancelTaskCommand(taskName)
+      // Leave cancelling true; loadCommandStatus will set it false when poll sees command inactive
+    } catch (e) {
+      setCommandError(e instanceof Error ? e.message : String(e))
+      setCancelling(false)
     }
   }
 
@@ -978,9 +993,25 @@ export function TaskCommsPageContent({
       )}
       <div className="task-commands">
         {activeCommand ? (
-          <p className="command-status">
-            <span className="command-spinner" aria-hidden /> Running: {COMMAND_LABEL[activeCommand] ?? activeCommand}
-          </p>
+          <div className="command-status-row">
+            {cancelling ? (
+              <p className="command-status">
+                <span className="command-spinner" aria-hidden /> Cancelling…
+              </p>
+            ) : (
+              <p className="command-status">
+                <span className="command-spinner" aria-hidden /> Running: {COMMAND_LABEL[activeCommand] ?? activeCommand}
+              </p>
+            )}
+            <button
+              type="button"
+              className="command-btn command-cancel-btn"
+              disabled={cancelling}
+              onClick={handleCancelCommand}
+            >
+              {cancelling ? 'Cancelling…' : 'Cancel'}
+            </button>
+          </div>
         ) : (
           <div className="command-buttons">
             <button

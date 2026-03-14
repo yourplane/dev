@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -47,6 +48,7 @@ DEV_TEST_MAX_LEVEL = 2  # Allow one nested run (level 0 and 1); level 2+ skipped
 
 STREAM_READER_TIMEOUT_SEC = 300
 PROC_WAIT_TIMEOUT_SEC = 5
+CANCEL_TERMINATE_TIMEOUT_SEC = 5
 
 
 def _agent_cmd() -> str:
@@ -127,6 +129,7 @@ def _run_agent_ask_stream_json(
     extra_argv: list[str] | None = None,
     on_stream_line: StreamLineCallback | None = None,
     on_start: Callable[[Path], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> tuple[Path, str]:
     """
     Run agent in ask mode with stream-json. Write each stdout line to log; optionally call on_stream_line(line).
@@ -192,6 +195,24 @@ def _run_agent_ask_stream_json(
     except FileNotFoundError as e:
         raise AgentRunError(f"Agent command not found: {agent_cmd}") from e
 
+    def cancel_watcher() -> None:
+        if cancel_event is None:
+            return
+        cancel_event.wait()
+        proc.terminate()
+        time.sleep(CANCEL_TERMINATE_TIMEOUT_SEC)
+        if proc.poll() is None:
+            proc.kill()
+        try:
+            proc.wait(timeout=PROC_WAIT_TIMEOUT_SEC)
+        except subprocess.TimeoutExpired:
+            pass
+
+    watcher: threading.Thread | None = None
+    if cancel_event is not None:
+        watcher = threading.Thread(target=cancel_watcher, daemon=True)
+        watcher.start()
+
     reader = threading.Thread(target=read_stdout, args=(proc,))
     reader.start()
     reader.join(timeout=STREAM_READER_TIMEOUT_SEC)
@@ -199,6 +220,14 @@ def _run_agent_ask_stream_json(
         proc.kill()
         proc.wait()
         raise AgentRunError("Agent timed out.")
+
+    if cancel_event is not None and cancel_event.is_set():
+        try:
+            proc.wait(timeout=PROC_WAIT_TIMEOUT_SEC)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        raise AgentRunError("Cancelled.")
 
     try:
         proc.wait(timeout=PROC_WAIT_TIMEOUT_SEC)
@@ -275,6 +304,7 @@ def run_plan_implement(
     *,
     on_stream_line: StreamLineCallback | None = None,
     on_start: Callable[[Path], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> RunPlanImplementResult:
     """Run agent with plan prompt; write stream to log, extract plan, write task-plan-draft.md and add comms (plan)."""
     chat_id = _read_chat_id(task_dir)
@@ -285,6 +315,7 @@ def run_plan_implement(
         PLAN_IMPLEMENT_STREAM_LOG_PREFIX,
         on_stream_line=on_stream_line,
         on_start=on_start,
+        cancel_event=cancel_event,
     )
     plan_text = extract_plan_from_stream_json(streamed_output)
     draft_path = task_dir / TASK_PLAN_DRAFT
@@ -347,6 +378,7 @@ def run_implement(
     *,
     on_stream_line: StreamLineCallback | None = None,
     on_start: Callable[[Path], None] | None = None,
+    cancel_event: threading.Event | None = None,
 ) -> RunImplementResult:
     """Run agent with implement prompt (--force, --sandbox disabled); write stream to log only."""
     chat_id = _read_chat_id(task_dir)
@@ -406,8 +438,29 @@ def run_implement(
     except FileNotFoundError as e:
         raise AgentRunError(f"Agent command not found: {agent_cmd}") from e
 
+    def cancel_watcher() -> None:
+        if cancel_event is None:
+            return
+        cancel_event.wait()
+        proc.terminate()
+        time.sleep(CANCEL_TERMINATE_TIMEOUT_SEC)
+        if proc.poll() is None:
+            proc.kill()
+        try:
+            proc.wait(timeout=PROC_WAIT_TIMEOUT_SEC)
+        except subprocess.TimeoutExpired:
+            pass
+
+    watcher: threading.Thread | None = None
+    if cancel_event is not None:
+        watcher = threading.Thread(target=cancel_watcher, daemon=True)
+        watcher.start()
+
     read_stdout(proc)
     proc.wait()
+
+    if cancel_event is not None and cancel_event.is_set():
+        raise AgentRunError("Cancelled.")
 
     stderr_output = ""
     if proc.stderr:
