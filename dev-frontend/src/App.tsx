@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import { api, apiBaseUrl } from './api'
 import './App.css'
 
-function Layout() {
+export function Layout() {
   return (
     <div className="app">
       <header className="header">
@@ -271,12 +271,20 @@ const COMMAND_LABEL: Record<string, string> = {
 function TaskCommsPage() {
   const { taskName } = useParams<{ taskName: string }>()
   const navigate = useNavigate()
-
   if (!taskName) {
     navigate('/')
     return null
   }
+  return <TaskCommsPageContent taskName={taskName} navigate={navigate} />
+}
 
+export function TaskCommsPageContent({
+  taskName,
+  navigate,
+}: {
+  taskName: string
+  navigate: (to: string) => void
+}) {
   const [files, setFiles] = useState<string[]>([])
   const [contents, setContents] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
@@ -315,6 +323,29 @@ function TaskCommsPage() {
     }
   }, [taskName])
 
+  const loadComms = useCallback(async () => {
+    setError(null)
+    setLoading(true)
+    try {
+      const res = await api.getTaskCommsList(taskName)
+      setFiles(res.files)
+      const pairs = await Promise.all(
+        res.files.map((filename) =>
+          api.getTaskCommsFile(taskName, filename).then((text) => ({ filename, text }))
+        )
+      )
+      const map: Record<string, string> = {}
+      for (const { filename, text } of pairs) {
+        map[filename] = text
+      }
+      setContents(map)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }, [taskName])
+
   useEffect(() => {
     loadCommandStatus()
   }, [loadCommandStatus])
@@ -344,29 +375,6 @@ function TaskCommsPage() {
       setStartingCommand(null)
     }
   }
-
-  const loadComms = useCallback(async () => {
-    setError(null)
-    setLoading(true)
-    try {
-      const res = await api.getTaskCommsList(taskName)
-      setFiles(res.files)
-      const pairs = await Promise.all(
-        res.files.map((filename) =>
-          api.getTaskCommsFile(taskName, filename).then((text) => ({ filename, text }))
-        )
-      )
-      const map: Record<string, string> = {}
-      for (const { filename, text } of pairs) {
-        map[filename] = text
-      }
-      setContents(map)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setLoading(false)
-    }
-  }, [taskName])
 
   useEffect(() => {
     loadComms()
