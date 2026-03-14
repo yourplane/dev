@@ -375,6 +375,18 @@ function TaskCommsPage() {
     <section className="task-comms">
       <h2>Comms: {taskName}</h2>
       <p><Link to="/">← Back to tasks</Link></p>
+      {files.length === 0 ? (
+        <p className="empty">No comms yet for this task.</p>
+      ) : (
+        <div className="comms-history">
+          {files.map((filename) => (
+            <div key={filename} className="comms-entry">
+              <div className="comms-filename">{filename}</div>
+              <pre className="comms-content">{contents[filename] ?? '(loading…)'}</pre>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="task-commands">
         {activeCommand ? (
           <p className="command-status">
@@ -402,18 +414,6 @@ function TaskCommsPage() {
         )}
         {commandError && <p className="inline-error">{commandError}</p>}
       </div>
-      {files.length === 0 ? (
-        <p className="empty">No comms yet for this task.</p>
-      ) : (
-        <div className="comms-history">
-          {files.map((filename) => (
-            <div key={filename} className="comms-entry">
-              <div className="comms-filename">{filename}</div>
-              <pre className="comms-content">{contents[filename] ?? '(loading…)'}</pre>
-            </div>
-          ))}
-        </div>
-      )}
       <form className="comms-post-form" onSubmit={handlePostComment}>
         <label className="comms-post-form-label">Add comment</label>
         <textarea
