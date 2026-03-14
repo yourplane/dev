@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { api, apiBaseUrl } from './api'
@@ -431,7 +431,7 @@ const COMMAND_LABEL: Record<string, string> = {
   implement: 'Implement',
 }
 
-function FeedEntryRow({
+const FeedEntryRow = memo(function FeedEntryRow({
   entry,
   contents,
   loadingContentKeys,
@@ -492,7 +492,7 @@ function FeedEntryRow({
       )}
     </div>
   )
-}
+})
 
 function ParsedLogView({ raw }: { raw: string }) {
   const segments = parseLogToSegments(raw)
@@ -559,7 +559,6 @@ export function TaskCommsPageContent({
   const [feedEntries, setFeedEntries] = useState<Array<{ type: string; id: string; created_at: number }>>([])
   const [contents, setContents] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [commentText, setCommentText] = useState('')
   const [posting, setPosting] = useState(false)
@@ -652,7 +651,6 @@ export function TaskCommsPageContent({
       if (!isIncremental) {
         setError(null)
         if (current.length === 0) setLoading(true)
-        else setRefreshing(true)
       }
       try {
         if (isIncremental) {
@@ -710,7 +708,6 @@ export function TaskCommsPageContent({
         setError(e instanceof Error ? e.message : String(e))
       } finally {
         setLoading(false)
-        setRefreshing(false)
       }
     },
     [taskName]
@@ -824,8 +821,8 @@ export function TaskCommsPageContent({
   useEffect(() => {
     if (!loading && feedEntries.length > 0) {
       if (scrollToBottomAfterLoad) {
-        lastCommsEntryRef.current?.scrollIntoView({ behavior: 'instant' })
         setScrollToBottomAfterLoad(false)
+        window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
       } else if (!hasScrolledInitialRef.current) {
         lastCommsEntryRef.current?.scrollIntoView({ behavior: 'smooth' })
         hasScrolledInitialRef.current = true
@@ -855,15 +852,6 @@ export function TaskCommsPageContent({
       <div className="task-comms-header">
         <h2>{taskName}</h2>
         <div className="task-comms-header-actions">
-          <button
-            type="button"
-            className="refresh-feed-btn"
-            onClick={() => loadFeed()}
-            disabled={refreshing || loading}
-            title="Refresh feed"
-          >
-            {refreshing ? 'Updating…' : 'Refresh feed'}
-          </button>
           <button
             type="button"
             className="archive-btn archive-btn-task-view"
