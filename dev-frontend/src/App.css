@@ -181,6 +181,30 @@
   min-height: 4rem;
 }
 
+.repo-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.repo-radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-weight: normal;
+}
+
+.repo-radio-option input[type="radio"] {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.repo-radio-group .repo-custom {
+  margin-top: 0.25rem;
+  margin-left: 1.5rem;
+}
+
 .repo-custom {
   margin-top: 0.35rem;
 }
