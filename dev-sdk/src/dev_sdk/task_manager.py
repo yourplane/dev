@@ -6,7 +6,6 @@ import logging
 import secrets
 import shutil
 import subprocess
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
@@ -68,7 +67,6 @@ class TaskManager:
         if on_progress:
             on_progress("Repository cloned.")
         self._checkout_feature_branch(task_dir, repo_url, task_name, on_progress=on_progress)
-        self._setup_pyenv(task_dir, repo_url, on_progress=on_progress)
         logger.debug("start_task: completed task_name=%s", task_name)
 
     def _ensure_comms_dir(self, task_dir: Path) -> None:
@@ -191,77 +189,6 @@ class TaskManager:
         """Derive repo directory name from URL (e.g. .../repo.git -> repo)."""
         name = repo_url.rstrip("/").split("/")[-1]
         return name.removesuffix(".git") if name.endswith(".git") else name or "repo"
-
-    def _setup_pyenv(
-        self, task_dir: Path, repo_url: str, on_progress: ProgressCallback | None = None
-    ) -> None:
-        """Create a venv, install the cloned repo in editable mode, and add a Cursor rule for testing."""
-        repo_name = self._repo_name_from_url(repo_url)
-        repo_path = task_dir / repo_name
-
-        if not (repo_path / "pyproject.toml").exists() and not (
-            repo_path / "setup.py"
-        ).exists():
-            logger.warning(
-                "%s has no pyproject.toml or setup.py; skipping Python venv setup.",
-                repo_name,
-            )
-            return
-
-        if on_progress:
-            on_progress("Setting up Python environment…")
-        venv_name = task_dir.name
-        venv_dir = task_dir / ".venv" / venv_name
-        logger.debug("Setting up Python environment: venv_dir=%s", venv_dir)
-        try:
-            subprocess.run(
-                [sys.executable, "-m", "venv", str(venv_dir)],
-                check=True,
-                capture_output=True,
-            )
-            logger.debug("Virtual environment created: %s", venv_dir)
-        except subprocess.CalledProcessError as e:
-            logger.warning("Failed to create virtual environment: %s", e)
-            return
-
-        pip = venv_dir / "bin" / "pip"
-        if sys.platform == "win32":
-            pip = venv_dir / "Scripts" / "pip.exe"
-        logger.debug("Installing repo in editable mode: pip=%s repo_path=%s", pip, repo_path)
-        try:
-            subprocess.run(
-                [str(pip), "install", "-e", str(repo_path)],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            logger.debug("Editable install completed: %s", repo_name)
-        except subprocess.CalledProcessError as e:
-            logger.warning("Failed to install %s in editable mode: %s", repo_name, e)
-            return
-
-        rules_dir = task_dir / ".cursor" / "rules"
-        rules_dir.mkdir(parents=True, exist_ok=True)
-        rule_path = rules_dir / "pyenv-testing.mdc"
-        rule_path.write_text(
-            "---\n"
-            "description: Use the task virtual environment for testing\n"
-            "alwaysApply: true\n"
-            "---\n\n"
-            "# Testing with the task virtual environment\n\n"
-            "When running or testing the cloned repo (e.g. its CLI or tests), use the tool "
-            "installed in this task's virtual environment:\n\n"
-            f"- **Virtual environment path:** `.venv/{venv_name}` at the task root\n"
-            f"- **Run the installed CLI:** `.venv/{venv_name}/bin/<command>` (or `Scripts\\<command>.exe` on Windows)\n"
-            f"- **Run tests:** Use `.venv/{venv_name}/bin/python -m pytest` or `.venv/{venv_name}/bin/tox` so that the "
-            "editable-installed package and its dependencies are used.\n\n"
-            f"Do not rely on a system-wide or other Python environment for testing; always "
-            f"invoke via this task's `.venv/{venv_name}` to ensure the correct editable installation is under test.\n",
-            encoding="utf-8",
-        )
-        logger.debug("Python environment ready: task_dir=%s", task_dir)
-        if on_progress:
-            on_progress("Python environment ready.")
 
     def list_tasks(self) -> list[str]:
         """Return sorted list of task directory names (excludes .archive and hidden dirs)."""
