@@ -184,20 +184,23 @@
 .repo-radio-group {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 0.5rem;
+  align-self: flex-start;
 }
 
-.repo-radio-option {
+.create-form .repo-radio-group .repo-radio-option {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: flex-start;
   gap: 0.5rem;
+  flex-wrap: nowrap;
   cursor: pointer;
   font-weight: normal;
 }
 
-.repo-radio-option input[type="radio"] {
+.create-form .repo-radio-group .repo-radio-option input[type="radio"] {
   margin: 0;
   flex-shrink: 0;
 }
