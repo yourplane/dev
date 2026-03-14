@@ -184,20 +184,23 @@
 .repo-radio-group {
   display: flex;
   flex-direction: column;
+  align-items: flex-start;
   gap: 0.5rem;
+  align-self: flex-start;
 }
 
-.repo-radio-option {
+.create-form .repo-radio-group .repo-radio-option {
   display: flex;
   flex-direction: row;
   align-items: center;
   justify-content: flex-start;
   gap: 0.5rem;
+  flex-wrap: nowrap;
   cursor: pointer;
   font-weight: normal;
 }
 
-.repo-radio-option input[type="radio"] {
+.create-form .repo-radio-group .repo-radio-option input[type="radio"] {
   margin: 0;
   flex-shrink: 0;
 }
@@ -259,9 +262,36 @@
 }
 
 /* Task comms view */
-.task-comms h2 {
-  margin: 0 0 0.75rem;
+.task-comms-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.task-comms-header h2 {
+  margin: 0;
   font-size: 1.15rem;
+}
+
+.task-comms .archive-btn-task-view {
+  border: 2px solid #c00;
+  color: #c00;
+  background: #fff;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.task-comms .archive-btn-task-view:hover:not(:disabled) {
+  background: #fff5f5;
+}
+
+.task-comms .archive-btn-task-view:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 .task-commands {

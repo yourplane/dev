@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { api, apiBaseUrl } from './api'
@@ -131,7 +131,7 @@ function CreateTaskPage() {
   const navigate = useNavigate()
   return (
     <CreateTaskForm
-      onCreated={() => navigate('/')}
+      onCreated={(taskName) => navigate(`/task/${encodeURIComponent(taskName)}`)}
       onCancel={() => navigate('/')}
     />
   )
@@ -141,7 +141,7 @@ function CreateTaskForm({
   onCreated,
   onCancel,
 }: {
-  onCreated: () => void
+  onCreated: (taskName: string) => void
   onCancel: () => void
 }) {
   const [repos, setRepos] = useState<Record<string, string>>({})
@@ -172,12 +172,12 @@ function CreateTaskForm({
     if (!repoValue.trim()) { setError('Repo is required (select a shorthand or enter a URL)'); return }
     setSubmitting(true)
     try {
-      await api.createTask({
+      const res = await api.createTask({
         title: title.trim(),
         repo: repoValue.trim(),
         comment: comment.trim() || undefined,
       })
-      onCreated()
+      onCreated(res.task_name)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -191,7 +191,7 @@ function CreateTaskForm({
       <form onSubmit={handleSubmit}>
         {error && <p className="inline-error">{error}</p>}
         <label>
-          Title <span className="required">*</span>
+          <span>Title <span className="required">*</span></span>
           <input
             type="text"
             value={title}
@@ -201,7 +201,7 @@ function CreateTaskForm({
           />
         </label>
         <label>
-          Repo <span className="required">*</span>
+          <span>Repo <span className="required">*</span></span>
           {reposLoading ? (
             <span className="hint">Loading shorthands…</span>
           ) : (
@@ -290,6 +290,24 @@ function TaskCommsPage() {
   const [creatingPr, setCreatingPr] = useState(false)
   const [prUrl, setPrUrl] = useState<string | null>(null)
   const [prError, setPrError] = useState<string | null>(null)
+  const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false)
+  const lastCommsEntryRef = useRef<HTMLDivElement | null>(null)
+  const [archiving, setArchiving] = useState(false)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
+
+  const handleArchive = async () => {
+    if (!confirm(`Archive task "${taskName}"?`)) return
+    setArchiveError(null)
+    setArchiving(true)
+    try {
+      await api.archiveTask(taskName)
+      navigate('/')
+    } catch (e) {
+      setArchiveError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setArchiving(false)
+    }
+  }
 
   const loadCommandStatus = useCallback(async () => {
     try {
@@ -308,6 +326,14 @@ function TaskCommsPage() {
     const interval = setInterval(loadCommandStatus, 3000)
     return () => clearInterval(interval)
   }, [loadCommandStatus])
+
+  const prevActiveCommandRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (prevActiveCommandRef.current !== null && activeCommand === null) {
+      loadComms()
+    }
+    prevActiveCommandRef.current = activeCommand
+  }, [activeCommand, loadComms])
 
   const handleStartCommand = async (command: string) => {
     setCommandError(null)
@@ -372,6 +398,7 @@ function TaskCommsPage() {
     try {
       await api.postTaskComms(taskName, content)
       setCommentText('')
+      setScrollToBottomAfterLoad(true)
       await loadComms()
     } catch (e) {
       setPostError(e instanceof Error ? e.message : String(e))
@@ -379,6 +406,13 @@ function TaskCommsPage() {
       setPosting(false)
     }
   }
+
+  useEffect(() => {
+    if (!loading && scrollToBottomAfterLoad && files.length > 0) {
+      lastCommsEntryRef.current?.scrollIntoView({ behavior: 'smooth' })
+      setScrollToBottomAfterLoad(false)
+    }
+  }, [loading, scrollToBottomAfterLoad, files.length])
 
   if (loading) return <p className="status">Loading comms…</p>
   if (error) {
@@ -392,14 +426,29 @@ function TaskCommsPage() {
 
   return (
     <section className="task-comms">
-      <h2>Comms: {taskName}</h2>
+      <div className="task-comms-header">
+        <h2>Comms: {taskName}</h2>
+        <button
+          type="button"
+          className="archive-btn archive-btn-task-view"
+          onClick={handleArchive}
+          disabled={archiving}
+        >
+          {archiving ? 'Archiving…' : 'Archive'}
+        </button>
+      </div>
+      {archiveError && <p className="inline-error">{archiveError}</p>}
       <p><Link to="/">← Back to tasks</Link></p>
       {files.length === 0 ? (
         <p className="empty">No comms yet for this task.</p>
       ) : (
         <div className="comms-history">
-          {files.map((filename) => (
-            <div key={filename} className="comms-entry">
+          {files.map((filename, i) => (
+            <div
+              key={filename}
+              className="comms-entry"
+              ref={i === files.length - 1 ? lastCommsEntryRef : undefined}
+            >
               <div className="comms-filename">{filename}</div>
               <div className="comms-content">
                 <ReactMarkdown>{contents[filename] ?? '(loading…)'}</ReactMarkdown>
