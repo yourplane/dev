@@ -828,7 +828,7 @@ export function TaskCommsPageContent({
           })
         })
       } else if (!hasScrolledInitialRef.current) {
-        lastCommsEntryRef.current?.scrollIntoView({ behavior: 'smooth' })
+        lastCommsEntryRef.current?.scrollIntoView({ behavior: 'instant' })
         hasScrolledInitialRef.current = true
       }
     }
@@ -844,6 +844,13 @@ export function TaskCommsPageContent({
       window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
     }
   }, [activeLogFilename, contents[activeLogFilename], feedEntries.length])
+
+  const scrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+  const scrollToBottom = () => {
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })
+  }
 
   if (loading) return <p className="status">Loading feed…</p>
   if (error) {
@@ -956,6 +963,28 @@ export function TaskCommsPageContent({
           </button>
         </div>
       </form>
+      <div className="task-comms-scroll-buttons" aria-label="Scroll">
+        <button
+          type="button"
+          className="task-comms-scroll-btn"
+          onClick={scrollToTop}
+          aria-label="Scroll to top"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="m18 15-6-6-6 6" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className="task-comms-scroll-btn"
+          onClick={scrollToBottom}
+          aria-label="Scroll to bottom"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
+      </div>
     </section>
   )
 }
