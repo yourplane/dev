@@ -259,9 +259,36 @@
 }
 
 /* Task comms view */
-.task-comms h2 {
-  margin: 0 0 0.75rem;
+.task-comms-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.task-comms-header h2 {
+  margin: 0;
   font-size: 1.15rem;
+}
+
+.task-comms .archive-btn-task-view {
+  border: 2px solid #c00;
+  color: #c00;
+  background: #fff;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.task-comms .archive-btn-task-view:hover:not(:disabled) {
+  background: #fff5f5;
+}
+
+.task-comms .archive-btn-task-view:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 .task-commands {

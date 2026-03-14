@@ -287,6 +287,22 @@ function TaskCommsPage() {
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [startingCommand, setStartingCommand] = useState<string | null>(null)
+  const [archiving, setArchiving] = useState(false)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
+
+  const handleArchive = async () => {
+    if (!confirm(`Archive task "${taskName}"?`)) return
+    setArchiveError(null)
+    setArchiving(true)
+    try {
+      await api.archiveTask(taskName)
+      navigate('/')
+    } catch (e) {
+      setArchiveError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setArchiving(false)
+    }
+  }
 
   const loadCommandStatus = useCallback(async () => {
     try {
@@ -375,7 +391,18 @@ function TaskCommsPage() {
 
   return (
     <section className="task-comms">
-      <h2>Comms: {taskName}</h2>
+      <div className="task-comms-header">
+        <h2>Comms: {taskName}</h2>
+        <button
+          type="button"
+          className="archive-btn archive-btn-task-view"
+          onClick={handleArchive}
+          disabled={archiving}
+        >
+          {archiving ? 'Archiving…' : 'Archive'}
+        </button>
+      </div>
+      {archiveError && <p className="inline-error">{archiveError}</p>}
       <p><Link to="/">← Back to tasks</Link></p>
       {files.length === 0 ? (
         <p className="empty">No comms yet for this task.</p>
