@@ -247,8 +247,8 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
             args=(task_name, body.command, task_dir),
             daemon=True,
         )
-        thread.start()
         _command_registry[task_name] = {"command_id": body.command, "thread": thread}
+        thread.start()
     return StartCommandResponse(command=body.command)
 
 
