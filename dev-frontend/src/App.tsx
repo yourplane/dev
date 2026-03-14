@@ -847,16 +847,9 @@ export function TaskCommsPageContent({
     }
   }, [loading, scrollToBottomAfterLoad, feedEntries.length])
 
-  // Enter locked-to-bottom when a streaming command is running (on load or when command starts)
-  useEffect(() => {
-    if (activeCommand && activeLogFilename) {
-      setLockedToBottom(true)
-    }
-  }, [activeCommand, activeLogFilename])
-
   const SCROLL_NEAR_BOTTOM_PX = 80
 
-  // User scroll: at bottom → enter locked; not at bottom → leave locked (ignore programmatic scrolls)
+  // Bottom lock: enter when really close to bottom, leave only when user scrolls up (ignore programmatic scrolls)
   useEffect(() => {
     const onScroll = () => {
       if (programmaticScrollRef.current) return
@@ -883,19 +876,18 @@ export function TaskCommsPageContent({
   }, [activeLogFilename, contents[activeLogFilename], feedEntries.length, lockedToBottom])
 
   const scrollToTop = () => {
-    setLockedToBottom(false)
+    programmaticScrollRef.current = true
     window.scrollTo({ top: 0, behavior: 'smooth' })
+    setTimeout(() => {
+      programmaticScrollRef.current = false
+    }, PROGRAMMATIC_SCROLL_SMOOTH_MS)
   }
   const scrollToBottomClick = () => {
-    setLockedToBottom(false)
     programmaticScrollRef.current = true
     window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })
     setTimeout(() => {
       programmaticScrollRef.current = false
     }, PROGRAMMATIC_SCROLL_SMOOTH_MS)
-  }
-  const scrollToBottomDoubleClick = () => {
-    setLockedToBottom(true)
   }
 
   if (loading) return <p className="status">Loading feed…</p>
@@ -1024,7 +1016,6 @@ export function TaskCommsPageContent({
           type="button"
           className={`task-comms-scroll-btn task-comms-scroll-btn-bottom ${lockedToBottom ? 'task-comms-scroll-btn-locked' : ''}`}
           onClick={scrollToBottomClick}
-          onDoubleClick={scrollToBottomDoubleClick}
           aria-label="Scroll to bottom"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
