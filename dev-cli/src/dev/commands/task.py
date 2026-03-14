@@ -32,11 +32,11 @@ IMPLEMENT_STREAM_LOG_PREFIX = "dev-implement-stream-"
 
 PLAN_TEST_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Produce two artifacts in this exact order, with no other text before or after:
 
-1) A manual, end-to-end testing plan in markdown. It must validate the entire task—all work and behavior described in the task context from the beginning, not just the most recent changes. Include feature testing (steps to verify the task's goals) and regression testing (steps to verify existing behavior is unchanged). Do not run or reference unit tests (e.g. pytest): unit tests are run separately and do not count as end-to-end regression testing. The plan is Unix-only; Windows is out of scope. Every command in the plan must use the task's virtual environment: from the task root use .venv/<task_name>/bin/<command> (or activate the venv first). This is not unit or automated test code; it is a step-by-step manual test plan. Output only the plan as markdown.
+1) A manual, end-to-end testing plan in markdown. It must validate the entire task—all work and behavior described in the task context from the beginning, not just the most recent changes. Include feature testing (steps to verify the task's goals) and regression testing (steps to verify existing behavior is unchanged). Do not run or reference unit tests (e.g. pytest): unit tests are run separately and do not count as end-to-end regression testing. The plan is Unix-only; Windows is out of scope. Use system or project-appropriate commands (e.g. from PATH or the cloned repo). This is not unit or automated test code; it is a step-by-step manual test plan. Output only the plan as markdown.
 
 2) On a new line, the exact delimiter line: ---BASH SCRIPT---
 
-3) An executable bash script that runs the plan. The script must be very easy for a human to read: prioritize readability over fancy printouts or verification. Use shebang #!/usr/bin/env bash and set -e. Run each step from the plan using the actual venv path for CLI invocations. The script must never contain angle brackets or placeholders (e.g. do not write .venv/<task_name>/bin/<command> in the script—bash would interpret < as a redirect). Use the literal path with the real task name and command, e.g. .venv/bash-dev-plan-test/bin/dev. The script does not need to contain verification logic—it will be run by an agent that verifies the output. Use simple checks only where they are easy to read; if verification would be too complex to encode in bash, leave a comment describing the expected output instead. The script should be dead-simple: just straightforward bash commands, no progress counters or extra logic. Output only the script source (no markdown code fence)."""
+3) An executable bash script that runs the plan. The script must be very easy for a human to read: prioritize readability over fancy printouts or verification. Use shebang #!/usr/bin/env bash and set -e. Run each step from the plan using concrete commands (no angle brackets or placeholders in the script—bash would interpret < as a redirect). The script does not need to contain verification logic—it will be run by an agent that verifies the output. Use simple checks only where they are easy to read; if verification would be too complex to encode in bash, leave a comment describing the expected output instead. The script should be dead-simple: just straightforward bash commands, no progress counters or extra logic. Output only the script source (no markdown code fence)."""
 
 PLAN_TEST_BASH_DELIMITER = "\n---BASH SCRIPT---\n"
 PLAN_TEST_SCRIPT_PREFIX = "run-plan.sh"
@@ -620,9 +620,6 @@ def start_task(
         click.echo(f"  Comms: {comms_dir(task_dir)}")
         click.echo(f"  Chat ID file: {task_dir / AGENT_CHAT_ID_FILE}")
         click.echo(f"  Repo cloned into: {task_dir / repo_dir}")
-        venv_dir = task_dir / ".venv" / name
-        if venv_dir.exists():
-            click.echo(f"  Venv: {venv_dir} (repo installed in editable mode)")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         raise SystemExit(1)
@@ -774,36 +771,6 @@ def comms_comment(
         raise SystemExit(1)
     path = add_comms(task_dir, "user", message.strip())
     click.echo(f"Added: {path.relative_to(task_dir)}")
-
-
-ACTIVATE_SCRIPT = "bin/activate"
-
-
-def _venv_activate_path(task_root: Path) -> Path:
-    """Return path to the task venv activate script: task_root/.venv/{task_name}/bin/activate."""
-    return task_root / ".venv" / task_root.name / ACTIVATE_SCRIPT
-
-
-@click.command("activate-path")
-@click.option(
-    "--task",
-    "-t",
-    "task_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Path to task directory (root containing .venv/<task-name>). Default: current working directory.",
-)
-def activate_path(task_path: Path | None) -> None:
-    """Print path to the task venv activate script for use with: source $(dev activate-path)."""
-    task_root = _resolve_task_dir(task_path)
-    activate_script = _venv_activate_path(task_root)
-    if not activate_script.exists():
-        click.echo(
-            f"Activate script not found: {activate_script}. Run from a task directory or use --task.",
-            err=True,
-        )
-        raise SystemExit(1)
-    click.echo(str(activate_script))
 
 
 @click.group("plan-implement", invoke_without_command=True)

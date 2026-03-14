@@ -7,7 +7,6 @@ from pathlib import Path
 import click
 
 from dev.commands import (
-    activate_path,
     archive_task,
     comms_group,
     create_pr,
@@ -48,7 +47,6 @@ main.add_command(start_task)
 main.add_command(launch_interact)
 main.add_command(list_tasks)
 main.add_command(archive_task)
-main.add_command(activate_path)
 main.add_command(plan_implement_group)
 main.add_command(plan_test_cmd)
 main.add_command(implement_cmd)
