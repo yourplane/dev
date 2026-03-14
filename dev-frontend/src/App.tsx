@@ -820,12 +820,18 @@ export function TaskCommsPageContent({
     }
   }
 
+  const PROGRAMMATIC_SCROLL_MS = 150
+
   useEffect(() => {
     if (!loading && feedEntries.length > 0) {
       if (scrollToBottomAfterLoad) {
         setScrollToBottomAfterLoad(false)
         const scrollToBottom = () => {
+          programmaticScrollRef.current = true
           window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
+          setTimeout(() => {
+            programmaticScrollRef.current = false
+          }, PROGRAMMATIC_SCROLL_MS)
         }
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
@@ -867,11 +873,9 @@ export function TaskCommsPageContent({
     if (lockedToBottom || nearBottom) {
       programmaticScrollRef.current = true
       window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
-      requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          programmaticScrollRef.current = false
-        })
-      })
+      setTimeout(() => {
+        programmaticScrollRef.current = false
+      }, PROGRAMMATIC_SCROLL_MS)
     }
   }, [activeLogFilename, contents[activeLogFilename], feedEntries.length, lockedToBottom])
 
@@ -881,7 +885,11 @@ export function TaskCommsPageContent({
   }
   const scrollToBottomClick = () => {
     setLockedToBottom(false)
+    programmaticScrollRef.current = true
     window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })
+    setTimeout(() => {
+      programmaticScrollRef.current = false
+    }, PROGRAMMATIC_SCROLL_MS)
   }
   const scrollToBottomDoubleClick = () => {
     setLockedToBottom(true)

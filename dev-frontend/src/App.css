@@ -487,13 +487,13 @@
 }
 
 .task-comms-scroll-btn-bottom.task-comms-scroll-btn-locked {
-  background: linear-gradient(to bottom, #e8f4fc, #0088ff);
+  background: linear-gradient(to bottom, #fff 0%, #fff 78%, #0088ff 100%);
   border-color: #0088ff;
-  color: #fff;
+  color: #333;
 }
 
 .task-comms-scroll-btn-bottom.task-comms-scroll-btn-locked:hover {
-  background: linear-gradient(to bottom, #d0ebfc, #0077dd);
+  background: linear-gradient(to bottom, #f5f5f5 0%, #f5f5f5 78%, #0077dd 100%);
   border-color: #0077dd;
 }
 
