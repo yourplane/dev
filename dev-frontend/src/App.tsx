@@ -324,6 +324,14 @@ function TaskCommsPage() {
     return () => clearInterval(interval)
   }, [loadCommandStatus])
 
+  const prevActiveCommandRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (prevActiveCommandRef.current !== null && activeCommand === null) {
+      loadComms()
+    }
+    prevActiveCommandRef.current = activeCommand
+  }, [activeCommand, loadComms])
+
   const handleStartCommand = async (command: string) => {
     setCommandError(null)
     setStartingCommand(command)
