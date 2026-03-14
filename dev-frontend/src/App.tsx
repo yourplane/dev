@@ -573,6 +573,8 @@ export function TaskCommsPageContent({
   const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false)
   const [lockedToBottom, setLockedToBottom] = useState(false)
   const programmaticScrollRef = useRef(false)
+  const feedLengthRef = useRef(0)
+  const lastLockedScrollTimeRef = useRef(0)
   const lastCommsEntryRef = useRef<HTMLDivElement | null>(null)
   const feedEntriesRef = useRef(feedEntries)
   feedEntriesRef.current = feedEntries
@@ -848,6 +850,8 @@ export function TaskCommsPageContent({
   }, [loading, scrollToBottomAfterLoad, feedEntries.length])
 
   const SCROLL_NEAR_BOTTOM_PX = 80
+  const SCROLL_BEHIND_THRESHOLD_PX = 24
+  const LOCKED_SCROLL_THROTTLE_MS = 80
 
   // Bottom lock: enter when really close to bottom, leave only when user scrolls up (ignore programmatic scrolls)
   useEffect(() => {
@@ -861,17 +865,47 @@ export function TaskCommsPageContent({
     return () => window.removeEventListener('scroll', onScroll)
   }, [])
 
-  // When streaming: if locked to bottom, always scroll to bottom; else only if user was near bottom
+  // When locked and feed grows (e.g. command started, new log entry), scroll to bottom so we stay locked
+  useEffect(() => {
+    const len = feedEntries.length
+    if (!lockedToBottom || len === 0) {
+      feedLengthRef.current = len
+      return
+    }
+    if (len > feedLengthRef.current) {
+      feedLengthRef.current = len
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          programmaticScrollRef.current = true
+          window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
+          setTimeout(() => {
+            programmaticScrollRef.current = false
+          }, PROGRAMMATIC_SCROLL_MS)
+        })
+      })
+    } else {
+      feedLengthRef.current = len
+    }
+  }, [lockedToBottom, feedEntries.length])
+
+  // When streaming: if locked or near bottom, scroll to bottom (throttled + only when behind to reduce jitter)
   useEffect(() => {
     if (!activeLogFilename || !contents[activeLogFilename] || feedEntries.length === 0) return
+    const scrollHeight = document.documentElement.scrollHeight
     const nearBottom =
-      window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - SCROLL_NEAR_BOTTOM_PX
+      window.scrollY + window.innerHeight >= scrollHeight - SCROLL_NEAR_BOTTOM_PX
+    const behind = window.scrollY + window.innerHeight < scrollHeight - SCROLL_BEHIND_THRESHOLD_PX
+    const now = Date.now()
+    const throttled = now - lastLockedScrollTimeRef.current < LOCKED_SCROLL_THROTTLE_MS
     if (lockedToBottom || nearBottom) {
-      programmaticScrollRef.current = true
-      window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
-      setTimeout(() => {
-        programmaticScrollRef.current = false
-      }, PROGRAMMATIC_SCROLL_MS)
+      if (behind && !throttled) {
+        lastLockedScrollTimeRef.current = now
+        programmaticScrollRef.current = true
+        window.scrollTo({ top: scrollHeight, behavior: 'instant' })
+        setTimeout(() => {
+          programmaticScrollRef.current = false
+        }, PROGRAMMATIC_SCROLL_MS)
+      }
     }
   }, [activeLogFilename, contents[activeLogFilename], feedEntries.length, lockedToBottom])
 
