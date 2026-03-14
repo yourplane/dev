@@ -289,6 +289,7 @@ function TaskCommsPage() {
   const [startingCommand, setStartingCommand] = useState<string | null>(null)
   const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false)
   const lastCommsEntryRef = useRef<HTMLDivElement | null>(null)
+  const hasScrolledInitialRef = useRef(false)
   const [archiving, setArchiving] = useState(false)
   const [archiveError, setArchiveError] = useState<string | null>(null)
 
@@ -383,9 +384,14 @@ function TaskCommsPage() {
   }
 
   useEffect(() => {
-    if (!loading && scrollToBottomAfterLoad && files.length > 0) {
-      lastCommsEntryRef.current?.scrollIntoView({ behavior: 'smooth' })
-      setScrollToBottomAfterLoad(false)
+    if (!loading && files.length > 0) {
+      if (scrollToBottomAfterLoad) {
+        lastCommsEntryRef.current?.scrollIntoView({ behavior: 'instant' })
+        setScrollToBottomAfterLoad(false)
+      } else if (!hasScrolledInitialRef.current) {
+        lastCommsEntryRef.current?.scrollIntoView({ behavior: 'smooth' })
+        hasScrolledInitialRef.current = true
+      }
     }
   }, [loading, scrollToBottomAfterLoad, files.length])
 
