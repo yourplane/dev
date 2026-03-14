@@ -20,14 +20,16 @@ CORS is enabled for `http://localhost:5173` and `http://127.0.0.1:5173` so the d
 
 ## Run
 
+For single-port dev, the frontend (Vite) proxies `/api` to this server; only the frontend port is exposed. Bind the backend to loopback so it is not reachable from the network:
+
 From the repo root (dev workspace):
 
 ```bash
-uv run --project dev-server uvicorn dev_server.main:app --reload
+uv run --project dev-server uvicorn dev_server.main:app --reload --host 127.0.0.1
 ```
 
 Or with the dev-server directory as cwd:
 
 ```bash
-cd dev-server && uv run uvicorn dev_server.main:app --reload
+cd dev-server && uv run uvicorn dev_server.main:app --reload --host 127.0.0.1
 ```
