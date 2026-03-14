@@ -150,7 +150,6 @@ function CreateTaskForm({
   const [repo, setRepo] = useState('')
   const [repoCustom, setRepoCustom] = useState('')
   const [comment, setComment] = useState('')
-  const [taskName, setTaskName] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
@@ -177,7 +176,6 @@ function CreateTaskForm({
         title: title.trim(),
         repo: repoValue.trim(),
         comment: comment.trim() || undefined,
-        task_name: taskName.trim() || undefined,
       })
       onCreated()
     } catch (e) {
@@ -249,15 +247,6 @@ function CreateTaskForm({
             onChange={(e) => setComment(e.target.value)}
             placeholder="Optional"
             rows={3}
-          />
-        </label>
-        <label>
-          Task directory name (optional)
-          <input
-            type="text"
-            value={taskName}
-            onChange={(e) => setTaskName(e.target.value)}
-            placeholder="Default: slug from title"
           />
         </label>
         <div className="form-actions">
