@@ -16,6 +16,7 @@ from dev_sdk.agent_run import (
     run_plan_implement,
 )
 from dev_sdk.comms import add_comms, comms_dir, read_index
+from dev_sdk.create_pr import CreatePRError, create_pull_request
 from dev_sdk.repo_config import load_repos, resolve_repo
 from dev_sdk.task_manager import TaskManager
 
@@ -120,6 +121,10 @@ class StartCommandResponse(BaseModel):
 class CommandStatusResponse(BaseModel):
     active: bool
     command: str | None = None
+
+
+class CreatePRResponse(BaseModel):
+    pr_url: str
 
 
 def _task_dir(task_name: str) -> Path:
@@ -261,3 +266,14 @@ def get_task_command_status(task_name: str) -> CommandStatusResponse:
     if entry is None:
         return CommandStatusResponse(active=False, command=None)
     return CommandStatusResponse(active=True, command=entry["command_id"])
+
+
+@app.post("/tasks/{task_name}/create-pr", response_model=CreatePRResponse)
+def create_task_pr(task_name: str) -> CreatePRResponse:
+    """Create a pull request for the task's repo (current branch to main). Returns PR URL."""
+    task_dir = _task_dir(task_name)
+    try:
+        pr_url = create_pull_request(task_dir, allow_dirty=False)
+        return CreatePRResponse(pr_url=pr_url)
+    except CreatePRError as e:
+        raise HTTPException(status_code=422, detail=str(e))

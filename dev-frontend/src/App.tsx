@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown'
 import { api, apiBaseUrl } from './api'
 import './App.css'
 
-function Layout() {
+export function Layout() {
   return (
     <div className="app">
       <header className="header">
@@ -191,7 +191,7 @@ function CreateTaskForm({
       <form onSubmit={handleSubmit}>
         {error && <p className="inline-error">{error}</p>}
         <label>
-          Title <span className="required">*</span>
+          <span>Title <span className="required">*</span></span>
           <input
             type="text"
             value={title}
@@ -201,7 +201,7 @@ function CreateTaskForm({
           />
         </label>
         <label>
-          Repo <span className="required">*</span>
+          <span>Repo <span className="required">*</span></span>
           {reposLoading ? (
             <span className="hint">Loading shorthands…</span>
           ) : (
@@ -271,12 +271,20 @@ const COMMAND_LABEL: Record<string, string> = {
 function TaskCommsPage() {
   const { taskName } = useParams<{ taskName: string }>()
   const navigate = useNavigate()
-
   if (!taskName) {
     navigate('/')
     return null
   }
+  return <TaskCommsPageContent taskName={taskName} navigate={navigate} />
+}
 
+export function TaskCommsPageContent({
+  taskName,
+  navigate,
+}: {
+  taskName: string
+  navigate: (to: string) => void
+}) {
   const [files, setFiles] = useState<string[]>([])
   const [contents, setContents] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
@@ -287,6 +295,9 @@ function TaskCommsPage() {
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [startingCommand, setStartingCommand] = useState<string | null>(null)
+  const [creatingPr, setCreatingPr] = useState(false)
+  const [prUrl, setPrUrl] = useState<string | null>(null)
+  const [prError, setPrError] = useState<string | null>(null)
   const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false)
   const lastCommsEntryRef = useRef<HTMLDivElement | null>(null)
   const hasScrolledInitialRef = useRef(false)
@@ -316,28 +327,6 @@ function TaskCommsPage() {
     }
   }, [taskName])
 
-  useEffect(() => {
-    loadCommandStatus()
-  }, [loadCommandStatus])
-
-  useEffect(() => {
-    const interval = setInterval(loadCommandStatus, 3000)
-    return () => clearInterval(interval)
-  }, [loadCommandStatus])
-
-  const handleStartCommand = async (command: string) => {
-    setCommandError(null)
-    setStartingCommand(command)
-    try {
-      await api.startTaskCommand(taskName, command)
-      await loadCommandStatus()
-    } catch (e) {
-      setCommandError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setStartingCommand(null)
-    }
-  }
-
   const loadComms = useCallback(async () => {
     setError(null)
     setLoading(true)
@@ -360,6 +349,50 @@ function TaskCommsPage() {
       setLoading(false)
     }
   }, [taskName])
+
+  useEffect(() => {
+    loadCommandStatus()
+  }, [loadCommandStatus])
+
+  useEffect(() => {
+    const interval = setInterval(loadCommandStatus, 3000)
+    return () => clearInterval(interval)
+  }, [loadCommandStatus])
+
+  const prevActiveCommandRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (prevActiveCommandRef.current !== null && activeCommand === null) {
+      loadComms()
+    }
+    prevActiveCommandRef.current = activeCommand
+  }, [activeCommand, loadComms])
+
+  const handleStartCommand = async (command: string) => {
+    setCommandError(null)
+    setStartingCommand(command)
+    try {
+      await api.startTaskCommand(taskName, command)
+      await loadCommandStatus()
+    } catch (e) {
+      setCommandError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setStartingCommand(null)
+    }
+  }
+
+  const handleCreatePr = async () => {
+    setPrError(null)
+    setPrUrl(null)
+    setCreatingPr(true)
+    try {
+      const res = await api.createTaskPr(taskName)
+      setPrUrl(res.pr_url)
+    } catch (e) {
+      setPrError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCreatingPr(false)
+    }
+  }
 
   useEffect(() => {
     loadComms()
@@ -408,7 +441,7 @@ function TaskCommsPage() {
   return (
     <section className="task-comms">
       <div className="task-comms-header">
-        <h2>Comms: {taskName}</h2>
+        <h2>{taskName}</h2>
         <button
           type="button"
           className="archive-btn archive-btn-task-view"
@@ -461,9 +494,24 @@ function TaskCommsPage() {
             >
               {startingCommand === 'implement' ? 'Starting…' : 'Implement'}
             </button>
+            <button
+              type="button"
+              className="command-btn"
+              disabled={!!startingCommand || creatingPr}
+              onClick={handleCreatePr}
+              aria-busy={creatingPr}
+            >
+              {creatingPr ? 'Creating PR…' : 'Create PR'}
+            </button>
           </div>
         )}
         {commandError && <p className="inline-error">{commandError}</p>}
+        {prError && <p className="inline-error">{prError}</p>}
+        {prUrl && (
+          <p className="pr-result">
+            <a href={prUrl} target="_blank" rel="noopener noreferrer">Open PR</a>
+          </p>
+        )}
       </div>
       <form className="comms-post-form" onSubmit={handlePostComment}>
         <label className="comms-post-form-label">Add comment</label>
