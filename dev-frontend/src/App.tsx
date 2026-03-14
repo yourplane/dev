@@ -435,7 +435,7 @@ export function TaskCommsPageContent({
   return (
     <section className="task-comms">
       <div className="task-comms-header">
-        <h2>Comms: {taskName}</h2>
+        <h2>{taskName}</h2>
         <button
           type="button"
           className="archive-btn archive-btn-task-view"
