@@ -181,6 +181,30 @@
   min-height: 4rem;
 }
 
+.repo-radio-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.repo-radio-option {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  font-weight: normal;
+}
+
+.repo-radio-option input[type="radio"] {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.repo-radio-group .repo-custom {
+  margin-top: 0.25rem;
+  margin-left: 1.5rem;
+}
+
 .repo-custom {
   margin-top: 0.35rem;
 }
@@ -316,11 +340,35 @@
   margin: 0;
   padding: 0.75rem;
   font-size: 0.9rem;
-  white-space: pre-wrap;
   word-break: break-word;
   background: #fff;
   border-top: 1px solid #eee;
 }
+
+.comms-content h1, .comms-content h2, .comms-content h3 {
+  margin: 0.75em 0 0.35em;
+  font-size: 1em;
+  font-weight: 600;
+}
+.comms-content h1:first-child, .comms-content h2:first-child, .comms-content h3:first-child { margin-top: 0; }
+.comms-content p { margin: 0.5em 0; }
+.comms-content p:first-child { margin-top: 0; }
+.comms-content ul, .comms-content ol { margin: 0.5em 0; padding-left: 1.5em; }
+.comms-content pre {
+  margin: 0.5em 0;
+  padding: 0.75rem;
+  overflow-x: auto;
+  background: #f5f5f5;
+  border-radius: 4px;
+  font-size: 0.85em;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.comms-content code { font-family: ui-monospace, monospace; font-size: 0.9em; }
+.comms-content :not(pre) > code { padding: 0.1em 0.25rem; background: #f0f0f0; border-radius: 4px; }
+.comms-content a { color: #16a34a; }
+.comms-content a:hover { text-decoration: underline; }
+.comms-content blockquote { margin: 0.5em 0; padding-left: 1em; border-left: 3px solid #ddd; color: #555; }
 
 /* Post comment form at bottom of feed; same width as comms entries */
 .comms-post-form {

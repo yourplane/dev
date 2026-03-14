@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
 import { api, apiBaseUrl } from './api'
 import './App.css'
 
@@ -204,17 +205,29 @@ function CreateTaskForm({
           {reposLoading ? (
             <span className="hint">Loading shorthands…</span>
           ) : (
-            <>
-              <select
-                value={repo}
-                onChange={(e) => setRepo(e.target.value)}
-              >
-                <option value="">Select or use custom below</option>
-                {Object.entries(repos).map(([name, url]) => (
-                  <option key={name} value={name}>{name} — {url}</option>
-                ))}
-                <option value="__custom__">Custom URL…</option>
-              </select>
+            <div className="repo-radio-group" role="radiogroup" aria-label="Repo">
+              {Object.entries(repos).map(([name, url]) => (
+                <label key={name} className="repo-radio-option">
+                  <input
+                    type="radio"
+                    name="repo"
+                    value={name}
+                    checked={repo === name}
+                    onChange={() => setRepo(name)}
+                  />
+                  <span>{name} — {url}</span>
+                </label>
+              ))}
+              <label className="repo-radio-option">
+                <input
+                  type="radio"
+                  name="repo"
+                  value="__custom__"
+                  checked={repo === '__custom__'}
+                  onChange={() => setRepo('__custom__')}
+                />
+                <span>Custom URL…</span>
+              </label>
               {repo === '__custom__' && (
                 <input
                   type="text"
@@ -224,7 +237,7 @@ function CreateTaskForm({
                   className="repo-custom"
                 />
               )}
-            </>
+            </div>
           )}
         </label>
         <label>
@@ -371,7 +384,9 @@ function TaskCommsPage() {
           {files.map((filename) => (
             <div key={filename} className="comms-entry">
               <div className="comms-filename">{filename}</div>
-              <pre className="comms-content">{contents[filename] ?? '(loading…)'}</pre>
+              <div className="comms-content">
+                <ReactMarkdown>{contents[filename] ?? '(loading…)'}</ReactMarkdown>
+              </div>
             </div>
           ))}
         </div>
