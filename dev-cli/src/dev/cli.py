@@ -21,7 +21,7 @@ from dev.commands import (
     test_cmd,
 )
 
-DEFAULT_SDK_LOG = Path.home() / ".config" / "dev" / "sdk-debug.log"
+DEFAULT_SDK_LOG = Path.home() / ".local" / "share" / "dev" / "sdk-debug.log"
 
 
 def _setup_sdk_debug_log() -> Path:
@@ -41,7 +41,7 @@ def _setup_sdk_debug_log() -> Path:
     "--debug",
     is_flag=True,
     envvar="DEV_DEBUG",
-    help="Enable SDK debug logging to a file (default: ~/.config/dev/sdk-debug.log).",
+    help="Enable SDK debug logging to a file (default: ~/.local/share/dev/sdk-debug.log).",
 )
 @click.version_option(version="0.1.0")
 @click.pass_context
