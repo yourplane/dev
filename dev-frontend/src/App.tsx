@@ -131,7 +131,7 @@ function CreateTaskPage() {
   const navigate = useNavigate()
   return (
     <CreateTaskForm
-      onCreated={() => navigate('/')}
+      onCreated={(taskName) => navigate(`/task/${encodeURIComponent(taskName)}`)}
       onCancel={() => navigate('/')}
     />
   )
@@ -141,7 +141,7 @@ function CreateTaskForm({
   onCreated,
   onCancel,
 }: {
-  onCreated: () => void
+  onCreated: (taskName: string) => void
   onCancel: () => void
 }) {
   const [repos, setRepos] = useState<Record<string, string>>({})
@@ -172,12 +172,12 @@ function CreateTaskForm({
     if (!repoValue.trim()) { setError('Repo is required (select a shorthand or enter a URL)'); return }
     setSubmitting(true)
     try {
-      await api.createTask({
+      const res = await api.createTask({
         title: title.trim(),
         repo: repoValue.trim(),
         comment: comment.trim() || undefined,
       })
-      onCreated()
+      onCreated(res.task_name)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -289,6 +289,22 @@ function TaskCommsPage() {
   const [startingCommand, setStartingCommand] = useState<string | null>(null)
   const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false)
   const lastCommsEntryRef = useRef<HTMLDivElement | null>(null)
+  const [archiving, setArchiving] = useState(false)
+  const [archiveError, setArchiveError] = useState<string | null>(null)
+
+  const handleArchive = async () => {
+    if (!confirm(`Archive task "${taskName}"?`)) return
+    setArchiveError(null)
+    setArchiving(true)
+    try {
+      await api.archiveTask(taskName)
+      navigate('/')
+    } catch (e) {
+      setArchiveError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setArchiving(false)
+    }
+  }
 
   const loadCommandStatus = useCallback(async () => {
     try {
@@ -385,7 +401,18 @@ function TaskCommsPage() {
 
   return (
     <section className="task-comms">
-      <h2>Comms: {taskName}</h2>
+      <div className="task-comms-header">
+        <h2>Comms: {taskName}</h2>
+        <button
+          type="button"
+          className="archive-btn archive-btn-task-view"
+          onClick={handleArchive}
+          disabled={archiving}
+        >
+          {archiving ? 'Archiving…' : 'Archive'}
+        </button>
+      </div>
+      {archiveError && <p className="inline-error">{archiveError}</p>}
       <p><Link to="/">← Back to tasks</Link></p>
       {files.length === 0 ? (
         <p className="empty">No comms yet for this task.</p>
