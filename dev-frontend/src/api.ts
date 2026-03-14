@@ -1,4 +1,5 @@
-export const apiBaseUrl = import.meta.env.VITE_DEV_SERVER_URL ?? 'http://localhost:8000';
+/** Base URL for API requests. Default `/api` uses Vite proxy (single-port dev). Override with VITE_DEV_SERVER_URL to talk to backend directly. */
+export const apiBaseUrl = import.meta.env.VITE_DEV_SERVER_URL ?? '/api';
 
 async function request<T>(
   path: string,
@@ -15,7 +16,7 @@ async function request<T>(
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(
-      `Could not reach dev-server at ${apiBaseUrl}. ${msg === 'Failed to fetch' ? 'Check that the server is running and CORS allows this origin.' : msg}`
+      `Could not reach dev-server at ${apiBaseUrl}. ${msg === 'Failed to fetch' ? 'Check that the backend is running (and that the Vite proxy target matches).' : msg}`
     );
   }
   const text = await res.text();

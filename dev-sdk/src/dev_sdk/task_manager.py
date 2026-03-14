@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 import secrets
 import shutil
 import subprocess
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
 from dev_sdk.comms import add_comms, comms_dir
+
+logger = logging.getLogger("dev_sdk")
 
 ProgressCallback = Callable[[str], None]
 
@@ -32,6 +34,12 @@ class TaskManager:
         on_progress: ProgressCallback | None = None,
     ) -> None:
         """Create task dir, comms dir (and optional first user comment), agent chat, and clone repo."""
+        logger.debug(
+            "start_task: task_name=%s repo_url=%s task_dir=%s",
+            task_name,
+            repo_url,
+            self.tasks_root / task_name,
+        )
         agent_create_chat_args = agent_create_chat_args or ["agent", "create-chat"]
         task_dir = self.tasks_root / task_name
         task_dir.mkdir(parents=True, exist_ok=False)
@@ -59,7 +67,7 @@ class TaskManager:
         if on_progress:
             on_progress("Repository cloned.")
         self._checkout_feature_branch(task_dir, repo_url, task_name, on_progress=on_progress)
-        self._setup_pyenv(task_dir, repo_url, on_progress=on_progress)
+        logger.debug("start_task: completed task_name=%s", task_name)
 
     def _ensure_comms_dir(self, task_dir: Path) -> None:
         """Create comms directory and write Cursor rule for comms context."""
@@ -87,13 +95,20 @@ class TaskManager:
         self, agent_cmd: str, agent_create_chat_args: list[str]
     ) -> str:
         cmd = [agent_cmd] + agent_create_chat_args
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return self._parse_chat_id(result.stdout.strip())
+        logger.debug("Creating agent chat: cmd=%s", cmd)
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            chat_id = self._parse_chat_id(result.stdout.strip())
+            logger.debug("Agent chat created: chat_id=%s", chat_id)
+            return chat_id
+        except (subprocess.CalledProcessError, ValueError) as e:
+            logger.warning("Agent chat failed: %s", e)
+            raise
 
     def _parse_chat_id(self, output: str) -> str:
         """Extract chat ID from agent create-chat output (e.g. UUID or last line)."""
@@ -128,12 +143,18 @@ class TaskManager:
 
     def _clone_repo(self, task_dir: Path, repo_url: str) -> None:
         """Clone repo into task_dir; git uses the repo name from the URL as the directory."""
-        subprocess.run(
-            ["git", "clone", repo_url],
-            cwd=task_dir,
-            check=True,
-            capture_output=True,
-        )
+        logger.debug("Cloning repo: repo_url=%s cwd=%s", repo_url, task_dir)
+        try:
+            subprocess.run(
+                ["git", "clone", repo_url],
+                cwd=task_dir,
+                check=True,
+                capture_output=True,
+            )
+            logger.debug("Repo cloned: repo_url=%s", repo_url)
+        except subprocess.CalledProcessError as e:
+            logger.warning("Clone failed: %s", e)
+            raise
 
     def _checkout_feature_branch(
         self,
@@ -146,14 +167,20 @@ class TaskManager:
         repo_name = self._repo_name_from_url(repo_url)
         repo_path = task_dir / repo_name
         branch_name = f"task/{task_name}"
+        logger.debug("Checking out feature branch: branch=%s cwd=%s", branch_name, repo_path)
         if on_progress:
             on_progress("Checking out feature branch…")
-        subprocess.run(
-            ["git", "checkout", "-b", branch_name],
-            cwd=repo_path,
-            check=True,
-            capture_output=True,
-        )
+        try:
+            subprocess.run(
+                ["git", "checkout", "-b", branch_name],
+                cwd=repo_path,
+                check=True,
+                capture_output=True,
+            )
+            logger.debug("Feature branch created: branch=%s", branch_name)
+        except subprocess.CalledProcessError as e:
+            logger.warning("Checkout failed: %s", e)
+            raise
         if on_progress:
             on_progress("Feature branch created.")
 
@@ -162,78 +189,6 @@ class TaskManager:
         """Derive repo directory name from URL (e.g. .../repo.git -> repo)."""
         name = repo_url.rstrip("/").split("/")[-1]
         return name.removesuffix(".git") if name.endswith(".git") else name or "repo"
-
-    def _setup_pyenv(
-        self, task_dir: Path, repo_url: str, on_progress: ProgressCallback | None = None
-    ) -> None:
-        """Create a venv, install the cloned repo in editable mode, and add a Cursor rule for testing."""
-        repo_name = self._repo_name_from_url(repo_url)
-        repo_path = task_dir / repo_name
-
-        if not (repo_path / "pyproject.toml").exists() and not (
-            repo_path / "setup.py"
-        ).exists():
-            print(
-                f"Warning: {repo_name} has no pyproject.toml or setup.py; skipping Python venv setup.",
-                file=sys.stderr,
-            )
-            return
-
-        if on_progress:
-            on_progress("Setting up Python environment…")
-        venv_name = task_dir.name
-        venv_dir = task_dir / ".venv" / venv_name
-        try:
-            subprocess.run(
-                [sys.executable, "-m", "venv", str(venv_dir)],
-                check=True,
-                capture_output=True,
-            )
-        except subprocess.CalledProcessError as e:
-            print(
-                f"Warning: failed to create virtual environment: {e}",
-                file=sys.stderr,
-            )
-            return
-
-        pip = venv_dir / "bin" / "pip"
-        if sys.platform == "win32":
-            pip = venv_dir / "Scripts" / "pip.exe"
-        try:
-            subprocess.run(
-                [str(pip), "install", "-e", str(repo_path)],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-        except subprocess.CalledProcessError as e:
-            print(
-                f"Warning: failed to install {repo_name} in editable mode: {e}",
-                file=sys.stderr,
-            )
-            return
-
-        rules_dir = task_dir / ".cursor" / "rules"
-        rules_dir.mkdir(parents=True, exist_ok=True)
-        rule_path = rules_dir / "pyenv-testing.mdc"
-        rule_path.write_text(
-            "---\n"
-            "description: Use the task virtual environment for testing\n"
-            "alwaysApply: true\n"
-            "---\n\n"
-            "# Testing with the task virtual environment\n\n"
-            "When running or testing the cloned repo (e.g. its CLI or tests), use the tool "
-            "installed in this task's virtual environment:\n\n"
-            f"- **Virtual environment path:** `.venv/{venv_name}` at the task root\n"
-            f"- **Run the installed CLI:** `.venv/{venv_name}/bin/<command>` (or `Scripts\\<command>.exe` on Windows)\n"
-            f"- **Run tests:** Use `.venv/{venv_name}/bin/python -m pytest` or `.venv/{venv_name}/bin/tox` so that the "
-            "editable-installed package and its dependencies are used.\n\n"
-            f"Do not rely on a system-wide or other Python environment for testing; always "
-            f"invoke via this task's `.venv/{venv_name}` to ensure the correct editable installation is under test.\n",
-            encoding="utf-8",
-        )
-        if on_progress:
-            on_progress("Python environment ready.")
 
     def list_tasks(self) -> list[str]:
         """Return sorted list of task directory names (excludes .archive and hidden dirs)."""

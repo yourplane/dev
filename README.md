@@ -84,7 +84,7 @@ dev archive <task-name>
 
 To use the web UI for listing, creating, and archiving tasks:
 
-1. Start dev-server: `uv run --project dev-server uvicorn dev_server.main:app --reload`
+1. Start dev-server: `uv run --project dev-server uvicorn dev_server.main:app --reload --host 127.0.0.1`
 2. From `dev-frontend/`: `npm install && npm run dev`
 3. Open http://localhost:5173
 

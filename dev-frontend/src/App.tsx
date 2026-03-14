@@ -91,8 +91,8 @@ function TaskList({
         <p className="error-title">Could not connect to dev-server</p>
         <p>{error}</p>
         <p className="hint">
-          Ensure dev-server is running from the dev repo root: <code>uv run --project dev-server uvicorn dev_server.main:app --reload</code>.
-          The client uses <code>{apiBaseUrl}</code> (set via <code>VITE_DEV_SERVER_URL</code> in <code>.env</code> if needed).
+          Ensure dev-server is running from the dev repo root: <code>uv run --project dev-server uvicorn dev_server.main:app --reload --host 127.0.0.1</code>.
+          The client uses <code>{apiBaseUrl}</code> (default <code>/api</code> via Vite proxy; set <code>VITE_DEV_SERVER_URL</code> in <code>.env</code> to override).
         </p>
         <button type="button" onClick={onRefresh}>Retry</button>
       </div>
