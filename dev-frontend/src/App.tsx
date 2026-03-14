@@ -293,6 +293,7 @@ type FeedListData = {
   collapsedKeys: Set<string>
   toggleCollapsed: (key: string) => void
   loadEntryContent: (entryId: string, type: string) => void
+  activeLogFilename: string | null
 }
 
 function FeedRow({
@@ -304,7 +305,7 @@ function FeedRow({
   style: React.CSSProperties
   data: FeedListData
 }) {
-  const { feedEntries, contents, loadingContentKeys, collapsedKeys, toggleCollapsed, loadEntryContent } = data
+  const { feedEntries, contents, loadingContentKeys, collapsedKeys, toggleCollapsed, loadEntryContent, activeLogFilename } = data
   const entry = feedEntries[index]
   const entryKey = `${entry.type}:${entry.id}`
   const isCollapsed = collapsedKeys.has(entryKey)
@@ -318,6 +319,11 @@ function FeedRow({
   const handleToggle = () => {
     toggleCollapsed(entryKey)
   }
+
+  const title =
+    entry.type === 'log'
+      ? `Agent log: ${entry.id}${entry.id === activeLogFilename ? ' (live)' : ''}`
+      : entry.id
 
   return (
     <div style={style} className="feed-row-wrapper">
@@ -334,7 +340,7 @@ function FeedRow({
             {isCollapsed ? '▶' : '▼'}
           </span>
           <span className="feed-entry-title">
-            {entry.type === 'log' ? `Agent log: ${entry.id}` : entry.id}
+            {title}
           </span>
         </button>
         {!isCollapsed && (
@@ -422,6 +428,7 @@ export function TaskCommsPageContent({
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
+  const [activeLogFilename, setActiveLogFilename] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [startingCommand, setStartingCommand] = useState<string | null>(null)
   const [creatingPr, setCreatingPr] = useState(false)
@@ -442,6 +449,8 @@ export function TaskCommsPageContent({
   }, [])
   const feedEntriesRef = useRef(feedEntries)
   feedEntriesRef.current = feedEntries
+  const activeLogFilenameRef = useRef(activeLogFilename)
+  activeLogFilenameRef.current = activeLogFilename
   const hasScrolledInitialRef = useRef(false)
   const [archiving, setArchiving] = useState(false)
   const [archiveError, setArchiveError] = useState<string | null>(null)
@@ -479,28 +488,38 @@ export function TaskCommsPageContent({
     try {
       const res = await api.getTaskCommandStatus(taskName)
       setActiveCommand(res.active && res.command ? res.command : null)
+      setActiveLogFilename(res.active && res.active_log_filename ? res.active_log_filename : null)
     } catch {
       // ignore; task might not exist yet
     }
   }, [taskName])
 
-  const loadEntryContent = useCallback(async (entryId: string, type: string) => {
-    const key = `${type}:${entryId}`
-    setLoadingContentKeys((prev) => new Set(prev).add(key))
-    try {
-      const text =
-        type === 'comms'
-          ? await api.getTaskCommsFile(taskName, entryId)
-          : await api.getTaskLogFile(taskName, entryId)
-      setContents((prev) => ({ ...prev, [entryId]: text }))
-    } finally {
-      setLoadingContentKeys((prev) => {
-        const next = new Set(prev)
-        next.delete(key)
-        return next
-      })
-    }
-  }, [taskName])
+  const loadEntryContent = useCallback(
+    async (entryId: string, type: string) => {
+      if (type === 'log' && entryId === activeLogFilename) {
+        setContents((prev) => ({ ...prev, [entryId]: prev[entryId] ?? '' }))
+        return
+      }
+      const key = `${type}:${entryId}`
+      setLoadingContentKeys((prev) => new Set(prev).add(key))
+      try {
+        const text =
+          type === 'comms'
+            ? await api.getTaskCommsFile(taskName, entryId)
+            : await api.getTaskLogFile(taskName, entryId)
+        setContents((prev) => ({ ...prev, [entryId]: text }))
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setLoadingContentKeys((prev) => {
+          const next = new Set(prev)
+          next.delete(key)
+          return next
+        })
+      }
+    },
+    [taskName, activeLogFilename]
+  )
 
   const loadFeed = useCallback(
     async (opts?: { incremental?: boolean; prefetchNew?: boolean }) => {
@@ -524,8 +543,12 @@ export function TaskCommsPageContent({
             return toAdd.length ? [...prev, ...toAdd] : prev
           })
           if (opts?.prefetchNew && newEntries.length > 0) {
+            const activeLog = activeLogFilenameRef.current
+            const toFetch = newEntries.filter(
+              (entry) => !(entry.type === 'log' && entry.id === activeLog)
+            )
             const texts = await Promise.all(
-              newEntries.map((entry) =>
+              toFetch.map((entry) =>
                 entry.type === 'comms'
                   ? api.getTaskCommsFile(taskName, entry.id)
                   : api.getTaskLogFile(taskName, entry.id)
@@ -533,8 +556,13 @@ export function TaskCommsPageContent({
             )
             setContents((prev) => {
               const next = { ...prev }
-              newEntries.forEach((entry, i) => {
+              toFetch.forEach((entry, i) => {
                 next[entry.id] = texts[i]
+              })
+              newEntries.forEach((entry) => {
+                if (entry.type === 'log' && entry.id === activeLog) {
+                  next[entry.id] = prev[entry.id] ?? ''
+                }
               })
               return next
             })
@@ -547,6 +575,10 @@ export function TaskCommsPageContent({
             res.entries.forEach((e) => {
               if (prev[e.id] !== undefined) next[e.id] = prev[e.id]
             })
+            const activeLog = activeLogFilenameRef.current
+            if (activeLog && (prev[activeLog] ?? '').length > 0) {
+              next[activeLog] = prev[activeLog]
+            }
             return next
           })
         }
@@ -584,6 +616,32 @@ export function TaskCommsPageContent({
     )
     return () => clearInterval(interval)
   }, [loadFeed])
+
+  // When a command becomes active with an active log, reload feed so the new log entry appears
+  useEffect(() => {
+    if (activeCommand && activeLogFilename) {
+      loadFeed({ incremental: true, prefetchNew: true })
+    }
+  }, [activeCommand, activeLogFilename, loadFeed])
+
+  // Stream the active log via SSE while command is running
+  useEffect(() => {
+    if (!activeCommand || !activeLogFilename) return
+    const es = api.openTaskLogStream(taskName)
+    es.onmessage = (e: MessageEvent) => {
+      const data = e.data != null ? String(e.data) : ''
+      setContents((prev) => ({
+        ...prev,
+        [activeLogFilename]: (prev[activeLogFilename] ?? '') + data + (data && !data.endsWith('\n') ? '\n' : ''),
+      }))
+    }
+    es.onerror = () => {
+      es.close()
+    }
+    return () => {
+      es.close()
+    }
+  }, [taskName, activeCommand, activeLogFilename])
 
   const handleStartCommand = async (command: string) => {
     setCommandError(null)
@@ -651,6 +709,13 @@ export function TaskCommsPageContent({
     }
   }, [loading, scrollToBottomAfterLoad, feedEntries.length])
 
+  // Keep list scrolled to bottom when active log content is streaming
+  useEffect(() => {
+    if (activeLogFilename && contents[activeLogFilename] && feedEntries.length > 0) {
+      listRef.current?.scrollToItem(feedEntries.length - 1, 'end')
+    }
+  }, [activeLogFilename, contents[activeLogFilename], feedEntries.length])
+
   if (loading) return <p className="status">Loading feed…</p>
   if (error) {
     return (
@@ -708,6 +773,7 @@ export function TaskCommsPageContent({
               collapsedKeys,
               toggleCollapsed,
               loadEntryContent,
+              activeLogFilename,
             }}
           >
             {FeedRow}

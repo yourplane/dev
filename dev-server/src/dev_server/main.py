@@ -1,5 +1,6 @@
 """FastAPI app: create, list, archive tasks."""
 
+import asyncio
 import os
 import re
 import threading
@@ -7,7 +8,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 from dev_sdk.agent_run import (
@@ -30,11 +31,17 @@ _command_registry_lock = threading.Lock()
 
 def _run_command_in_thread(task_name: str, command_id: str, task_dir: Path) -> None:
     """Run run_plan_implement or run_implement in this thread; clear registry when done."""
+
+    def on_start(stream_log_path: Path) -> None:
+        with _command_registry_lock:
+            if task_name in _command_registry:
+                _command_registry[task_name]["active_log_filename"] = stream_log_path.name
+
     try:
         if command_id == "plan-implement":
-            run_plan_implement(task_dir)
+            run_plan_implement(task_dir, on_start=on_start)
         else:
-            run_implement(task_dir)
+            run_implement(task_dir, on_start=on_start)
     except AgentRunError:
         pass
     finally:
@@ -122,6 +129,7 @@ class StartCommandResponse(BaseModel):
 class CommandStatusResponse(BaseModel):
     active: bool
     command: str | None = None
+    active_log_filename: str | None = None
 
 
 class CreatePRResponse(BaseModel):
@@ -254,6 +262,60 @@ def list_task_feed(task_name: str, after: float | None = None) -> ListFeedRespon
     )
 
 
+def _sse_format(data: str) -> str:
+    """Format a string as SSE data (each line prefixed with 'data: '), ending with blank line."""
+    if not data:
+        return ""
+    return "".join(f"data: {line}\n" for line in data.splitlines()) + "\n\n"
+
+
+async def _stream_active_log_gen(task_name: str, task_dir: Path, logs_path: Path, filename: str):
+    """Async generator that tails the active log file and yields SSE chunks until command ends."""
+    path = logs_path / filename
+    if not path.is_file() or path.resolve().parent != logs_path.resolve():
+        return
+    position = 0
+    while True:
+        with _command_registry_lock:
+            entry = _command_registry.get(task_name)
+            if not entry or entry.get("active_log_filename") != filename:
+                yield _sse_format("[stream ended]\n")
+                return
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                f.seek(position)
+                chunk = f.read()
+                position = f.tell()
+        except OSError:
+            await asyncio.sleep(0.3)
+            continue
+        if chunk:
+            yield _sse_format(chunk)
+        await asyncio.sleep(0.3)
+
+
+@app.get("/tasks/{task_name}/logs/stream")
+def stream_task_log(task_name: str):
+    """Stream the active log file for the task via Server-Sent Events. 404 if no command is running."""
+    task_dir = _task_dir(task_name)
+    logs_path = task_dir / LOGS_DIR
+    with _command_registry_lock:
+        entry = _command_registry.get(task_name)
+        if not entry:
+            raise HTTPException(status_code=404, detail="No command is running for this task.")
+        filename = entry.get("active_log_filename")
+        if not filename or "/" in filename or "\\" in filename or filename in (".", ".."):
+            raise HTTPException(status_code=404, detail="No active log file for this task.")
+    path = logs_path / filename
+    if not path.is_file() or path.resolve().parent != logs_path.resolve():
+        raise HTTPException(status_code=404, detail="Active log file not found.")
+    return StreamingResponse(
+        _stream_active_log_gen(task_name, task_dir, logs_path, filename),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/tasks/{task_name}/logs/{filename}", response_class=PlainTextResponse)
 def get_task_log_file(task_name: str, filename: str) -> str:
     """Return raw content of a single agent log file under task .logs directory."""
@@ -302,8 +364,12 @@ def get_task_command_status(task_name: str) -> CommandStatusResponse:
     with _command_registry_lock:
         entry = _command_registry.get(task_name)
     if entry is None:
-        return CommandStatusResponse(active=False, command=None)
-    return CommandStatusResponse(active=True, command=entry["command_id"])
+        return CommandStatusResponse(active=False, command=None, active_log_filename=None)
+    return CommandStatusResponse(
+        active=True,
+        command=entry["command_id"],
+        active_log_filename=entry.get("active_log_filename"),
+    )
 
 
 @app.post("/tasks/{task_name}/create-pr", response_model=CreatePRResponse)

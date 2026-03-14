@@ -11,6 +11,12 @@ FastAPI server for dev task management: create, list, archive.
 - `GET /tasks/{task_name}/comms` — list comms filenames for a task (index order)
 - `POST /tasks/{task_name}/comms` — append a user comment (body: `content`); returns `{ "filename": "…" }` (201)
 - `GET /tasks/{task_name}/comms/{filename}` — raw content of one comms file (plain text)
+- `GET /tasks/{task_name}/feed` — list feed entries (comms + agent logs) sorted by creation date
+- `GET /tasks/{task_name}/logs/{filename}` — raw content of one agent log file (plain text)
+- `GET /tasks/{task_name}/logs/stream` — stream the **active** log file via Server-Sent Events (404 if no command is running)
+- `GET /tasks/{task_name}/commands` — command status: `active`, `command`, and when active, `active_log_filename` (log file being written)
+- `POST /tasks/{task_name}/commands` — start a command (body: `command`, e.g. `plan-implement` or `implement`)
+- `POST /tasks/{task_name}/create-pr` — create a pull request
 
 CORS is enabled for `http://localhost:5173` and `http://127.0.0.1:5173` so the dev-frontend (Vite dev server) can call the API.
 

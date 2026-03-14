@@ -108,8 +108,19 @@ export const api = {
     });
   },
 
-  getTaskCommandStatus(taskName: string): Promise<{ active: boolean; command: string | null }> {
+  getTaskCommandStatus(
+    taskName: string
+  ): Promise<{ active: boolean; command: string | null; active_log_filename: string | null }> {
     return request(`/tasks/${encodeURIComponent(taskName)}/commands`);
+  },
+
+  /**
+   * Open an EventSource for the active log stream (SSE). Use when a command is running and
+   * active_log_filename is set. Close the returned EventSource when done.
+   */
+  openTaskLogStream(taskName: string): EventSource {
+    const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/logs/stream`;
+    return new EventSource(url);
   },
 
   startTaskCommand(
