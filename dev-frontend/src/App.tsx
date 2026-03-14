@@ -1,9 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
+import { VariableSizeList as List } from 'react-window'
 import { api, apiBaseUrl } from './api'
 import { parseLogToSegments, type LogSegment } from './logParser'
 import './App.css'
+
+const FEED_POLL_INTERVAL_MS = 15000
+const FEED_ENTRY_HEIGHT_COLLAPSED = 52
+const FEED_ENTRY_HEIGHT_EXPANDED = 420
 
 export function Layout() {
   return (
@@ -280,6 +285,72 @@ const COMMAND_LABEL: Record<string, string> = {
   implement: 'Implement',
 }
 
+type FeedEntryItem = { type: string; id: string; created_at: number }
+type FeedListData = {
+  feedEntries: FeedEntryItem[]
+  contents: Record<string, string>
+  loadingContentKeys: Set<string>
+  collapsedKeys: Set<string>
+  toggleCollapsed: (key: string) => void
+  loadEntryContent: (entryId: string, type: string) => void
+}
+
+function FeedRow({
+  index,
+  style,
+  data,
+}: {
+  index: number
+  style: React.CSSProperties
+  data: FeedListData
+}) {
+  const { feedEntries, contents, loadingContentKeys, collapsedKeys, toggleCollapsed, loadEntryContent } = data
+  const entry = feedEntries[index]
+  const entryKey = `${entry.type}:${entry.id}`
+  const isCollapsed = collapsedKeys.has(entryKey)
+  const contentLoaded = contents[entry.id] !== undefined
+  useEffect(() => {
+    if (!isCollapsed && !contentLoaded && !loadingContentKeys.has(entryKey)) {
+      loadEntryContent(entry.id, entry.type)
+    }
+  }, [isCollapsed, contentLoaded, entryKey, entry.id, entry.type, loadEntryContent, loadingContentKeys])
+
+  const handleToggle = () => {
+    toggleCollapsed(entryKey)
+  }
+
+  return (
+    <div style={style} className="feed-row-wrapper">
+      <div
+        className={entry.type === 'log' ? 'feed-entry feed-log-entry' : 'comms-entry'}
+      >
+        <button
+          type="button"
+          className="feed-entry-header"
+          onClick={handleToggle}
+          aria-expanded={!isCollapsed}
+        >
+          <span className="feed-entry-chevron" aria-hidden>
+            {isCollapsed ? '▶' : '▼'}
+          </span>
+          <span className="feed-entry-title">
+            {entry.type === 'log' ? `Agent log: ${entry.id}` : entry.id}
+          </span>
+        </button>
+        {!isCollapsed && (
+          <div className="comms-content">
+            {entry.type === 'log' ? (
+              <ParsedLogView raw={contents[entry.id] ?? ''} />
+            ) : (
+              <ReactMarkdown>{contents[entry.id] ?? '(loading…)'}</ReactMarkdown>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function ParsedLogView({ raw }: { raw: string }) {
   const segments = parseLogToSegments(raw)
   if (segments.length === 0) {
@@ -345,6 +416,7 @@ export function TaskCommsPageContent({
   const [feedEntries, setFeedEntries] = useState<Array<{ type: string; id: string; created_at: number }>>([])
   const [contents, setContents] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [commentText, setCommentText] = useState('')
   const [posting, setPosting] = useState(false)
@@ -356,11 +428,25 @@ export function TaskCommsPageContent({
   const [prUrl, setPrUrl] = useState<string | null>(null)
   const [prError, setPrError] = useState<string | null>(null)
   const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false)
-  const lastCommsEntryRef = useRef<HTMLDivElement | null>(null)
+  const listRef = useRef<List>(null)
+  const listContainerRef = useRef<HTMLDivElement>(null)
+  const [listHeight, setListHeight] = useState(400)
+  useEffect(() => {
+    const el = listContainerRef.current
+    if (!el) return
+    const set = () => setListHeight(el.clientHeight)
+    set()
+    const ro = new ResizeObserver(set)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const feedEntriesRef = useRef(feedEntries)
+  feedEntriesRef.current = feedEntries
   const hasScrolledInitialRef = useRef(false)
   const [archiving, setArchiving] = useState(false)
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set())
+  const [loadingContentKeys, setLoadingContentKeys] = useState<Set<string>>(new Set())
 
   const toggleCollapsed = useCallback((key: string) => {
     setCollapsedKeys((prev) => {
@@ -370,6 +456,10 @@ export function TaskCommsPageContent({
       return next
     })
   }, [])
+
+  useEffect(() => {
+    listRef.current?.resetAfterIndex(0)
+  }, [collapsedKeys])
 
   const handleArchive = async () => {
     if (!confirm(`Archive task "${taskName}"?`)) return
@@ -394,29 +484,81 @@ export function TaskCommsPageContent({
     }
   }, [taskName])
 
-  const loadFeed = useCallback(async () => {
-    setError(null)
-    setLoading(true)
+  const loadEntryContent = useCallback(async (entryId: string, type: string) => {
+    const key = `${type}:${entryId}`
+    setLoadingContentKeys((prev) => new Set(prev).add(key))
     try {
-      const res = await api.getTaskFeed(taskName)
-      setFeedEntries(res.entries)
-      const map: Record<string, string> = {}
-      await Promise.all(
-        res.entries.map(async (entry) => {
-          const text =
-            entry.type === 'comms'
-              ? await api.getTaskCommsFile(taskName, entry.id)
-              : await api.getTaskLogFile(taskName, entry.id)
-          map[entry.id] = text
-        })
-      )
-      setContents(map)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      const text =
+        type === 'comms'
+          ? await api.getTaskCommsFile(taskName, entryId)
+          : await api.getTaskLogFile(taskName, entryId)
+      setContents((prev) => ({ ...prev, [entryId]: text }))
     } finally {
-      setLoading(false)
+      setLoadingContentKeys((prev) => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
     }
   }, [taskName])
+
+  const loadFeed = useCallback(
+    async (opts?: { incremental?: boolean; prefetchNew?: boolean }) => {
+      const current = feedEntriesRef.current
+      const isIncremental = opts?.incremental && current.length > 0
+      if (!isIncremental) {
+        setError(null)
+        if (current.length === 0) setLoading(true)
+        else setRefreshing(true)
+      }
+      try {
+        if (isIncremental) {
+          const after = Math.max(...current.map((e) => e.created_at))
+          const res = await api.getTaskFeed(taskName, { after })
+          const existingKeys = new Set(current.map((e) => `${e.type}:${e.id}`))
+          const newEntries = res.entries.filter((e) => !existingKeys.has(`${e.type}:${e.id}`))
+          if (newEntries.length === 0) return
+          setFeedEntries((prev) => {
+            const keys = new Set(prev.map((e) => `${e.type}:${e.id}`))
+            const toAdd = newEntries.filter((e) => !keys.has(`${e.type}:${e.id}`))
+            return toAdd.length ? [...prev, ...toAdd] : prev
+          })
+          if (opts?.prefetchNew && newEntries.length > 0) {
+            const texts = await Promise.all(
+              newEntries.map((entry) =>
+                entry.type === 'comms'
+                  ? api.getTaskCommsFile(taskName, entry.id)
+                  : api.getTaskLogFile(taskName, entry.id)
+              )
+            )
+            setContents((prev) => {
+              const next = { ...prev }
+              newEntries.forEach((entry, i) => {
+                next[entry.id] = texts[i]
+              })
+              return next
+            })
+          }
+        } else {
+          const res = await api.getTaskFeed(taskName)
+          setFeedEntries(res.entries)
+          setContents((prev) => {
+            const next: Record<string, string> = {}
+            res.entries.forEach((e) => {
+              if (prev[e.id] !== undefined) next[e.id] = prev[e.id]
+            })
+            return next
+          })
+        }
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setLoading(false)
+        setRefreshing(false)
+      }
+    },
+    [taskName]
+  )
 
   useEffect(() => {
     loadCommandStatus()
@@ -430,10 +572,18 @@ export function TaskCommsPageContent({
   const prevActiveCommandRef = useRef<string | null>(null)
   useEffect(() => {
     if (prevActiveCommandRef.current !== null && activeCommand === null) {
-      loadFeed()
+      loadFeed({ incremental: true, prefetchNew: true })
     }
     prevActiveCommandRef.current = activeCommand
   }, [activeCommand, loadFeed])
+
+  useEffect(() => {
+    const interval = setInterval(
+      () => loadFeed({ incremental: true, prefetchNew: true }),
+      FEED_POLL_INTERVAL_MS
+    )
+    return () => clearInterval(interval)
+  }, [loadFeed])
 
   const handleStartCommand = async (command: string) => {
     setCommandError(null)
@@ -481,7 +631,7 @@ export function TaskCommsPageContent({
       await api.postTaskComms(taskName, content)
       setCommentText('')
       setScrollToBottomAfterLoad(true)
-      await loadFeed()
+      await loadFeed({ incremental: true, prefetchNew: true })
     } catch (e) {
       setPostError(e instanceof Error ? e.message : String(e))
     } finally {
@@ -492,10 +642,10 @@ export function TaskCommsPageContent({
   useEffect(() => {
     if (!loading && feedEntries.length > 0) {
       if (scrollToBottomAfterLoad) {
-        lastCommsEntryRef.current?.scrollIntoView({ behavior: 'instant' })
+        listRef.current?.scrollToItem(feedEntries.length - 1, 'end')
         setScrollToBottomAfterLoad(false)
       } else if (!hasScrolledInitialRef.current) {
-        lastCommsEntryRef.current?.scrollIntoView({ behavior: 'smooth' })
+        listRef.current?.scrollToItem(feedEntries.length - 1, 'end')
         hasScrolledInitialRef.current = true
       }
     }
@@ -515,55 +665,53 @@ export function TaskCommsPageContent({
     <section className="task-comms">
       <div className="task-comms-header">
         <h2>{taskName}</h2>
-        <button
-          type="button"
-          className="archive-btn archive-btn-task-view"
-          onClick={handleArchive}
-          disabled={archiving}
-        >
-          {archiving ? 'Archiving…' : 'Archive'}
-        </button>
+        <div className="task-comms-header-actions">
+          <button
+            type="button"
+            className="refresh-feed-btn"
+            onClick={() => loadFeed()}
+            disabled={refreshing || loading}
+            title="Refresh feed"
+          >
+            {refreshing ? 'Updating…' : 'Refresh feed'}
+          </button>
+          <button
+            type="button"
+            className="archive-btn archive-btn-task-view"
+            onClick={handleArchive}
+            disabled={archiving}
+          >
+            {archiving ? 'Archiving…' : 'Archive'}
+          </button>
+        </div>
       </div>
       {archiveError && <p className="inline-error">{archiveError}</p>}
       <p><Link to="/">← Back to tasks</Link></p>
       {feedEntries.length === 0 ? (
         <p className="empty">No comms or agent logs yet for this task.</p>
       ) : (
-        <div className="comms-history">
-          {feedEntries.map((entry, i) => {
-            const entryKey = `${entry.type}:${entry.id}`
-            const isCollapsed = collapsedKeys.has(entryKey)
-            return (
-              <div
-                key={entryKey}
-                className={entry.type === 'log' ? 'feed-entry feed-log-entry' : 'comms-entry'}
-                ref={i === feedEntries.length - 1 ? lastCommsEntryRef : undefined}
-              >
-                <button
-                  type="button"
-                  className="feed-entry-header"
-                  onClick={() => toggleCollapsed(entryKey)}
-                  aria-expanded={!isCollapsed}
-                >
-                  <span className="feed-entry-chevron" aria-hidden>
-                    {isCollapsed ? '▶' : '▼'}
-                  </span>
-                  <span className="feed-entry-title">
-                    {entry.type === 'log' ? `Agent log: ${entry.id}` : entry.id}
-                  </span>
-                </button>
-                {!isCollapsed && (
-                  <div className="comms-content">
-                    {entry.type === 'log' ? (
-                      <ParsedLogView raw={contents[entry.id] ?? ''} />
-                    ) : (
-                      <ReactMarkdown>{contents[entry.id] ?? '(loading…)'}</ReactMarkdown>
-                    )}
-                  </div>
-                )}
-              </div>
-            )
-          })}
+        <div ref={listContainerRef} className="comms-history comms-history-virtual" style={{ height: '60vh' }}>
+          <List
+            ref={listRef}
+            height={listHeight}
+            width="100%"
+            itemCount={feedEntries.length}
+            itemSize={(index) => {
+              const e = feedEntries[index]
+              const k = `${e.type}:${e.id}`
+              return collapsedKeys.has(k) ? FEED_ENTRY_HEIGHT_COLLAPSED : FEED_ENTRY_HEIGHT_EXPANDED
+            }}
+            itemData={{
+              feedEntries,
+              contents,
+              loadingContentKeys,
+              collapsedKeys,
+              toggleCollapsed,
+              loadEntryContent,
+            }}
+          >
+            {FeedRow}
+          </List>
         </div>
       )}
       <div className="task-commands">

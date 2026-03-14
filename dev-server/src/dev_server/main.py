@@ -241,10 +241,14 @@ def get_task_comms_file(task_name: str, filename: str) -> str:
 
 
 @app.get("/tasks/{task_name}/feed", response_model=ListFeedResponse)
-def list_task_feed(task_name: str) -> ListFeedResponse:
-    """List feed entries (comms + agent logs) sorted by file creation date."""
+def list_task_feed(task_name: str, after: float | None = None) -> ListFeedResponse:
+    """List feed entries (comms + agent logs) sorted by file creation date.
+    If `after` is provided, return only entries with created_at > after (for incremental updates).
+    """
     task_dir = _task_dir(task_name)
     entries = read_feed(task_dir)
+    if after is not None:
+        entries = [e for e in entries if e.created_at > after]
     return ListFeedResponse(
         entries=[FeedEntryModel(type=e.type, id=e.id, created_at=e.created_at) for e in entries]
     )

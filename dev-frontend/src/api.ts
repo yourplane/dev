@@ -76,8 +76,12 @@ export const api = {
     return request(`/tasks/${encodeURIComponent(taskName)}/comms`);
   },
 
-  getTaskFeed(taskName: string): Promise<{ entries: Array<{ type: string; id: string; created_at: number }> }> {
-    return request(`/tasks/${encodeURIComponent(taskName)}/feed`);
+  getTaskFeed(
+    taskName: string,
+    opts?: { after?: number }
+  ): Promise<{ entries: Array<{ type: string; id: string; created_at: number }> }> {
+    const params = opts?.after != null ? `?after=${opts.after}` : '';
+    return request(`/tasks/${encodeURIComponent(taskName)}/feed${params}`);
   },
 
   async getTaskLogFile(taskName: string, filename: string): Promise<string> {
