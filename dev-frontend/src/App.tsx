@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { api, apiBaseUrl } from './api'
+import { parseLogToSegments, type LogSegment } from './logParser'
 import './App.css'
 
 export function Layout() {
@@ -279,6 +280,51 @@ const COMMAND_LABEL: Record<string, string> = {
   implement: 'Implement',
 }
 
+function ParsedLogView({ raw }: { raw: string }) {
+  const segments = parseLogToSegments(raw)
+  if (segments.length === 0) {
+    return <pre className="feed-log-content feed-log-raw">(no parseable events)</pre>
+  }
+  return (
+    <div className="feed-log-parsed">
+      {segments.map((seg, i) => (
+        <LogSegmentBlock key={i} segment={seg} />
+      ))}
+    </div>
+  )
+}
+
+function LogSegmentBlock({ segment }: { segment: LogSegment }) {
+  const { type, text } = segment
+  const label = type === 'tool_call' ? 'Tool call' : type === 'thinking' ? 'Thinking' : type.charAt(0).toUpperCase() + type.slice(1)
+  if (type === 'thinking') {
+    return (
+      <div className="feed-log-segment feed-log-thinking">
+        <span className="feed-log-segment-label">{label}</span>
+        <div className="feed-log-segment-body">
+          <ReactMarkdown>{text.trim() || '\u00a0'}</ReactMarkdown>
+        </div>
+      </div>
+    )
+  }
+  if (type === 'tool_call') {
+    return (
+      <div className="feed-log-segment feed-log-tool-call">
+        <span className="feed-log-segment-label">{label}</span>
+        <pre className="feed-log-segment-body feed-log-terminal">{text}</pre>
+      </div>
+    )
+  }
+  return (
+    <div className="feed-log-segment feed-log-default">
+      <span className="feed-log-segment-label">{label}</span>
+      <div className="feed-log-segment-body">
+        <ReactMarkdown>{text.trim() || '\u00a0'}</ReactMarkdown>
+      </div>
+    </div>
+  )
+}
+
 function TaskCommsPage() {
   const { taskName } = useParams<{ taskName: string }>()
   const navigate = useNavigate()
@@ -314,6 +360,16 @@ export function TaskCommsPageContent({
   const hasScrolledInitialRef = useRef(false)
   const [archiving, setArchiving] = useState(false)
   const [archiveError, setArchiveError] = useState<string | null>(null)
+  const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set())
+
+  const toggleCollapsed = useCallback((key: string) => {
+    setCollapsedKeys((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }, [])
 
   const handleArchive = async () => {
     if (!confirm(`Archive task "${taskName}"?`)) return
@@ -474,24 +530,40 @@ export function TaskCommsPageContent({
         <p className="empty">No comms or agent logs yet for this task.</p>
       ) : (
         <div className="comms-history">
-          {feedEntries.map((entry, i) => (
-            <div
-              key={`${entry.type}:${entry.id}`}
-              className={entry.type === 'log' ? 'feed-entry feed-log-entry' : 'comms-entry'}
-              ref={i === feedEntries.length - 1 ? lastCommsEntryRef : undefined}
-            >
-              <div className="comms-filename">
-                {entry.type === 'log' ? `Agent log: ${entry.id}` : entry.id}
-              </div>
-              <div className="comms-content">
-                {entry.type === 'log' ? (
-                  <pre className="feed-log-content">{contents[entry.id] ?? '(loading…)'}</pre>
-                ) : (
-                  <ReactMarkdown>{contents[entry.id] ?? '(loading…)'}</ReactMarkdown>
+          {feedEntries.map((entry, i) => {
+            const entryKey = `${entry.type}:${entry.id}`
+            const isCollapsed = collapsedKeys.has(entryKey)
+            return (
+              <div
+                key={entryKey}
+                className={entry.type === 'log' ? 'feed-entry feed-log-entry' : 'comms-entry'}
+                ref={i === feedEntries.length - 1 ? lastCommsEntryRef : undefined}
+              >
+                <button
+                  type="button"
+                  className="feed-entry-header"
+                  onClick={() => toggleCollapsed(entryKey)}
+                  aria-expanded={!isCollapsed}
+                >
+                  <span className="feed-entry-chevron" aria-hidden>
+                    {isCollapsed ? '▶' : '▼'}
+                  </span>
+                  <span className="feed-entry-title">
+                    {entry.type === 'log' ? `Agent log: ${entry.id}` : entry.id}
+                  </span>
+                </button>
+                {!isCollapsed && (
+                  <div className="comms-content">
+                    {entry.type === 'log' ? (
+                      <ParsedLogView raw={contents[entry.id] ?? ''} />
+                    ) : (
+                      <ReactMarkdown>{contents[entry.id] ?? '(loading…)'}</ReactMarkdown>
+                    )}
+                  </div>
                 )}
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
       <div className="task-commands">
