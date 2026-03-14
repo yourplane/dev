@@ -38,7 +38,6 @@ export interface CreateTaskBody {
   title: string;
   repo: string;
   comment?: string | null;
-  task_name?: string | null;
 }
 
 export interface CreateTaskResponse {
