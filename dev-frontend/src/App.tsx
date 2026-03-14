@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import { api, apiBaseUrl } from './api'
 import './App.css'
@@ -303,6 +303,14 @@ function TaskCommsPage() {
     const interval = setInterval(loadCommandStatus, 3000)
     return () => clearInterval(interval)
   }, [loadCommandStatus])
+
+  const prevActiveCommandRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (prevActiveCommandRef.current !== null && activeCommand === null) {
+      loadComms()
+    }
+    prevActiveCommandRef.current = activeCommand
+  }, [activeCommand, loadComms])
 
   const handleStartCommand = async (command: string) => {
     setCommandError(null)
