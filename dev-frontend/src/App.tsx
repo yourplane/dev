@@ -191,7 +191,7 @@ function CreateTaskForm({
       <form onSubmit={handleSubmit}>
         {error && <p className="inline-error">{error}</p>}
         <label>
-          Title <span className="required">*</span>
+          <span>Title <span className="required">*</span></span>
           <input
             type="text"
             value={title}
@@ -201,7 +201,7 @@ function CreateTaskForm({
           />
         </label>
         <label>
-          Repo <span className="required">*</span>
+          <span>Repo <span className="required">*</span></span>
           {reposLoading ? (
             <span className="hint">Loading shorthands…</span>
           ) : (
