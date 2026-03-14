@@ -49,6 +49,20 @@ export interface ArchiveTaskResponse {
   archived_to: string;
 }
 
+export interface ArchivedTaskEntry {
+  archived_name: string;
+  task_name: string;
+  archived_date: string;
+}
+
+export interface ListArchiveResponse {
+  entries: ArchivedTaskEntry[];
+}
+
+export interface UnarchiveTaskResponse {
+  restored_task_name: string;
+}
+
 export const api = {
   getTasks(): Promise<{ tasks: string[] }> {
     return request('/tasks');
@@ -69,6 +83,16 @@ export const api = {
     return request(`/tasks/${encodeURIComponent(taskName)}/archive`, {
       method: 'POST',
       parseJson: true,
+    });
+  },
+
+  getArchive(): Promise<ListArchiveResponse> {
+    return request('/archive');
+  },
+
+  unarchiveTask(archivedName: string): Promise<UnarchiveTaskResponse> {
+    return request(`/archive/${encodeURIComponent(archivedName)}/unarchive`, {
+      method: 'POST',
     });
   },
 

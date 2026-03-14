@@ -210,3 +210,68 @@ def test_repo_name_from_url_with_git_suffix() -> None:
 
 def test_repo_name_from_url_without_git_suffix() -> None:
     assert TaskManager._repo_name_from_url("https://github.com/user/repo") == "repo"
+
+
+def test_parse_archive_name() -> None:
+    assert TaskManager.parse_archive_name("my-task-mar-14-a1b2c3") == ("my-task", "mar-14")
+    assert TaskManager.parse_archive_name("foo-jan-1-abcdef") == ("foo", "jan-1")
+    assert TaskManager.parse_archive_name("no-suffix") == ("no-suffix", "")
+    assert TaskManager.parse_archive_name("multi-dash-task-dec-31-fedcba") == (
+        "multi-dash-task",
+        "dec-31",
+    )
+
+
+def test_list_archived_tasks_empty(manager: TaskManager) -> None:
+    assert manager.list_archived_tasks() == []
+
+
+def test_list_archived_tasks_no_archive_dir(manager: TaskManager, tmp_tasks_root: Path) -> None:
+    tmp_tasks_root.mkdir(parents=True)
+    assert manager.list_archived_tasks() == []
+
+
+def test_list_archived_tasks_returns_sorted(manager: TaskManager, tmp_tasks_root: Path) -> None:
+    archive_root = tmp_tasks_root / ".archive"
+    archive_root.mkdir(parents=True)
+    (archive_root / "z-task-mar-14-aaaaaa").mkdir()
+    (archive_root / "a-task-mar-15-bbbbbb").mkdir()
+    (archive_root / "m-task-mar-14-cccccc").mkdir()
+    entries = manager.list_archived_tasks()
+    assert len(entries) == 3
+    assert entries[0].archived_date == "mar-15"
+    assert entries[0].task_name == "a-task"
+    assert entries[1].archived_date == "mar-14"
+    assert entries[1].task_name == "m-task"
+    assert entries[2].archived_date == "mar-14"
+    assert entries[2].task_name == "z-task"
+
+
+def test_unarchive_task(manager: TaskManager, tmp_tasks_root: Path) -> None:
+    tmp_tasks_root.mkdir(parents=True)
+    archive_root = tmp_tasks_root / ".archive"
+    archive_root.mkdir()
+    archived = archive_root / "my-task-mar-14-a1b2c3"
+    archived.mkdir()
+    (archived / "comms").mkdir()
+    dest = manager.unarchive_task("my-task-mar-14-a1b2c3")
+    assert dest == tmp_tasks_root / "my-task"
+    assert dest.is_dir()
+    assert not archived.exists()
+
+
+def test_unarchive_task_target_exists_raises(manager: TaskManager, tmp_tasks_root: Path) -> None:
+    tmp_tasks_root.mkdir(parents=True)
+    (tmp_tasks_root / "my-task").mkdir()
+    archive_root = tmp_tasks_root / ".archive"
+    archive_root.mkdir()
+    (archive_root / "my-task-mar-14-a1b2c3").mkdir()
+    with pytest.raises(FileExistsError, match="Task already exists"):
+        manager.unarchive_task("my-task-mar-14-a1b2c3")
+
+
+def test_unarchive_task_not_found_raises(manager: TaskManager, tmp_tasks_root: Path) -> None:
+    tmp_tasks_root.mkdir(parents=True)
+    (tmp_tasks_root / ".archive").mkdir()
+    with pytest.raises(FileNotFoundError, match="Archived task not found"):
+        manager.unarchive_task("nonexistent-mar-14-abcdef")

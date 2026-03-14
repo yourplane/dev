@@ -19,7 +19,7 @@ from dev_sdk.comms import add_comms, comms_dir, read_index
 from dev_sdk.feed import LOGS_DIR, read_feed
 from dev_sdk.create_pr import CreatePRError, create_pull_request
 from dev_sdk.repo_config import load_repos, resolve_repo
-from dev_sdk.task_manager import TaskManager
+from dev_sdk.task_manager import ArchivedTaskEntry, TaskManager
 
 SUPPORTED_COMMANDS = ("plan-implement", "implement")
 
@@ -96,6 +96,20 @@ class ListTasksResponse(BaseModel):
 
 class ArchiveTaskResponse(BaseModel):
     archived_to: str
+
+
+class ArchivedTaskEntryModel(BaseModel):
+    archived_name: str
+    task_name: str
+    archived_date: str
+
+
+class ListArchiveResponse(BaseModel):
+    entries: list[ArchivedTaskEntryModel]
+
+
+class UnarchiveTaskResponse(BaseModel):
+    restored_task_name: str
 
 
 class ListCommsResponse(BaseModel):
@@ -209,6 +223,38 @@ def archive_task(task_name: str) -> ArchiveTaskResponse:
         return ArchiveTaskResponse(archived_to=str(dest))
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.get("/archive", response_model=ListArchiveResponse)
+def list_archive() -> ListArchiveResponse:
+    """List archived tasks (grouped by date on the client)."""
+    manager = _get_manager()
+    entries = manager.list_archived_tasks()
+    return ListArchiveResponse(
+        entries=[
+            ArchivedTaskEntryModel(
+                archived_name=e.archived_name,
+                task_name=e.task_name,
+                archived_date=e.archived_date,
+            )
+            for e in entries
+        ]
+    )
+
+
+@app.post("/archive/{archived_name}/unarchive", response_model=UnarchiveTaskResponse)
+def unarchive_task(archived_name: str) -> UnarchiveTaskResponse:
+    """Move archived task back to task dir and strip -date-random suffix."""
+    if not archived_name or ".." in archived_name or "/" in archived_name or "\\" in archived_name:
+        raise HTTPException(status_code=404, detail="Invalid archive name")
+    manager = _get_manager()
+    try:
+        dest = manager.unarchive_task(archived_name)
+        return UnarchiveTaskResponse(restored_task_name=dest.name)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except FileExistsError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 @app.get("/tasks/{task_name}/comms", response_model=ListCommsResponse)

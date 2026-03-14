@@ -139,6 +139,105 @@
   cursor: not-allowed;
 }
 
+.archive-undo-banner {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  margin-bottom: 0.75rem;
+  background: #e8f4e8;
+  border: 1px solid #8c8;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+.archive-undo-btn,
+.archive-dismiss-btn {
+  padding: 0.2rem 0.5rem;
+  border-radius: 4px;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.archive-undo-btn {
+  background: #2a2;
+  color: #fff;
+  border: none;
+}
+
+.archive-dismiss-btn {
+  background: transparent;
+  border: 1px solid #666;
+  color: #666;
+}
+
+.task-list-archive-link {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.task-list-archive-link a {
+  color: #06c;
+}
+
+.archive-view h2 {
+  margin-top: 0;
+}
+
+.archive-view .archive-by-date {
+  margin-top: 1rem;
+}
+
+.archive-view .archive-date-group {
+  margin-bottom: 1.25rem;
+}
+
+.archive-view .archive-date-group h3 {
+  margin: 0 0 0.5rem;
+  font-size: 1rem;
+  color: #555;
+}
+
+.archive-view .task-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+
+.archive-view .task-row .task-name {
+  flex: 1;
+}
+
+.unarchive-btn {
+  padding: 0.35rem 0.65rem;
+  border: 1px solid #2a2;
+  border-radius: 6px;
+  background: #e8f4e8;
+  color: #2a2;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.unarchive-btn:hover:not(:disabled) {
+  background: #d0e8d0;
+}
+
+.unarchive-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.archive-restored {
+  margin: 0 0 0.5rem;
+  padding: 0.4rem 0;
+  font-size: 0.95rem;
+}
+
+.archive-restored a {
+  color: #06c;
+}
+
 .empty {
   color: #666;
   margin: 0;
