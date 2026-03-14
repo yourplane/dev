@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { api, apiBaseUrl } from './api'
@@ -287,6 +287,8 @@ function TaskCommsPage() {
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [startingCommand, setStartingCommand] = useState<string | null>(null)
+  const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false)
+  const lastCommsEntryRef = useRef<HTMLDivElement | null>(null)
 
   const loadCommandStatus = useCallback(async () => {
     try {
@@ -355,6 +357,7 @@ function TaskCommsPage() {
     try {
       await api.postTaskComms(taskName, content)
       setCommentText('')
+      setScrollToBottomAfterLoad(true)
       await loadComms()
     } catch (e) {
       setPostError(e instanceof Error ? e.message : String(e))
@@ -362,6 +365,13 @@ function TaskCommsPage() {
       setPosting(false)
     }
   }
+
+  useEffect(() => {
+    if (!loading && scrollToBottomAfterLoad && files.length > 0) {
+      lastCommsEntryRef.current?.scrollIntoView({ behavior: 'smooth' })
+      setScrollToBottomAfterLoad(false)
+    }
+  }, [loading, scrollToBottomAfterLoad, files.length])
 
   if (loading) return <p className="status">Loading comms…</p>
   if (error) {
@@ -381,8 +391,12 @@ function TaskCommsPage() {
         <p className="empty">No comms yet for this task.</p>
       ) : (
         <div className="comms-history">
-          {files.map((filename) => (
-            <div key={filename} className="comms-entry">
+          {files.map((filename, i) => (
+            <div
+              key={filename}
+              className="comms-entry"
+              ref={i === files.length - 1 ? lastCommsEntryRef : undefined}
+            >
               <div className="comms-filename">{filename}</div>
               <div className="comms-content">
                 <ReactMarkdown>{contents[filename] ?? '(loading…)'}</ReactMarkdown>
