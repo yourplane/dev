@@ -14,6 +14,7 @@ vi.mock('./api', () => ({
     getTaskCommsFile: vi.fn(),
     getTaskCommandStatus: vi.fn(),
     startTaskCommand: vi.fn(),
+    createTaskPr: vi.fn(),
   },
 }))
 
