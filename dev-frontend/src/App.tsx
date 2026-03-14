@@ -287,6 +287,9 @@ function TaskCommsPage() {
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [startingCommand, setStartingCommand] = useState<string | null>(null)
+  const [creatingPr, setCreatingPr] = useState(false)
+  const [prUrl, setPrUrl] = useState<string | null>(null)
+  const [prError, setPrError] = useState<string | null>(null)
   const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false)
   const lastCommsEntryRef = useRef<HTMLDivElement | null>(null)
   const [archiving, setArchiving] = useState(false)
@@ -342,6 +345,20 @@ function TaskCommsPage() {
       setCommandError(e instanceof Error ? e.message : String(e))
     } finally {
       setStartingCommand(null)
+    }
+  }
+
+  const handleCreatePr = async () => {
+    setPrError(null)
+    setPrUrl(null)
+    setCreatingPr(true)
+    try {
+      const res = await api.createTaskPr(taskName)
+      setPrUrl(res.pr_url)
+    } catch (e) {
+      setPrError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCreatingPr(false)
     }
   }
 
@@ -463,9 +480,24 @@ function TaskCommsPage() {
             >
               {startingCommand === 'implement' ? 'Starting…' : 'Implement'}
             </button>
+            <button
+              type="button"
+              className="command-btn"
+              disabled={!!startingCommand || creatingPr}
+              onClick={handleCreatePr}
+              aria-busy={creatingPr}
+            >
+              {creatingPr ? 'Creating PR…' : 'Create PR'}
+            </button>
           </div>
         )}
         {commandError && <p className="inline-error">{commandError}</p>}
+        {prError && <p className="inline-error">{prError}</p>}
+        {prUrl && (
+          <p className="pr-result">
+            <a href={prUrl} target="_blank" rel="noopener noreferrer">Open PR</a>
+          </p>
+        )}
       </div>
       <form className="comms-post-form" onSubmit={handlePostComment}>
         <label className="comms-post-form-label">Add comment</label>

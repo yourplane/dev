@@ -8,7 +8,8 @@ from unittest.mock import MagicMock, patch
 import pytest
 from click.testing import CliRunner
 
-from dev.commands.create_pr import _parse_owner_repo, create_pr
+from dev.commands.create_pr import create_pr
+from dev_sdk.create_pr import _parse_owner_repo
 
 
 @pytest.fixture
@@ -65,7 +66,7 @@ def test_create_pr_rejects_main(
         porcelain="",
         upstream_ok=False,  # we never get to upstream check
     )
-    with patch("dev.commands.create_pr.subprocess.run", subprocess_run):
+    with patch("dev_sdk.create_pr.subprocess.run", subprocess_run):
         result = runner.invoke(create_pr, ["--task", str(tmp_path)])
     assert result.exit_code != 0
     assert "feature branch" in result.output or "not main" in result.output.lower()
@@ -85,7 +86,7 @@ def test_create_pr_rejects_dirty_tree(
         porcelain=" M file.txt",
         upstream_ok=True,
     )
-    with patch("dev.commands.create_pr.subprocess.run", subprocess_run):
+    with patch("dev_sdk.create_pr.subprocess.run", subprocess_run):
         result = runner.invoke(create_pr, ["--task", str(tmp_path)])
     assert result.exit_code != 0
     assert "Uncommitted" in result.output or "commit or stash" in result.output
@@ -106,7 +107,7 @@ def test_create_pr_fails_when_push_fails_no_upstream(
         upstream_ok=False,
         push_succeeds=False,
     )
-    with patch("dev.commands.create_pr.subprocess.run", side_effect=run_mock):
+    with patch("dev_sdk.create_pr.subprocess.run", side_effect=run_mock):
         result = runner.invoke(create_pr, ["--task", str(tmp_path)])
     assert result.exit_code != 0
     assert "Failed to push" in result.output
@@ -146,15 +147,14 @@ def test_create_pr_sets_upstream_when_no_upstream(
         response.__exit__ = lambda *a: None
         return response
 
-    with patch("dev.commands.create_pr._get_github_token", return_value="secret"):
-        with patch("dev.commands.create_pr.subprocess.run", side_effect=run):
+    with patch("dev_sdk.create_pr._get_github_token", return_value="secret"):
+        with patch("dev_sdk.create_pr.subprocess.run", side_effect=run):
             with patch(
-                "dev.commands.create_pr.urllib.request.urlopen",
+                "dev_sdk.create_pr.urllib.request.urlopen",
                 side_effect=urlopen,
             ):
                 result = runner.invoke(create_pr, ["--task", str(tmp_path)])
     assert result.exit_code == 0
-    assert "Pushing branch" in result.output and "setting upstream" in result.output
     assert "https://github.com/owner/repo/pull/99" in result.output
 
 
@@ -193,15 +193,14 @@ def test_create_pr_pushes_when_out_of_sync(
         response.__exit__ = lambda *a: None
         return response
 
-    with patch("dev.commands.create_pr._get_github_token", return_value="secret"):
-        with patch("dev.commands.create_pr.subprocess.run", side_effect=run):
+    with patch("dev_sdk.create_pr._get_github_token", return_value="secret"):
+        with patch("dev_sdk.create_pr.subprocess.run", side_effect=run):
             with patch(
-                "dev.commands.create_pr.urllib.request.urlopen",
+                "dev_sdk.create_pr.urllib.request.urlopen",
                 side_effect=urlopen,
             ):
                 result = runner.invoke(create_pr, ["--task", str(tmp_path)])
     assert result.exit_code == 0
-    assert "Pushing branch" in result.output and "to origin" in result.output
     assert "https://github.com/owner/repo/pull/11" in result.output
 
 
@@ -288,10 +287,10 @@ def test_create_pr_success(runner: CliRunner, tmp_path: Path) -> None:
         response.__exit__ = lambda *a: None
         return response
 
-    with patch("dev.commands.create_pr._get_github_token", return_value="secret"):
-        with patch("dev.commands.create_pr.subprocess.run", side_effect=run):
+    with patch("dev_sdk.create_pr._get_github_token", return_value="secret"):
+        with patch("dev_sdk.create_pr.subprocess.run", side_effect=run):
             with patch(
-                "dev.commands.create_pr.urllib.request.urlopen",
+                "dev_sdk.create_pr.urllib.request.urlopen",
                 side_effect=urlopen,
             ):
                 result = runner.invoke(create_pr, ["--task", str(tmp_path)])

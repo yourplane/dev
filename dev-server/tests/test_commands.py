@@ -96,3 +96,21 @@ def test_get_commands_404_for_nonexistent_task(client_with_tasks: TestClient) ->
     """GET commands for nonexistent task returns 404."""
     resp = client_with_tasks.get("/tasks/nonexistent/commands")
     assert resp.status_code == 404
+
+
+def test_create_pr_returns_pr_url(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """POST create-pr returns 200 and pr_url when create_pull_request succeeds."""
+    with patch("dev_server.main.create_pull_request", return_value="https://github.com/owner/repo/pull/1"):
+        resp = client_with_tasks.post("/tasks/mytask/create-pr")
+    assert resp.status_code == 200
+    assert resp.json()["pr_url"] == "https://github.com/owner/repo/pull/1"
+
+
+def test_create_pr_returns_422_on_error(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """POST create-pr returns 422 with detail when create_pull_request raises CreatePRError."""
+    from dev_sdk.create_pr import CreatePRError
+
+    with patch("dev_server.main.create_pull_request", side_effect=CreatePRError("Create PR from a feature branch, not main.")):
+        resp = client_with_tasks.post("/tasks/mytask/create-pr")
+    assert resp.status_code == 422
+    assert "feature branch" in resp.json()["detail"]
