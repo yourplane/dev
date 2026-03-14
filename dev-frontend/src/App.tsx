@@ -615,7 +615,9 @@ export function TaskCommsPageContent({
   const loadCommandStatus = useCallback(async () => {
     try {
       const res = await api.getTaskCommandStatus(taskName)
-      setActiveCommand(res.active && res.command ? res.command : null)
+      const nextActive = res.active && res.command ? res.command : null
+      setActiveCommand(nextActive)
+      if (!nextActive) setCancelling(false)
       setActiveLogFilename(res.active && res.active_log_filename ? res.active_log_filename : null)
     } catch {
       // ignore; task might not exist yet
@@ -787,10 +789,9 @@ export function TaskCommsPageContent({
     setCancelling(true)
     try {
       await api.cancelTaskCommand(taskName)
-      // Poll will clear activeCommand when the command actually stops
+      // Leave cancelling true; loadCommandStatus will set it false when poll sees command inactive
     } catch (e) {
       setCommandError(e instanceof Error ? e.message : String(e))
-    } finally {
       setCancelling(false)
     }
   }
@@ -993,9 +994,15 @@ export function TaskCommsPageContent({
       <div className="task-commands">
         {activeCommand ? (
           <div className="command-status-row">
-            <p className="command-status">
-              <span className="command-spinner" aria-hidden /> Running: {COMMAND_LABEL[activeCommand] ?? activeCommand}
-            </p>
+            {cancelling ? (
+              <p className="command-status">
+                <span className="command-spinner" aria-hidden /> Cancelling…
+              </p>
+            ) : (
+              <p className="command-status">
+                <span className="command-spinner" aria-hidden /> Running: {COMMAND_LABEL[activeCommand] ?? activeCommand}
+              </p>
+            )}
             <button
               type="button"
               className="command-btn command-cancel-btn"
