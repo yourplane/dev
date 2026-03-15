@@ -300,6 +300,8 @@ function ArchivePage() {
   )
 }
 
+const DRAFT_DEBOUNCE_MS = 400
+
 function CreateTaskForm({
   onCreated,
   onCancel,
@@ -320,6 +322,8 @@ function CreateTaskForm({
   const [addError, setAddError] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
   const [removing, setRemoving] = useState<string | null>(null)
+  const [draftStatus, setDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
+  const draftLoadedRef = useRef(false)
 
   const loadRepos = useCallback(() => {
     return api.getRepos().then(setRepos)
@@ -334,6 +338,36 @@ function CreateTaskForm({
     })
     return () => { cancelled = true }
   }, [])
+
+  useEffect(() => {
+    if (reposLoading) return
+    let cancelled = false
+    api.getNewTaskDraft().then((d) => {
+      if (cancelled) return
+      if (d.title != null && d.title !== '') setTitle(d.title)
+      if (d.repo != null && d.repo !== '') setRepo(d.repo)
+      if (d.comment != null && d.comment !== '') setComment(d.comment)
+      draftLoadedRef.current = true
+      setDraftStatus('saved')
+    }).catch(() => { /* ignore */ })
+    return () => { cancelled = true }
+  }, [reposLoading])
+
+  useEffect(() => {
+    if (!draftLoadedRef.current) return
+    setDraftStatus('unsaved')
+    const t = setTimeout(() => {
+      const payload = { title, repo, comment }
+      const empty = !title.trim() && !repo.trim() && !comment.trim()
+      setDraftStatus('saving')
+      api.setNewTaskDraft(empty ? {} : payload).then(() => {
+        setDraftStatus('saved')
+      }).catch(() => {
+        setDraftStatus('unsaved')
+      })
+    }, DRAFT_DEBOUNCE_MS)
+    return () => clearTimeout(t)
+  }, [title, repo, comment])
 
   const handleRemoveRepo = async (name: string) => {
     if (!confirm(`Remove "${name}" from your repo list?`)) return
@@ -390,6 +424,7 @@ function CreateTaskForm({
         repo: repo.trim(),
         comment: comment.trim() || undefined,
       })
+      await api.setNewTaskDraft({})
       onCreated(res.task_name)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -401,6 +436,11 @@ function CreateTaskForm({
   return (
     <section className="create-form">
       <h2>New task</h2>
+      <div className={`draft-status draft-status-${draftStatus}`} role="status" aria-live="polite">
+        {draftStatus === 'saved' && 'All changes saved to draft'}
+        {draftStatus === 'unsaved' && 'Unsaved changes'}
+        {draftStatus === 'saving' && 'Saving draft…'}
+      </div>
       <form onSubmit={handleSubmit}>
         {error && <p className="inline-error">{error}</p>}
         <label>
@@ -1031,6 +1071,8 @@ export function TaskCommsPageContent({
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set())
   const [loadingContentKeys, setLoadingContentKeys] = useState<Set<string>>(new Set())
+  const [commentDraftStatus, setCommentDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
+  const commentDraftLoadedRef = useRef(false)
 
   const toggleCollapsed = useCallback((key: string) => {
     setCollapsedKeys((prev) => {
@@ -1260,6 +1302,30 @@ export function TaskCommsPageContent({
   }, [loadFeed])
 
   useEffect(() => {
+    if (loading || error) return
+    commentDraftLoadedRef.current = false
+    api.getTaskCommentDraft(taskName).then((text) => {
+      setCommentText(text)
+      commentDraftLoadedRef.current = true
+      setCommentDraftStatus('saved')
+    }).catch(() => { /* ignore */ })
+  }, [taskName, loading, error])
+
+  useEffect(() => {
+    if (!commentDraftLoadedRef.current) return
+    setCommentDraftStatus('unsaved')
+    const t = setTimeout(() => {
+      setCommentDraftStatus('saving')
+      api.setTaskCommentDraft(taskName, commentText).then(() => {
+        setCommentDraftStatus('saved')
+      }).catch(() => {
+        setCommentDraftStatus('unsaved')
+      })
+    }, DRAFT_DEBOUNCE_MS)
+    return () => clearTimeout(t)
+  }, [taskName, commentText])
+
+  useEffect(() => {
     document.title = `Dev – ${taskName}`
     return () => { document.title = DEFAULT_TAB_TITLE }
   }, [taskName])
@@ -1273,6 +1339,7 @@ export function TaskCommsPageContent({
     try {
       await api.postTaskComms(taskName, content)
       setCommentText('')
+      await api.setTaskCommentDraft(taskName, '')
       await loadFeed({ incremental: true, prefetchNew: true })
       setScrollToBottomAfterLoad(true)
     } catch (e) {
@@ -1496,6 +1563,11 @@ export function TaskCommsPageContent({
       </div>
       <form className="comms-post-form" onSubmit={handlePostComment}>
         <label className="comms-post-form-label">Add comment</label>
+        <div className={`draft-status draft-status-${commentDraftStatus}`} role="status" aria-live="polite">
+          {commentDraftStatus === 'saved' && 'All changes saved to draft'}
+          {commentDraftStatus === 'unsaved' && 'Unsaved changes'}
+          {commentDraftStatus === 'saving' && 'Saving draft…'}
+        </div>
         <textarea
           className="comms-post-form-textarea"
           value={commentText}
