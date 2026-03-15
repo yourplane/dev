@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { api, apiBaseUrl } from './api'
-import { parseLogToSegments, type LogSegment } from './logParser'
+import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import './App.css'
 
 const FEED_POLL_INTERVAL_MS = 15000
@@ -597,8 +597,332 @@ function ParsedLogView({ raw }: { raw: string }) {
   )
 }
 
+function getShellOutput(result: unknown): string {
+  if (result == null) return ''
+  const r = result as Record<string, unknown>
+  const inner = (r.success != null ? (r.success as Record<string, unknown>) : r) as Record<string, unknown>
+  if (typeof inner.output === 'string') return inner.output
+  if (typeof inner.combinedOutput === 'string') return inner.combinedOutput
+  if (typeof inner.interleavedOutput === 'string') return inner.interleavedOutput
+  const stdout = typeof inner.stdout === 'string' ? inner.stdout : ''
+  const stderr = typeof inner.stderr === 'string' ? inner.stderr : ''
+  return stderr ? stdout + (stdout ? '\n' : '') + stderr : stdout
+}
+
+function getReadSuccess(result: unknown): boolean {
+  if (result == null) return false
+  const r = result as Record<string, unknown>
+  return r.success !== undefined && r.success !== null
+}
+
+function getReadPath(args: Record<string, unknown>, result: unknown): string {
+  if (result != null) {
+    const r = result as Record<string, unknown>
+    const success = r.success as Record<string, unknown> | undefined
+    if (success && typeof success.path === 'string') return success.path
+  }
+  return typeof args.path === 'string' ? args.path : ''
+}
+
+function getTodoList(result: unknown): Array<{ id?: string; content?: string; status?: string }> {
+  if (result == null) return []
+  const r = result as Record<string, unknown>
+  const success = r.success as Record<string, unknown> | undefined
+  const todos = success?.todos ?? success?.todo ?? r.todos ?? r.todo
+  return Array.isArray(todos) ? todos : []
+}
+
+function getEditDiff(result: unknown, args: Record<string, unknown>): string {
+  if (result != null) {
+    const r = result as Record<string, unknown>
+    if (typeof r.diff === 'string') return r.diff
+    const success = r.success as Record<string, unknown> | undefined
+    if (success && typeof success.diffString === 'string') return success.diffString
+  }
+  const oldStr = args.old_string ?? args.oldString
+  const newStr = args.new_string ?? args.newString
+  if (oldStr != null && newStr != null) {
+    return `- ${typeof oldStr === 'string' ? oldStr : JSON.stringify(oldStr)}\n+ ${typeof newStr === 'string' ? newStr : JSON.stringify(newStr)}`
+  }
+  return ''
+}
+
+function getEditFilePath(args: Record<string, unknown>, result: unknown): string {
+  if (result != null) {
+    const r = result as Record<string, unknown>
+    const success = r.success as Record<string, unknown> | undefined
+    if (success && typeof success.path === 'string') return success.path
+  }
+  return typeof args.path === 'string' ? args.path : ''
+}
+
+function getWebSearchUrl(result: unknown, args: Record<string, unknown>): string {
+  if (result != null) {
+    const r = result as Record<string, unknown>
+    if (typeof r.url === 'string') return r.url
+  }
+  return typeof args.url === 'string' ? args.url : ''
+}
+
+function getWebSearchSuccess(result: unknown): boolean {
+  if (result == null) return false
+  const r = result as Record<string, unknown>
+  return r.success === true || (r.error === undefined && r.success !== false)
+}
+
+function getGrepSummary(result: unknown): { totalMatchedLines?: number; totalLines?: number; text?: string } {
+  if (result == null) return {}
+  const r = result as Record<string, unknown>
+  const success = r.success as Record<string, unknown> | undefined
+  const workspaceResults = success?.workspaceResults as Record<string, { content?: Record<string, unknown> }> | undefined
+  if (!workspaceResults) return {}
+  const firstWs = Object.values(workspaceResults)[0]
+  const first = firstWs?.content
+  if (!first || typeof first !== 'object') return {}
+  const data = first as Record<string, unknown>
+  const totalMatchedLines = data.totalMatchedLines as number | undefined
+  const totalLines = data.totalLines as number | undefined
+  const matches = data.matches as Array<{ file?: string; matches?: Array<{ lineNumber?: number; content?: string }> }> | undefined
+  if (!Array.isArray(matches)) return { totalMatchedLines, totalLines }
+  const lines: string[] = []
+  for (const m of matches.slice(0, 30)) {
+    const file = m.file ?? ''
+    for (const hit of (m.matches ?? []).slice(0, 5)) {
+      lines.push(`${file}:${hit.lineNumber ?? ''} ${(hit.content ?? '').slice(0, 80)}`)
+    }
+  }
+  return { totalMatchedLines, totalLines, text: lines.join('\n') }
+}
+
+function getGlobFiles(result: unknown): string[] {
+  if (result == null) return []
+  const r = result as Record<string, unknown>
+  const success = r.success as Record<string, unknown> | undefined
+  const files = success?.files ?? r.files
+  return Array.isArray(files) ? files.filter((f): f is string => typeof f === 'string') : []
+}
+
+function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
+  const { toolKey, humanLabel, args, result, status } = toolCall
+  const isStarted = status === 'started'
+
+  if (isStarted) {
+    if (toolKey === 'shellToolCall') {
+      const command = typeof args.command === 'string' ? args.command : ''
+      return (
+        <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
+          <pre className="feed-log-shell-block">
+            <span className="feed-log-tool-call-spinner" aria-hidden />
+            {' $ '}
+            {command || '(running…)'}
+          </pre>
+        </div>
+      )
+    }
+    return (
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-in-progress">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-tool-call-spinner" aria-hidden />
+          <span className="feed-log-segment-label">{humanLabel}</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (toolKey === 'readToolCall') {
+    const path = getReadPath(args, result)
+    const success = getReadSuccess(result)
+    return (
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-read">
+        <div className="feed-log-tool-call-header feed-log-tool-call-read-line">
+          <span className="feed-log-segment-label">{humanLabel}</span>
+          <span className="feed-log-tool-call-read-path feed-log-file-path">{path || '—'}</span>
+          {!success && <span className="feed-log-tool-call-status feed-log-tool-call-error">Error</span>}
+        </div>
+      </div>
+    )
+  }
+
+  if (toolKey === 'shellToolCall') {
+    const command = typeof args.command === 'string' ? args.command : ''
+    const output = getShellOutput(result)
+    const block = [command ? `$ ${command}` : '', output].filter(Boolean).join('\n\n')
+    return (
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
+        <pre className="feed-log-shell-block">{block || ' '}</pre>
+      </div>
+    )
+  }
+
+  if (toolKey === 'todo_writeToolCall') {
+    const todos = getTodoList(result)
+    return (
+      <div className="feed-log-segment feed-log-tool-call">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-segment-label">{humanLabel}</span>
+        </div>
+        <div className="feed-log-segment-body">
+          <ul className="feed-log-tool-call-todos">
+            {todos.map((t, i) => (
+              <li key={t.id ?? i}>
+                {[t.status, t.content].filter(Boolean).join(' – ')}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    )
+  }
+
+  if (toolKey === 'search_replaceToolCall' || toolKey === 'editToolCall') {
+    const diff = getEditDiff(result, args)
+    const filePath = getEditFilePath(args, result)
+    return (
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-diff">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-segment-label">{humanLabel}</span>
+          {filePath ? <span className="feed-log-tool-call-edit-path feed-log-file-path">{filePath}</span> : null}
+        </div>
+        <div className="feed-log-diff-body">
+          {diff ? (
+            diff.split('\n').map((line, i) => {
+              if (line.startsWith('-')) {
+                return <div key={i} className="feed-log-diff-line feed-log-diff-removed">{line}</div>
+              }
+              if (line.startsWith('+')) {
+                return <div key={i} className="feed-log-diff-line feed-log-diff-added">{line}</div>
+              }
+              return <div key={i} className="feed-log-diff-line">{line || '\u00a0'}</div>
+            })
+          ) : (
+            <div className="feed-log-diff-line">(no diff)</div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (toolKey === 'writeToolCall') {
+    const diff = getEditDiff(result, args)
+    const content = diff || (args.contents != null ? String(args.contents) : '')
+    const filePath = getEditFilePath(args, result)
+    const displayContent = content || (typeof args.path === 'string' ? args.path : '')
+    return (
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-diff">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-segment-label">{humanLabel}</span>
+          {filePath ? <span className="feed-log-tool-call-edit-path feed-log-file-path">{filePath}</span> : null}
+        </div>
+        <div className="feed-log-diff-body">
+          {displayContent ? (
+            displayContent.split('\n').map((line, i) => {
+              if (line.startsWith('-')) {
+                return <div key={i} className="feed-log-diff-line feed-log-diff-removed">{line}</div>
+              }
+              if (line.startsWith('+')) {
+                return <div key={i} className="feed-log-diff-line feed-log-diff-added">{line}</div>
+              }
+              return <div key={i} className="feed-log-diff-line">{line || '\u00a0'}</div>
+            })
+          ) : (
+            <div className="feed-log-diff-line">(no content)</div>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (toolKey === 'web_searchToolCall') {
+    const url = getWebSearchUrl(result, args) || (typeof args.query === 'string' ? `https://search?q=${encodeURIComponent(args.query)}` : '')
+    const success = getWebSearchSuccess(result)
+    return (
+      <div className="feed-log-segment feed-log-tool-call">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-tool-call-web-icon" aria-hidden />
+          <span className="feed-log-segment-label">{humanLabel}</span>
+          <span className="feed-log-tool-call-status">{success ? 'Success' : 'Error'}</span>
+        </div>
+        <div className="feed-log-segment-body">
+          {url ? (
+            <a href={url.startsWith('http') ? url : `https://${url}`} target="_blank" rel="noopener noreferrer" className="feed-log-tool-call-link">
+              {url}
+            </a>
+          ) : null}
+        </div>
+      </div>
+    )
+  }
+
+  if (toolKey === 'grepToolCall') {
+    const summary = getGrepSummary(result)
+    const pattern = typeof args.pattern === 'string' ? args.pattern : ''
+    const path = typeof args.path === 'string' ? args.path : ''
+    const scope = [path, typeof args.glob === 'string' ? args.glob : ''].filter(Boolean).join(' ')
+    return (
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-search">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-segment-label">{humanLabel}</span>
+          {summary.totalMatchedLines != null && (
+            <span className="feed-log-tool-call-search-count">{summary.totalMatchedLines} matches</span>
+          )}
+        </div>
+        <div className="feed-log-segment-body feed-log-search-body">
+          <p className="feed-log-tool-call-read-path feed-log-search-pattern">{pattern}{scope ? ` in ${scope}` : ''}</p>
+          {summary.text ? <pre className="feed-log-search-results">{summary.text}</pre> : null}
+        </div>
+      </div>
+    )
+  }
+
+  if (toolKey === 'globToolCall') {
+    const files = getGlobFiles(result)
+    const pattern = typeof args.globPattern === 'string' ? args.globPattern : (typeof args.pattern === 'string' ? args.pattern : '')
+    return (
+      <div className="feed-log-segment feed-log-tool-call">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-segment-label">{humanLabel}</span>
+          {files.length > 0 && <span className="feed-log-tool-call-status">{files.length} files</span>}
+        </div>
+        <div className="feed-log-segment-body">
+          {pattern ? <p className="feed-log-tool-call-read-path feed-log-file-path">{pattern}</p> : null}
+          {files.length > 0 ? <pre className="feed-log-terminal">{files.slice(0, 50).join('\n')}{files.length > 50 ? `\n... and ${files.length - 50} more` : ''}</pre> : null}
+        </div>
+      </div>
+    )
+  }
+
+  const hasResult = result !== undefined && result !== null
+  const resultStr = hasResult ? (typeof result === 'string' ? result : JSON.stringify(result, null, 2)) : ''
+  return (
+    <div className="feed-log-segment feed-log-tool-call">
+      <div className="feed-log-tool-call-header">
+        <span className="feed-log-segment-label">{humanLabel}</span>
+        <span className="feed-log-tool-call-status">{status}</span>
+      </div>
+      <div className="feed-log-segment-body">
+        {Object.keys(args).length > 0 && (
+          <dl className="feed-log-tool-call-args">
+            {Object.entries(args).map(([k, v]) => (
+              <div key={k} className="feed-log-tool-call-arg">
+                <dt>{k}</dt>
+                <dd>{typeof v === 'string' ? v : JSON.stringify(v)}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        {hasResult && (
+          <details className="feed-log-tool-call-result">
+            <summary>Result</summary>
+            <pre className="feed-log-terminal">{resultStr}</pre>
+          </details>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function LogSegmentBlock({ segment }: { segment: LogSegment }) {
-  const { type, text } = segment
+  const { type, text, toolCall } = segment
   const label = type === 'tool_call' ? 'Tool call' : type === 'thinking' ? 'Thinking' : type.charAt(0).toUpperCase() + type.slice(1)
   if (type === 'thinking') {
     return (
@@ -610,11 +934,14 @@ function LogSegmentBlock({ segment }: { segment: LogSegment }) {
       </div>
     )
   }
+  if (type === 'tool_call' && toolCall) {
+    return <ToolCallBlock toolCall={toolCall} />
+  }
   if (type === 'tool_call') {
     return (
       <div className="feed-log-segment feed-log-tool-call">
         <span className="feed-log-segment-label">{label}</span>
-        <pre className="feed-log-segment-body feed-log-terminal">{text}</pre>
+        <pre className="feed-log-segment-body feed-log-terminal">{text || '(no details)'}</pre>
       </div>
     )
   }

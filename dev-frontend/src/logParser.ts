@@ -1,11 +1,58 @@
 /**
- * Parse agent JSONL log into display segments (type + text).
- * Consecutive events of the same type are merged into one segment.
+ * Parse agent JSONL log into display segments (type + text or structured tool call).
+ * Consecutive events of the same type are merged into one segment (except tool_call).
+ * Tool call events with the same call_id are grouped into one segment with structured data.
+ * System init at the beginning of the log is omitted. Empty segments are omitted.
  */
+
+export interface ToolCallInfo {
+  toolKey: string
+  humanLabel: string
+  args: Record<string, unknown>
+  result?: unknown
+  status: 'started' | 'completed'
+}
 
 export interface LogSegment {
   type: string
   text: string
+  toolCall?: ToolCallInfo
+}
+
+const TOOL_HUMAN_LABELS: Record<string, string> = {
+  readToolCall: 'Read file',
+  grepToolCall: 'Search',
+  globToolCall: 'List files',
+  writeToolCall: 'Write file',
+  search_replaceToolCall: 'Search and replace',
+  editToolCall: 'Edit file',
+  run_terminal_cmdToolCall: 'Run command',
+  shellToolCall: 'Run command',
+  list_dirToolCall: 'List directory',
+  delete_fileToolCall: 'Delete file',
+  edit_notebookToolCall: 'Edit notebook',
+  web_searchToolCall: 'Web search',
+  mcp_taskToolCall: 'Task',
+  mcp_web_fetchToolCall: 'Fetch URL',
+  todo_writeToolCall: 'Update todo',
+}
+
+function humanLabelForTool(toolKey: string): string {
+  return TOOL_HUMAN_LABELS[toolKey] ?? toolKey.replace(/([A-Z])/g, ' $1').replace(/^./, (s) => s.toUpperCase()).trim()
+}
+
+interface ParsedEvent {
+  index: number
+  type: string
+  subtype?: string
+  text: string | null
+  toolCall?: {
+    call_id: string
+    subtype: string
+    toolKey: string
+    args: Record<string, unknown>
+    result?: unknown
+  }
 }
 
 function getTextFromLine(obj: Record<string, unknown>): string | null {
@@ -25,22 +72,8 @@ function getTextFromLine(obj: Record<string, unknown>): string | null {
         .map((c) => c.text as string)
       return parts.length ? parts.join('') : null
     }
-    case 'tool_call': {
-      const tc = obj.tool_call as Record<string, unknown> | undefined
-      if (!tc || typeof tc !== 'object') return null
-      const subtype = typeof obj.subtype === 'string' ? obj.subtype : ''
-      const keys = Object.keys(tc)
-      const name = keys[0] // e.g. readToolCall, grepToolCall
-      if (!name) return subtype ? `[${subtype}]` : null
-      const argObj = (tc[name] as Record<string, unknown>)?.args as Record<string, unknown> | undefined
-      const argStr =
-        argObj && typeof argObj === 'object'
-          ? Object.entries(argObj)
-              .map(([k, v]) => (v !== undefined && v !== null ? `${k}=${JSON.stringify(v)}` : k))
-              .join(' ')
-          : ''
-      return `$ ${name} ${argStr}`.trim()
-    }
+    case 'tool_call':
+      return null // we use structured toolCall instead
     case 'system': {
       const sub = obj.subtype as string | undefined
       return sub ? `[system: ${sub}]` : '[system]'
@@ -50,26 +83,107 @@ function getTextFromLine(obj: Record<string, unknown>): string | null {
   }
 }
 
-export function parseLogToSegments(raw: string): LogSegment[] {
-  const segments: LogSegment[] = []
-  const lines = raw.split('\n').filter((s) => s.trim())
+function parseToolCall(obj: Record<string, unknown>): ParsedEvent['toolCall'] | undefined {
+  const tc = obj.tool_call as Record<string, unknown> | undefined
+  if (!tc || typeof tc !== 'object') return undefined
+  const call_id = typeof obj.call_id === 'string' ? obj.call_id : ''
+  const subtype = typeof obj.subtype === 'string' ? obj.subtype : ''
+  const keys = Object.keys(tc)
+  const toolKey = keys[0]
+  if (!toolKey) return undefined
+  const payload = tc[toolKey] as Record<string, unknown> | undefined
+  const args = (payload?.args as Record<string, unknown>) ?? {}
+  const result = payload?.result
+  return { call_id, subtype, toolKey, args, result }
+}
 
-  for (const line of lines) {
-    let obj: Record<string, unknown>
-    try {
-      obj = JSON.parse(line) as Record<string, unknown>
-    } catch {
+function parseLine(line: string, index: number): ParsedEvent | null {
+  let obj: Record<string, unknown>
+  try {
+    obj = JSON.parse(line) as Record<string, unknown>
+  } catch {
+    return null
+  }
+  const eventType = typeof obj.type === 'string' ? obj.type : 'unknown'
+  if (eventType === 'tool_call') {
+    const toolCall = parseToolCall(obj)
+    if (!toolCall) return null
+    return { index, type: 'tool_call', subtype: toolCall.subtype, text: null, toolCall }
+  }
+  const text = getTextFromLine(obj)
+  if (text === null || text === '') return null
+  return { index, type: eventType, subtype: obj.subtype as string | undefined, text }
+}
+
+export function parseLogToSegments(raw: string): LogSegment[] {
+  const lines = raw.split('\n').filter((s) => s.trim())
+  const events: ParsedEvent[] = []
+  for (let i = 0; i < lines.length; i++) {
+    const ev = parseLine(lines[i], i)
+    if (ev) events.push(ev)
+  }
+
+  const segments: LogSegment[] = []
+  let onlySystemInitSoFar = true
+  const toolCallGroups = new Map<string, { firstIndex: number; events: ParsedEvent[] }>()
+
+  function flushToolCalls(): void {
+    const order = [...toolCallGroups.entries()].sort((a, b) => a[1].firstIndex - b[1].firstIndex)
+    for (const [, group] of order) {
+      const evs = group.events
+      const completed = evs.find((e) => e.toolCall?.subtype === 'completed')
+      const started = evs.find((e) => e.toolCall?.subtype === 'started') ?? evs[0]
+      const tc = (completed ?? started).toolCall!
+      const status = completed ? ('completed' as const) : ('started' as const)
+      const args = (started.toolCall?.args ?? {}) as Record<string, unknown>
+      const result = completed?.toolCall?.result
+      const humanLabel = humanLabelForTool(tc.toolKey)
+      segments.push({
+        type: 'tool_call',
+        text: '',
+        toolCall: { toolKey: tc.toolKey, humanLabel, args, result, status },
+      })
+    }
+    toolCallGroups.clear()
+  }
+
+  function hasContent(seg: LogSegment): boolean {
+    if (seg.toolCall) return true
+    return typeof seg.text === 'string' && seg.text.trim().length > 0
+  }
+
+  for (const ev of events) {
+    if (ev.type === 'system' && ev.subtype === 'init' && onlySystemInitSoFar) {
       continue
     }
-    const eventType = typeof obj.type === 'string' ? obj.type : 'unknown'
-    const text = getTextFromLine(obj)
-    if (text === null || text === '') continue
-    if (segments.length > 0 && segments[segments.length - 1].type === eventType) {
-      segments[segments.length - 1].text += text
-    } else {
-      segments.push({ type: eventType, text })
+    onlySystemInitSoFar = false
+
+    if (ev.type === 'tool_call' && ev.toolCall) {
+      const id = ev.toolCall.call_id
+      const existing = toolCallGroups.get(id)
+      if (existing) {
+        existing.events.push(ev)
+      } else {
+        toolCallGroups.set(id, { firstIndex: ev.index, events: [ev] })
+      }
+      continue
+    }
+
+    flushToolCalls()
+
+    if (ev.type === 'thinking' || ev.type === 'assistant' || ev.type === 'user' || ev.type === 'system' || ev.type === 'unknown') {
+      const last = segments[segments.length - 1]
+      const text = ev.text ?? ''
+      if (last && last.type === ev.type && !last.toolCall) {
+        last.text += text
+      } else {
+        const seg: LogSegment = { type: ev.type, text }
+        if (hasContent(seg)) segments.push(seg)
+      }
     }
   }
 
-  return segments
+  flushToolCalls()
+
+  return segments.filter(hasContent)
 }
