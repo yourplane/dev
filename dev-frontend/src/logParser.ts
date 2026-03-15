@@ -36,9 +36,9 @@ const TOOL_HUMAN_LABELS: Record<string, string> = {
   web_searchToolCall: 'Web search',
   webSearchToolCall: 'Web search',
   mcp_taskToolCall: 'Task',
-  mcp_web_fetchToolCall: 'Fetch URL',
-  mcpWebFetchToolCall: 'Fetch URL',
-  webFetchToolCall: 'Fetch URL',
+  mcp_web_fetchToolCall: 'WEB FETCH',
+  mcpWebFetchToolCall: 'WEB FETCH',
+  webFetchToolCall: 'WEB FETCH',
   todo_writeToolCall: 'Update todo',
 }
 
