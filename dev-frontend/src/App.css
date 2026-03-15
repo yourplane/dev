@@ -830,31 +830,33 @@
   color: #1b5e20;
 }
 .feed-log-shell-terminal {
-  background: #1e1e1e;
-  color: #d4d4d4;
+  background: #5a5a5a;
+  color: #e8e8e8;
   border-radius: 6px;
   padding: 0.6rem 0.75rem;
   font-family: ui-monospace, monospace;
   font-size: 0.82rem;
-  border: 1px solid #333;
+  border: 1px solid #777;
 }
 .feed-log-shell-command {
   margin-bottom: 0.35rem;
   display: flex;
   align-items: flex-start;
   gap: 0.4rem;
+  background: #5a5a5a;
 }
 .feed-log-shell-prompt {
-  color: #4ec9b0;
+  color: #8fbc8f;
   flex-shrink: 0;
 }
 .feed-log-shell-output {
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
-  color: #d4d4d4;
+  color: #e8e8e8;
   font-size: inherit;
   font-family: inherit;
+  background: #5a5a5a;
 }
 .feed-log-terminal {
   margin: 0;
