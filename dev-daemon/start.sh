@@ -30,8 +30,28 @@ echo "Starting dev-server (backend) on 127.0.0.1:8000..."
 ) &
 BACKEND_PID=$!
 
-# Give backend a moment to bind before starting frontend
-sleep 2
+# Wait for backend to be ready (so frontend proxy can reach it)
+BACKEND_URL="http://127.0.0.1:8000/"
+echo "Waiting for backend to be ready..."
+if command -v curl >/dev/null 2>&1; then
+  for _ in {1..60}; do
+    if curl -sf -o /dev/null "$BACKEND_URL" 2>/dev/null; then
+      break
+    fi
+    if ! kill -0 "$BACKEND_PID" 2>/dev/null; then
+      echo "Backend process exited before becoming ready." >&2
+      exit 1
+    fi
+    sleep 0.5
+  done
+  if ! curl -sf -o /dev/null "$BACKEND_URL" 2>/dev/null; then
+    echo "Backend did not become ready in time (30s). Check logs above." >&2
+    cleanup 1
+  fi
+else
+  echo "Warning: curl not found; waiting 5s for backend." >&2
+  sleep 5
+fi
 
 echo "Starting dev-frontend (Vite) on http://localhost:5173..."
 (
