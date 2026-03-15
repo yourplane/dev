@@ -707,6 +707,18 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
   const isStarted = status === 'started'
 
   if (isStarted) {
+    if (toolKey === 'shellToolCall') {
+      const command = typeof args.command === 'string' ? args.command : ''
+      return (
+        <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
+          <pre className="feed-log-shell-block">
+            <span className="feed-log-tool-call-spinner" aria-hidden />
+            {' $ '}
+            {command || '(running…)'}
+          </pre>
+        </div>
+      )
+    }
     return (
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-in-progress">
         <div className="feed-log-tool-call-header">
@@ -734,17 +746,10 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
   if (toolKey === 'shellToolCall') {
     const command = typeof args.command === 'string' ? args.command : ''
     const output = getShellOutput(result)
+    const block = [command ? `$ ${command}` : '', output].filter(Boolean).join('\n\n')
     return (
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
-        <div className="feed-log-shell-terminal">
-          {command && (
-            <div className="feed-log-shell-command">
-              <span className="feed-log-shell-prompt" aria-hidden>$</span>
-              <span>{command}</span>
-            </div>
-          )}
-          {output ? <pre className="feed-log-shell-output">{output}</pre> : null}
-        </div>
+        <pre className="feed-log-shell-block">{block || ' '}</pre>
       </div>
     )
   }
