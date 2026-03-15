@@ -850,7 +850,7 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
     )
   }
 
-  if (toolKey === 'mcp_web_fetchToolCall') {
+  if (toolKey === 'mcp_web_fetchToolCall' || toolKey === 'mcpWebFetchToolCall' || toolKey === 'webFetchToolCall') {
     const url = typeof args.url === 'string' ? args.url : ''
     if (!url) {
       return (
