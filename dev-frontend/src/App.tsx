@@ -600,10 +600,12 @@ function ParsedLogView({ raw }: { raw: string }) {
 function getShellOutput(result: unknown): string {
   if (result == null) return ''
   const r = result as Record<string, unknown>
-  if (typeof r.output === 'string') return r.output
-  if (typeof r.combinedOutput === 'string') return r.combinedOutput
-  const stdout = typeof r.stdout === 'string' ? r.stdout : ''
-  const stderr = typeof r.stderr === 'string' ? r.stderr : ''
+  const inner = (r.success != null ? (r.success as Record<string, unknown>) : r) as Record<string, unknown>
+  if (typeof inner.output === 'string') return inner.output
+  if (typeof inner.combinedOutput === 'string') return inner.combinedOutput
+  if (typeof inner.interleavedOutput === 'string') return inner.interleavedOutput
+  const stdout = typeof inner.stdout === 'string' ? inner.stdout : ''
+  const stderr = typeof inner.stderr === 'string' ? inner.stderr : ''
   return stderr ? stdout + (stdout ? '\n' : '') + stderr : stdout
 }
 
@@ -625,7 +627,8 @@ function getReadPath(args: Record<string, unknown>, result: unknown): string {
 function getTodoList(result: unknown): Array<{ id?: string; content?: string; status?: string }> {
   if (result == null) return []
   const r = result as Record<string, unknown>
-  const todos = r.todos ?? r.todo
+  const success = r.success as Record<string, unknown> | undefined
+  const todos = success?.todos ?? success?.todo ?? r.todos ?? r.todo
   return Array.isArray(todos) ? todos : []
 }
 
@@ -633,6 +636,8 @@ function getEditDiff(result: unknown, args: Record<string, unknown>): string {
   if (result != null) {
     const r = result as Record<string, unknown>
     if (typeof r.diff === 'string') return r.diff
+    const success = r.success as Record<string, unknown> | undefined
+    if (success && typeof success.diffString === 'string') return success.diffString
   }
   const oldStr = args.old_string ?? args.oldString
   const newStr = args.new_string ?? args.newString
@@ -654,6 +659,38 @@ function getWebSearchSuccess(result: unknown): boolean {
   if (result == null) return false
   const r = result as Record<string, unknown>
   return r.success === true || (r.error === undefined && r.success !== false)
+}
+
+function getGrepSummary(result: unknown): { totalMatchedLines?: number; totalLines?: number; text?: string } {
+  if (result == null) return {}
+  const r = result as Record<string, unknown>
+  const success = r.success as Record<string, unknown> | undefined
+  const workspaceResults = success?.workspaceResults as Record<string, { content?: Record<string, unknown> }> | undefined
+  if (!workspaceResults) return {}
+  const firstWs = Object.values(workspaceResults)[0]
+  const first = firstWs?.content
+  if (!first || typeof first !== 'object') return {}
+  const data = first as Record<string, unknown>
+  const totalMatchedLines = data.totalMatchedLines as number | undefined
+  const totalLines = data.totalLines as number | undefined
+  const matches = data.matches as Array<{ file?: string; matches?: Array<{ lineNumber?: number; content?: string }> }> | undefined
+  if (!Array.isArray(matches)) return { totalMatchedLines, totalLines }
+  const lines: string[] = []
+  for (const m of matches.slice(0, 30)) {
+    const file = m.file ?? ''
+    for (const hit of (m.matches ?? []).slice(0, 5)) {
+      lines.push(`${file}:${hit.lineNumber ?? ''} ${(hit.content ?? '').slice(0, 80)}`)
+    }
+  }
+  return { totalMatchedLines, totalLines, text: lines.join('\n') }
+}
+
+function getGlobFiles(result: unknown): string[] {
+  if (result == null) return []
+  const r = result as Record<string, unknown>
+  const success = r.success as Record<string, unknown> | undefined
+  const files = success?.files ?? r.files
+  return Array.isArray(files) ? files.filter((f): f is string => typeof f === 'string') : []
 }
 
 function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
@@ -723,7 +760,7 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
     )
   }
 
-  if (toolKey === 'search_replaceToolCall') {
+  if (toolKey === 'search_replaceToolCall' || toolKey === 'editToolCall') {
     const diff = getEditDiff(result, args)
     return (
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-diff">
@@ -764,6 +801,44 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
               {url}
             </a>
           ) : null}
+        </div>
+      </div>
+    )
+  }
+
+  if (toolKey === 'grepToolCall') {
+    const summary = getGrepSummary(result)
+    const pattern = typeof args.pattern === 'string' ? args.pattern : ''
+    const path = typeof args.path === 'string' ? args.path : ''
+    const scope = [path, typeof args.glob === 'string' ? args.glob : ''].filter(Boolean).join(' ')
+    return (
+      <div className="feed-log-segment feed-log-tool-call">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-segment-label">{humanLabel}</span>
+          {summary.totalMatchedLines != null && (
+            <span className="feed-log-tool-call-status">{summary.totalMatchedLines} matches</span>
+          )}
+        </div>
+        <div className="feed-log-segment-body">
+          <p className="feed-log-tool-call-read-path">{pattern}{scope ? ` in ${scope}` : ''}</p>
+          {summary.text ? <pre className="feed-log-terminal">{summary.text}</pre> : null}
+        </div>
+      </div>
+    )
+  }
+
+  if (toolKey === 'globToolCall') {
+    const files = getGlobFiles(result)
+    const pattern = typeof args.globPattern === 'string' ? args.globPattern : (typeof args.pattern === 'string' ? args.pattern : '')
+    return (
+      <div className="feed-log-segment feed-log-tool-call">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-segment-label">{humanLabel}</span>
+          {files.length > 0 && <span className="feed-log-tool-call-status">{files.length} files</span>}
+        </div>
+        <div className="feed-log-segment-body">
+          {pattern ? <p className="feed-log-tool-call-read-path">{pattern}</p> : null}
+          {files.length > 0 ? <pre className="feed-log-terminal">{files.slice(0, 50).join('\n')}{files.length > 50 ? `\n... and ${files.length - 50} more` : ''}</pre> : null}
         </div>
       </div>
     )

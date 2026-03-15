@@ -25,6 +25,7 @@ const TOOL_HUMAN_LABELS: Record<string, string> = {
   globToolCall: 'List files',
   writeToolCall: 'Write file',
   search_replaceToolCall: 'Search and replace',
+  editToolCall: 'Edit file',
   run_terminal_cmdToolCall: 'Run command',
   shellToolCall: 'Run command',
   list_dirToolCall: 'List directory',
