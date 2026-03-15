@@ -61,4 +61,17 @@ describe('parseLogToSegments', () => {
     const segments = parseLogToSegments(raw)
     expect(segments[0].toolCall?.humanLabel).toBe('Custom Tool Call')
   })
+
+  it('accumulates partialOutput from progress/partial tool_call events for same call_id', () => {
+    const raw = [
+      '{"type":"tool_call","subtype":"started","call_id":"sh1","tool_call":{"shellToolCall":{"args":{"command":"echo hi"}}}}',
+      '{"type":"tool_call","subtype":"progress","call_id":"sh1","tool_call":{"shellToolCall":{"result":{"output":"hi\\n"}}}}',
+      '{"type":"tool_call","subtype":"progress","call_id":"sh1","tool_call":{"shellToolCall":{"result":{"output":" there"}}}}',
+    ].join('\n')
+    const segments = parseLogToSegments(raw)
+    expect(segments).toHaveLength(1)
+    expect(segments[0].toolCall?.status).toBe('started')
+    // In JSON "hi\\n" is newline; joined with " there" gives "hi\n there"
+    expect(segments[0].toolCall?.partialOutput).toBe('hi\n there')
+  })
 })
