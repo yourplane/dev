@@ -50,6 +50,7 @@ Restart=on-failure
 RestartSec=5
 
 Environment=HOME=%h
+Environment=PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
 
 [Install]
 WantedBy=default.target

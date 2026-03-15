@@ -6,6 +6,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 FRONTEND_DIR="$REPO_ROOT/dev-frontend"
 
+# So uv (and node/npm) are found when run with minimal PATH (e.g. systemd user service)
+export PATH="${HOME:?}/.local/bin:/usr/local/bin:$PATH"
+
 if [[ ! -d "$REPO_ROOT/dev-server" ]] || [[ ! -d "$FRONTEND_DIR" ]]; then
   echo "dev-daemon: repo root not found (expected dev-server and dev-frontend under $REPO_ROOT)" >&2
   exit 1
