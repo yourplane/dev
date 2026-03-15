@@ -859,16 +859,16 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
     const path = typeof args.path === 'string' ? args.path : ''
     const scope = [path, typeof args.glob === 'string' ? args.glob : ''].filter(Boolean).join(' ')
     return (
-      <div className="feed-log-segment feed-log-tool-call">
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-search">
         <div className="feed-log-tool-call-header">
           <span className="feed-log-segment-label">{humanLabel}</span>
           {summary.totalMatchedLines != null && (
-            <span className="feed-log-tool-call-status">{summary.totalMatchedLines} matches</span>
+            <span className="feed-log-tool-call-search-count">{summary.totalMatchedLines} matches</span>
           )}
         </div>
-        <div className="feed-log-segment-body">
-          <p className="feed-log-tool-call-read-path feed-log-file-path">{pattern}{scope ? ` in ${scope}` : ''}</p>
-          {summary.text ? <pre className="feed-log-terminal">{summary.text}</pre> : null}
+        <div className="feed-log-segment-body feed-log-search-body">
+          <p className="feed-log-tool-call-read-path feed-log-search-pattern">{pattern}{scope ? ` in ${scope}` : ''}</p>
+          {summary.text ? <pre className="feed-log-search-results">{summary.text}</pre> : null}
         </div>
       </div>
     )

@@ -810,6 +810,35 @@
 .feed-log-tool-call-error {
   color: #c00;
 }
+.feed-log-tool-call-search {
+  background: #f5f0f9;
+  border-left: 3px solid #7b1fa2;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+}
+.feed-log-tool-call-search .feed-log-segment-label { color: #6a1b9a; }
+.feed-log-tool-call-search-count {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #4a148c;
+}
+.feed-log-search-body { padding: 0.25rem 0 0 0; }
+.feed-log-search-pattern {
+  color: #5e35b1;
+  font-weight: 500;
+  margin-bottom: 0.35rem;
+}
+.feed-log-search-results {
+  margin: 0;
+  padding: 0.5rem 0.6rem;
+  font-size: 0.82rem;
+  font-family: ui-monospace, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #ede7f6;
+  color: #311b92;
+  border-radius: 4px;
+}
 .feed-log-tool-call-edit-path.feed-log-file-path,
 .feed-log-tool-call-read-path.feed-log-file-path { font-weight: normal; }
 .feed-log-tool-call-edit-path {
