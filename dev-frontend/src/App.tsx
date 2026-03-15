@@ -724,7 +724,7 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-read">
         <div className="feed-log-tool-call-header feed-log-tool-call-read-line">
           <span className="feed-log-segment-label">{humanLabel}</span>
-          <span className="feed-log-tool-call-read-path">{path || '—'}</span>
+          <span className="feed-log-tool-call-read-path feed-log-file-path">{path || '—'}</span>
           {!success && <span className="feed-log-tool-call-status feed-log-tool-call-error">Error</span>}
         </div>
       </div>
@@ -776,7 +776,7 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-diff">
         <div className="feed-log-tool-call-header">
           <span className="feed-log-segment-label">{humanLabel}</span>
-          {filePath ? <span className="feed-log-tool-call-edit-path">{filePath}</span> : null}
+          {filePath ? <span className="feed-log-tool-call-edit-path feed-log-file-path">{filePath}</span> : null}
         </div>
         <div className="feed-log-diff-body">
           {diff ? (
@@ -806,7 +806,7 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-diff">
         <div className="feed-log-tool-call-header">
           <span className="feed-log-segment-label">{humanLabel}</span>
-          {filePath ? <span className="feed-log-tool-call-edit-path">{filePath}</span> : null}
+          {filePath ? <span className="feed-log-tool-call-edit-path feed-log-file-path">{filePath}</span> : null}
         </div>
         <div className="feed-log-diff-body">
           {displayContent ? (
@@ -862,7 +862,7 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
           )}
         </div>
         <div className="feed-log-segment-body">
-          <p className="feed-log-tool-call-read-path">{pattern}{scope ? ` in ${scope}` : ''}</p>
+          <p className="feed-log-tool-call-read-path feed-log-file-path">{pattern}{scope ? ` in ${scope}` : ''}</p>
           {summary.text ? <pre className="feed-log-terminal">{summary.text}</pre> : null}
         </div>
       </div>
@@ -879,7 +879,7 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
           {files.length > 0 && <span className="feed-log-tool-call-status">{files.length} files</span>}
         </div>
         <div className="feed-log-segment-body">
-          {pattern ? <p className="feed-log-tool-call-read-path">{pattern}</p> : null}
+          {pattern ? <p className="feed-log-tool-call-read-path feed-log-file-path">{pattern}</p> : null}
           {files.length > 0 ? <pre className="feed-log-terminal">{files.slice(0, 50).join('\n')}{files.length > 50 ? `\n... and ${files.length - 50} more` : ''}</pre> : null}
         </div>
       </div>

@@ -781,6 +781,16 @@
 .feed-log-tool-call-link:hover {
   text-decoration: underline;
 }
+.feed-log-file-path {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: #1a5a1a;
+  background: #f0f8f0;
+  padding: 0.15em 0.4em;
+  border-radius: 3px;
+  border-left: 3px solid #2e7d2e;
+}
 .feed-log-tool-call-read-path {
   margin: 0;
   font-family: ui-monospace, monospace;
@@ -803,11 +813,15 @@
 .feed-log-tool-call-error {
   color: #c00;
 }
+.feed-log-tool-call-edit-path.feed-log-file-path,
+.feed-log-tool-call-read-path.feed-log-file-path { font-weight: normal; }
 .feed-log-tool-call-edit-path {
   font-family: ui-monospace, monospace;
   font-size: 0.8rem;
-  color: #555;
   font-weight: normal;
+}
+.feed-log-tool-call-edit-path.feed-log-file-path {
+  color: #1a5a1a;
 }
 .feed-log-diff-body {
   font-family: ui-monospace, monospace;
@@ -830,20 +844,21 @@
   color: #1b5e20;
 }
 .feed-log-shell-terminal {
-  background: #5a5a5a;
-  color: #e8e8e8;
+  background: #3a3a3a;
+  color: #e0e0e0;
   border-radius: 6px;
   padding: 0.6rem 0.75rem;
   font-family: ui-monospace, monospace;
   font-size: 0.82rem;
-  border: 1px solid #777;
+  border: 1px solid #555;
 }
 .feed-log-shell-command {
   margin-bottom: 0.35rem;
   display: flex;
   align-items: flex-start;
   gap: 0.4rem;
-  background: #5a5a5a;
+  background: #3a3a3a;
+  color: #e0e0e0;
 }
 .feed-log-shell-prompt {
   color: #8fbc8f;
@@ -853,10 +868,16 @@
   margin: 0;
   white-space: pre-wrap;
   word-break: break-all;
-  color: #e8e8e8;
+  color: #e0e0e0;
   font-size: inherit;
   font-family: inherit;
-  background: #5a5a5a;
+  background: #3a3a3a;
+}
+.comms-content .feed-log-shell-terminal pre.feed-log-shell-output {
+  background: #3a3a3a;
+  color: #e0e0e0;
+  margin: 0;
+  padding: 0;
 }
 .feed-log-terminal {
   margin: 0;
