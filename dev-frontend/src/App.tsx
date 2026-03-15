@@ -311,10 +311,19 @@ function CreateTaskForm({
   const [reposLoading, setReposLoading] = useState(true)
   const [title, setTitle] = useState('')
   const [repo, setRepo] = useState('')
-  const [repoCustom, setRepoCustom] = useState('')
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [addModalOpen, setAddModalOpen] = useState(false)
+  const [addName, setAddName] = useState('')
+  const [addUrl, setAddUrl] = useState('')
+  const [addError, setAddError] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [removing, setRemoving] = useState<string | null>(null)
+
+  const loadRepos = useCallback(() => {
+    return api.getRepos().then(setRepos)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -326,18 +335,59 @@ function CreateTaskForm({
     return () => { cancelled = true }
   }, [])
 
-  const repoValue = repo === '__custom__' ? repoCustom : repo
+  const handleRemoveRepo = async (name: string) => {
+    if (!confirm(`Remove "${name}" from your repo list?`)) return
+    setAddError(null)
+    setRemoving(name)
+    try {
+      await api.removeRepo(name)
+      await loadRepos()
+      if (repo === name) setRepo('')
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRemoving(null)
+    }
+  }
+
+  const openAddModal = () => {
+    setAddName('')
+    setAddUrl('')
+    setAddError(null)
+    setAddModalOpen(true)
+  }
+
+  const handleAddRepo = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setAddError(null)
+    const n = addName.trim()
+    const u = addUrl.trim()
+    if (!n) { setAddError('Name is required'); return }
+    if (!u) { setAddError('URL is required'); return }
+    setAdding(true)
+    try {
+      await api.addRepo(n, u)
+      await loadRepos()
+      setAddName('')
+      setAddUrl('')
+      setAddModalOpen(false)
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAdding(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
     if (!title.trim()) { setError('Title is required'); return }
-    if (!repoValue.trim()) { setError('Repo is required (select a shorthand or enter a URL)'); return }
+    if (!repo.trim()) { setError('Select a repo'); return }
     setSubmitting(true)
     try {
       const res = await api.createTask({
         title: title.trim(),
-        repo: repoValue.trim(),
+        repo: repo.trim(),
         comment: comment.trim() || undefined,
       })
       onCreated(res.task_name)
@@ -367,40 +417,45 @@ function CreateTaskForm({
           <span>Repo <span className="required">*</span></span>
           {reposLoading ? (
             <span className="hint">Loading shorthands…</span>
+          ) : Object.keys(repos).length === 0 ? (
+            <div className="repo-empty">
+              <p className="hint">No repos yet. Click Add to add one.</p>
+              <button type="button" className="repo-add-open-btn" onClick={openAddModal}>
+                Add repo
+              </button>
+            </div>
           ) : (
+            <>
             <div className="repo-radio-group" role="radiogroup" aria-label="Repo">
               {Object.entries(repos).map(([name, url]) => (
-                <label key={name} className="repo-radio-option">
-                  <input
-                    type="radio"
-                    name="repo"
-                    value={name}
-                    checked={repo === name}
-                    onChange={() => setRepo(name)}
-                  />
-                  <span>{name} — {url}</span>
-                </label>
+                <div key={name} className="repo-radio-option repo-radio-row">
+                  <label className="repo-radio-label">
+                    <input
+                      type="radio"
+                      name="repo"
+                      value={name}
+                      checked={repo === name}
+                      onChange={() => setRepo(name)}
+                    />
+                    <span>{name} — {url}</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="repo-remove-btn"
+                    onClick={() => handleRemoveRepo(name)}
+                    disabled={removing !== null}
+                    title={`Remove ${name}`}
+                    aria-label={`Remove ${name}`}
+                  >
+                    ×
+                  </button>
+                </div>
               ))}
-              <label className="repo-radio-option">
-                <input
-                  type="radio"
-                  name="repo"
-                  value="__custom__"
-                  checked={repo === '__custom__'}
-                  onChange={() => setRepo('__custom__')}
-                />
-                <span>Custom URL…</span>
-              </label>
-              {repo === '__custom__' && (
-                <input
-                  type="text"
-                  value={repoCustom}
-                  onChange={(e) => setRepoCustom(e.target.value)}
-                  placeholder="https://github.com/user/repo.git"
-                  className="repo-custom"
-                />
-              )}
             </div>
+            <button type="button" className="repo-add-open-btn" onClick={openAddModal}>
+              Add repo
+            </button>
+            </>
           )}
         </label>
         <label>
@@ -419,9 +474,43 @@ function CreateTaskForm({
           <button type="button" onClick={onCancel}>Cancel</button>
         </div>
       </form>
-      <p className="hint">
-        Repo shorthands are configured via the CLI: <code>dev repos add &lt;name&gt; &lt;url&gt;</code> (stored in <code>~/.config/dev/repos.json</code>).
-      </p>
+      {addModalOpen && (
+        <div className="modal-backdrop" onClick={() => setAddModalOpen(false)}>
+          <div className="modal-content repo-add-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="repo-add-modal-title">
+            <h3 id="repo-add-modal-title" className="modal-title">Add repo</h3>
+            {addError && <p className="inline-error">{addError}</p>}
+            <form onSubmit={handleAddRepo}>
+              <label>
+                <span>Name</span>
+                <input
+                  type="text"
+                  value={addName}
+                  onChange={(e) => setAddName(e.target.value)}
+                  placeholder="Shorthand name"
+                  autoFocus
+                />
+              </label>
+              <label>
+                <span>URL</span>
+                <input
+                  type="text"
+                  value={addUrl}
+                  onChange={(e) => setAddUrl(e.target.value)}
+                  placeholder="https://github.com/user/repo.git"
+                />
+              </label>
+              <div className="form-actions">
+                <button type="submit" disabled={adding}>
+                  {adding ? 'Adding…' : 'Add'}
+                </button>
+                <button type="button" onClick={() => setAddModalOpen(false)}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </section>
   )
 }

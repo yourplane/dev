@@ -19,7 +19,7 @@ from dev_sdk.agent_run import (
 from dev_sdk.comms import add_comms, comms_dir, read_index
 from dev_sdk.feed import LOGS_DIR, read_feed
 from dev_sdk.create_pr import CreatePRError, create_pull_request
-from dev_sdk.repo_config import load_repos, resolve_repo
+from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repos
 from dev_sdk.task_manager import ArchivedTaskEntry, TaskManager
 
 SUPPORTED_COMMANDS = ("plan-implement", "implement")
@@ -184,10 +184,55 @@ def root() -> dict:
     return {"service": "dev-server", "docs": "/docs"}
 
 
+def _shorthand_safe(name: str) -> bool:
+    """Shorthand must be non-empty and not look like a URL or path."""
+    if not name or not name.strip():
+        return False
+    s = name.strip()
+    if "://" in s or s.startswith("git@") or "/" in s or "\\" in s:
+        return False
+    return True
+
+
+def _url_like(value: str) -> bool:
+    """True if value looks like a git URL."""
+    v = value.strip()
+    return "://" in v or v.startswith("git@")
+
+
+class AddRepoRequest(BaseModel):
+    name: str = Field(..., description="Repo shorthand name")
+    url: str = Field(..., description="Repo URL (https or git@)")
+
+
 @app.get("/repos")
 def list_repos() -> dict[str, str]:
     """Return repo shorthand -> URL mapping from ~/.config/dev/repos.json."""
     return load_repos()
+
+
+@app.post("/repos", response_model=dict[str, str])
+def add_repo(body: AddRepoRequest) -> dict[str, str]:
+    """Add or update a repo shorthand. Returns updated mapping."""
+    name = body.name.strip()
+    url = body.url.strip()
+    if not _shorthand_safe(body.name):
+        raise HTTPException(status_code=400, detail="Name must be non-empty and not contain / or look like a URL.")
+    if not url:
+        raise HTTPException(status_code=400, detail="URL is required.")
+    if not _url_like(url):
+        raise HTTPException(status_code=400, detail="URL must look like a git URL (e.g. https://... or git@...).")
+    repos = load_repos()
+    repos[name] = url
+    save_repos(repos)
+    return load_repos()
+
+
+@app.delete("/repos/{shorthand}", status_code=204)
+def delete_repo(shorthand: str) -> None:
+    """Remove a repo shorthand. 404 if not found."""
+    if not remove_repo(shorthand):
+        raise HTTPException(status_code=404, detail=f"Repo shorthand {shorthand!r} not found.")
 
 
 @app.get("/tasks", response_model=ListTasksResponse)

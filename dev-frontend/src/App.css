@@ -304,13 +304,131 @@
   flex-shrink: 0;
 }
 
-.repo-radio-group .repo-custom {
-  margin-top: 0.25rem;
-  margin-left: 1.5rem;
+.repo-radio-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
 }
 
-.repo-custom {
-  margin-top: 0.35rem;
+.repo-radio-row .repo-radio-label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  cursor: pointer;
+  font-weight: normal;
+  min-width: 0;
+}
+
+.repo-radio-row .repo-radio-label input[type="radio"] {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.repo-remove-btn {
+  flex-shrink: 0;
+  width: 1.25rem;
+  height: 1.25rem;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: #888;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.repo-remove-btn:hover:not(:disabled) {
+  background: #eee;
+  color: #555;
+}
+
+.repo-remove-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.repo-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.repo-add-open-btn {
+  align-self: flex-start;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.repo-add-open-btn:hover {
+  background: #f5f5f5;
+}
+
+.repo-radio-group + .repo-add-open-btn {
+  margin-top: 0.5rem;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: #fff;
+  border-radius: 8px;
+  padding: 1.25rem;
+  max-width: 90vw;
+  width: 420px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.repo-add-modal .modal-title {
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+}
+
+.repo-add-modal label {
+  display: block;
+  margin-bottom: 0.75rem;
+}
+
+.repo-add-modal label span {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.repo-add-modal input {
+  width: 100%;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+.repo-add-modal .inline-error {
+  margin-bottom: 0.5rem;
+}
+
+.repo-add-modal .form-actions {
+  margin-top: 1rem;
 }
 
 .form-actions {
