@@ -315,6 +315,15 @@ function CreateTaskForm({
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [addName, setAddName] = useState('')
+  const [addUrl, setAddUrl] = useState('')
+  const [addError, setAddError] = useState<string | null>(null)
+  const [adding, setAdding] = useState(false)
+  const [removing, setRemoving] = useState<string | null>(null)
+
+  const loadRepos = useCallback(() => {
+    return api.getRepos().then(setRepos)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -327,6 +336,41 @@ function CreateTaskForm({
   }, [])
 
   const repoValue = repo === '__custom__' ? repoCustom : repo
+
+  const handleRemoveRepo = async (name: string) => {
+    if (!confirm(`Remove "${name}" from your repo list?`)) return
+    setAddError(null)
+    setRemoving(name)
+    try {
+      await api.removeRepo(name)
+      await loadRepos()
+      if (repo === name) setRepo('')
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setRemoving(null)
+    }
+  }
+
+  const handleAddRepo = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setAddError(null)
+    const n = addName.trim()
+    const u = addUrl.trim()
+    if (!n) { setAddError('Name is required'); return }
+    if (!u) { setAddError('URL is required'); return }
+    setAdding(true)
+    try {
+      await api.addRepo(n, u)
+      await loadRepos()
+      setAddName('')
+      setAddUrl('')
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setAdding(false)
+    }
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -370,16 +414,28 @@ function CreateTaskForm({
           ) : (
             <div className="repo-radio-group" role="radiogroup" aria-label="Repo">
               {Object.entries(repos).map(([name, url]) => (
-                <label key={name} className="repo-radio-option">
-                  <input
-                    type="radio"
-                    name="repo"
-                    value={name}
-                    checked={repo === name}
-                    onChange={() => setRepo(name)}
-                  />
-                  <span>{name} — {url}</span>
-                </label>
+                <div key={name} className="repo-radio-option repo-radio-row">
+                  <label className="repo-radio-label">
+                    <input
+                      type="radio"
+                      name="repo"
+                      value={name}
+                      checked={repo === name}
+                      onChange={() => setRepo(name)}
+                    />
+                    <span>{name} — {url}</span>
+                  </label>
+                  <button
+                    type="button"
+                    className="repo-remove-btn"
+                    onClick={() => handleRemoveRepo(name)}
+                    disabled={removing !== null}
+                    title={`Remove ${name}`}
+                    aria-label={`Remove ${name}`}
+                  >
+                    ×
+                  </button>
+                </div>
               ))}
               <label className="repo-radio-option">
                 <input
@@ -401,6 +457,31 @@ function CreateTaskForm({
                 />
               )}
             </div>
+            <div className="repo-add-section">
+              <p className="repo-add-label">Add repo to list</p>
+              {addError && <p className="inline-error">{addError}</p>}
+              <form className="repo-add-form" onSubmit={handleAddRepo}>
+                <input
+                  type="text"
+                  value={addName}
+                  onChange={(e) => setAddName(e.target.value)}
+                  placeholder="Shorthand name"
+                  className="repo-add-name"
+                  aria-label="New repo shorthand name"
+                />
+                <input
+                  type="text"
+                  value={addUrl}
+                  onChange={(e) => setAddUrl(e.target.value)}
+                  placeholder="https://github.com/user/repo.git"
+                  className="repo-add-url"
+                  aria-label="New repo URL"
+                />
+                <button type="submit" disabled={adding} className="repo-add-submit">
+                  {adding ? 'Adding…' : 'Add'}
+                </button>
+              </form>
+            </div>
           )}
         </label>
         <label>
@@ -420,7 +501,7 @@ function CreateTaskForm({
         </div>
       </form>
       <p className="hint">
-        Repo shorthands are configured via the CLI: <code>dev repos add &lt;name&gt; &lt;url&gt;</code> (stored in <code>~/.config/dev/repos.json</code>).
+        Add or remove repo shorthands above. Stored in <code>~/.config/dev/repos.json</code>.
       </p>
     </section>
   )

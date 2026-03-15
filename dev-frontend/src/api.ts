@@ -72,6 +72,20 @@ export const api = {
     return request('/repos');
   },
 
+  addRepo(name: string, url: string): Promise<Record<string, string>> {
+    return request('/repos', {
+      method: 'POST',
+      body: JSON.stringify({ name: name.trim(), url: url.trim() }),
+    });
+  },
+
+  removeRepo(shorthand: string): Promise<void> {
+    return request(`/repos/${encodeURIComponent(shorthand)}`, {
+      method: 'DELETE',
+      parseJson: false,
+    });
+  },
+
   createTask(body: CreateTaskBody): Promise<CreateTaskResponse> {
     return request('/tasks', {
       method: 'POST',

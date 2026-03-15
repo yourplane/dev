@@ -40,3 +40,13 @@ def resolve_repo(repo: str) -> str:
     if repo not in repos:
         raise ValueError(f"Unknown repo shorthand: {repo!r}. Add it with: dev repos add {repo} <url>")
     return repos[repo]
+
+
+def remove_repo(name: str) -> bool:
+    """Remove a shorthand from config. Returns True if it existed and was removed, False if not found."""
+    repos = load_repos()
+    if name not in repos:
+        return False
+    del repos[name]
+    save_repos(repos)
+    return True

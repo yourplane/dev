@@ -304,6 +304,57 @@
   flex-shrink: 0;
 }
 
+.repo-radio-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  width: 100%;
+}
+
+.repo-radio-row .repo-radio-label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  flex: 1;
+  cursor: pointer;
+  font-weight: normal;
+  min-width: 0;
+}
+
+.repo-radio-row .repo-radio-label input[type="radio"] {
+  margin: 0;
+  flex-shrink: 0;
+}
+
+.repo-remove-btn {
+  flex-shrink: 0;
+  width: 1.6rem;
+  height: 1.6rem;
+  padding: 0;
+  border: 1px solid #c33;
+  border-radius: 4px;
+  background: #fff;
+  color: #c33;
+  font-size: 1.2rem;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.repo-remove-btn:hover:not(:disabled) {
+  background: #c33;
+  color: #fff;
+}
+
+.repo-remove-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
 .repo-radio-group .repo-custom {
   margin-top: 0.25rem;
   margin-left: 1.5rem;
@@ -311,6 +362,66 @@
 
 .repo-custom {
   margin-top: 0.35rem;
+}
+
+.repo-add-section {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid #eee;
+}
+
+.repo-add-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.9rem;
+  color: #555;
+}
+
+.repo-add-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.repo-add-section .inline-error {
+  margin: 0 0 0.35rem;
+}
+
+.repo-add-name {
+  width: 8rem;
+  min-width: 6rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+.repo-add-url {
+  flex: 1;
+  min-width: 12rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 0.95rem;
+}
+
+.repo-add-submit {
+  padding: 0.35rem 0.75rem;
+  border: 1px solid #1a1a1a;
+  border-radius: 6px;
+  background: #1a1a1a;
+  color: #fff;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.repo-add-submit:hover:not(:disabled) {
+  background: #333;
+}
+
+.repo-add-submit:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
 }
 
 .form-actions {
