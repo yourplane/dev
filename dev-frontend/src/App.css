@@ -710,6 +710,50 @@
 }
 
 .feed-log-tool-call .feed-log-segment-label { color: #0a0; }
+.feed-log-tool-call-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.feed-log-tool-call-status {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  color: #888;
+  font-weight: 500;
+}
+.feed-log-tool-call-args {
+  margin: 0 0 0.5rem 0;
+  padding: 0;
+  font-size: 0.85rem;
+}
+.feed-log-tool-call-arg {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+}
+.feed-log-tool-call-arg dt {
+  margin: 0;
+  font-weight: 600;
+  color: #555;
+  min-width: 5rem;
+}
+.feed-log-tool-call-arg dd {
+  margin: 0;
+  word-break: break-all;
+}
+.feed-log-tool-call-result {
+  margin-top: 0.5rem;
+}
+.feed-log-tool-call-result summary {
+  cursor: pointer;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: #0a0;
+}
+.feed-log-tool-call-result .feed-log-terminal {
+  margin-top: 0.25rem;
+}
 .feed-log-terminal {
   margin: 0;
   padding: 0.6rem 0.75rem;

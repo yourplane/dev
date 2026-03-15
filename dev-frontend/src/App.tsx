@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, memo } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { api, apiBaseUrl } from './api'
-import { parseLogToSegments, type LogSegment } from './logParser'
+import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import './App.css'
 
 const FEED_POLL_INTERVAL_MS = 15000
@@ -597,8 +597,40 @@ function ParsedLogView({ raw }: { raw: string }) {
   )
 }
 
+function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
+  const { humanLabel, args, result, status } = toolCall
+  const hasResult = result !== undefined && result !== null
+  const resultStr = hasResult ? (typeof result === 'string' ? result : JSON.stringify(result, null, 2)) : ''
+  return (
+    <div className="feed-log-segment feed-log-tool-call">
+      <div className="feed-log-tool-call-header">
+        <span className="feed-log-segment-label">{humanLabel}</span>
+        <span className="feed-log-tool-call-status">{status}</span>
+      </div>
+      <div className="feed-log-segment-body">
+        {Object.keys(args).length > 0 && (
+          <dl className="feed-log-tool-call-args">
+            {Object.entries(args).map(([k, v]) => (
+              <div key={k} className="feed-log-tool-call-arg">
+                <dt>{k}</dt>
+                <dd>{typeof v === 'string' ? v : JSON.stringify(v)}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+        {hasResult && (
+          <details className="feed-log-tool-call-result">
+            <summary>Result</summary>
+            <pre className="feed-log-terminal">{resultStr}</pre>
+          </details>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function LogSegmentBlock({ segment }: { segment: LogSegment }) {
-  const { type, text } = segment
+  const { type, text, toolCall } = segment
   const label = type === 'tool_call' ? 'Tool call' : type === 'thinking' ? 'Thinking' : type.charAt(0).toUpperCase() + type.slice(1)
   if (type === 'thinking') {
     return (
@@ -610,11 +642,14 @@ function LogSegmentBlock({ segment }: { segment: LogSegment }) {
       </div>
     )
   }
+  if (type === 'tool_call' && toolCall) {
+    return <ToolCallBlock toolCall={toolCall} />
+  }
   if (type === 'tool_call') {
     return (
       <div className="feed-log-segment feed-log-tool-call">
         <span className="feed-log-segment-label">{label}</span>
-        <pre className="feed-log-segment-body feed-log-terminal">{text}</pre>
+        <pre className="feed-log-segment-body feed-log-terminal">{text || '(no details)'}</pre>
       </div>
     )
   }
