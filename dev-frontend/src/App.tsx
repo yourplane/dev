@@ -647,6 +647,15 @@ function getEditDiff(result: unknown, args: Record<string, unknown>): string {
   return ''
 }
 
+function getEditFilePath(args: Record<string, unknown>, result: unknown): string {
+  if (result != null) {
+    const r = result as Record<string, unknown>
+    const success = r.success as Record<string, unknown> | undefined
+    if (success && typeof success.path === 'string') return success.path
+  }
+  return typeof args.path === 'string' ? args.path : ''
+}
+
 function getWebSearchUrl(result: unknown, args: Record<string, unknown>): string {
   if (result != null) {
     const r = result as Record<string, unknown>
@@ -712,30 +721,30 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
     const path = getReadPath(args, result)
     const success = getReadSuccess(result)
     return (
-      <div className="feed-log-segment feed-log-tool-call">
-        <div className="feed-log-tool-call-header">
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-read">
+        <div className="feed-log-tool-call-header feed-log-tool-call-read-line">
           <span className="feed-log-segment-label">{humanLabel}</span>
-          <span className="feed-log-tool-call-status">{success ? 'Success' : 'Error'}</span>
-        </div>
-        <div className="feed-log-segment-body">
-          <p className="feed-log-tool-call-read-path">{path || '—'}</p>
+          <span className="feed-log-tool-call-read-path">{path || '—'}</span>
+          {!success && <span className="feed-log-tool-call-status feed-log-tool-call-error">Error</span>}
         </div>
       </div>
     )
   }
 
   if (toolKey === 'shellToolCall') {
+    const command = typeof args.command === 'string' ? args.command : ''
     const output = getShellOutput(result)
     return (
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
-        <div className="feed-log-tool-call-header">
-          <span className="feed-log-segment-label">{humanLabel}</span>
+        <div className="feed-log-shell-terminal">
+          {command && (
+            <div className="feed-log-shell-command">
+              <span className="feed-log-shell-prompt" aria-hidden>$</span>
+              <span>{command}</span>
+            </div>
+          )}
+          {output ? <pre className="feed-log-shell-output">{output}</pre> : null}
         </div>
-        {output ? (
-          <pre className="feed-log-segment-body feed-log-terminal">{output}</pre>
-        ) : (
-          <div className="feed-log-segment-body" />
-        )}
       </div>
     )
   }
@@ -762,12 +771,28 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
 
   if (toolKey === 'search_replaceToolCall' || toolKey === 'editToolCall') {
     const diff = getEditDiff(result, args)
+    const filePath = getEditFilePath(args, result)
     return (
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-diff">
         <div className="feed-log-tool-call-header">
           <span className="feed-log-segment-label">{humanLabel}</span>
+          {filePath ? <span className="feed-log-tool-call-edit-path">{filePath}</span> : null}
         </div>
-        <pre className="feed-log-segment-body feed-log-terminal">{diff || '(no diff)'}</pre>
+        <div className="feed-log-diff-body">
+          {diff ? (
+            diff.split('\n').map((line, i) => {
+              if (line.startsWith('-')) {
+                return <div key={i} className="feed-log-diff-line feed-log-diff-removed">{line}</div>
+              }
+              if (line.startsWith('+')) {
+                return <div key={i} className="feed-log-diff-line feed-log-diff-added">{line}</div>
+              }
+              return <div key={i} className="feed-log-diff-line">{line || '\u00a0'}</div>
+            })
+          ) : (
+            <div className="feed-log-diff-line">(no diff)</div>
+          )}
+        </div>
       </div>
     )
   }
@@ -775,12 +800,29 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
   if (toolKey === 'writeToolCall') {
     const diff = getEditDiff(result, args)
     const content = diff || (args.contents != null ? String(args.contents) : '')
+    const filePath = getEditFilePath(args, result)
+    const displayContent = content || (typeof args.path === 'string' ? args.path : '')
     return (
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-diff">
         <div className="feed-log-tool-call-header">
           <span className="feed-log-segment-label">{humanLabel}</span>
+          {filePath ? <span className="feed-log-tool-call-edit-path">{filePath}</span> : null}
         </div>
-        <pre className="feed-log-segment-body feed-log-terminal">{content || (typeof args.path === 'string' ? args.path : '')}</pre>
+        <div className="feed-log-diff-body">
+          {displayContent ? (
+            displayContent.split('\n').map((line, i) => {
+              if (line.startsWith('-')) {
+                return <div key={i} className="feed-log-diff-line feed-log-diff-removed">{line}</div>
+              }
+              if (line.startsWith('+')) {
+                return <div key={i} className="feed-log-diff-line feed-log-diff-added">{line}</div>
+              }
+              return <div key={i} className="feed-log-diff-line">{line || '\u00a0'}</div>
+            })
+          ) : (
+            <div className="feed-log-diff-line">(no content)</div>
+          )}
+        </div>
       </div>
     )
   }
