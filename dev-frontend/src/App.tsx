@@ -871,6 +871,7 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-web-fetch">
         <div className="feed-log-tool-call-header">
           <a href={href} target="_blank" rel="noopener noreferrer" className="feed-log-tool-call-web-fetch-link">
+            <span className="feed-log-tool-call-globe-icon" aria-hidden />
             <img src={faviconUrl} alt="" className="feed-log-tool-call-favicon" width={16} height={16} />
             <span className="feed-log-tool-call-link">{url}</span>
           </a>
