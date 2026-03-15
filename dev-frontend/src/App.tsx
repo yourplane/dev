@@ -597,8 +597,178 @@ function ParsedLogView({ raw }: { raw: string }) {
   )
 }
 
+function getShellOutput(result: unknown): string {
+  if (result == null) return ''
+  const r = result as Record<string, unknown>
+  if (typeof r.output === 'string') return r.output
+  if (typeof r.combinedOutput === 'string') return r.combinedOutput
+  const stdout = typeof r.stdout === 'string' ? r.stdout : ''
+  const stderr = typeof r.stderr === 'string' ? r.stderr : ''
+  return stderr ? stdout + (stdout ? '\n' : '') + stderr : stdout
+}
+
+function getReadSuccess(result: unknown): boolean {
+  if (result == null) return false
+  const r = result as Record<string, unknown>
+  return r.success !== undefined && r.success !== null
+}
+
+function getReadPath(args: Record<string, unknown>, result: unknown): string {
+  if (result != null) {
+    const r = result as Record<string, unknown>
+    const success = r.success as Record<string, unknown> | undefined
+    if (success && typeof success.path === 'string') return success.path
+  }
+  return typeof args.path === 'string' ? args.path : ''
+}
+
+function getTodoList(result: unknown): Array<{ id?: string; content?: string; status?: string }> {
+  if (result == null) return []
+  const r = result as Record<string, unknown>
+  const todos = r.todos ?? r.todo
+  return Array.isArray(todos) ? todos : []
+}
+
+function getEditDiff(result: unknown, args: Record<string, unknown>): string {
+  if (result != null) {
+    const r = result as Record<string, unknown>
+    if (typeof r.diff === 'string') return r.diff
+  }
+  const oldStr = args.old_string ?? args.oldString
+  const newStr = args.new_string ?? args.newString
+  if (oldStr != null && newStr != null) {
+    return `- ${typeof oldStr === 'string' ? oldStr : JSON.stringify(oldStr)}\n+ ${typeof newStr === 'string' ? newStr : JSON.stringify(newStr)}`
+  }
+  return ''
+}
+
+function getWebSearchUrl(result: unknown, args: Record<string, unknown>): string {
+  if (result != null) {
+    const r = result as Record<string, unknown>
+    if (typeof r.url === 'string') return r.url
+  }
+  return typeof args.url === 'string' ? args.url : ''
+}
+
+function getWebSearchSuccess(result: unknown): boolean {
+  if (result == null) return false
+  const r = result as Record<string, unknown>
+  return r.success === true || (r.error === undefined && r.success !== false)
+}
+
 function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
-  const { humanLabel, args, result, status } = toolCall
+  const { toolKey, humanLabel, args, result, status } = toolCall
+  const isStarted = status === 'started'
+
+  if (isStarted) {
+    return (
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-in-progress">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-tool-call-spinner" aria-hidden />
+          <span className="feed-log-segment-label">{humanLabel}</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (toolKey === 'readToolCall') {
+    const path = getReadPath(args, result)
+    const success = getReadSuccess(result)
+    return (
+      <div className="feed-log-segment feed-log-tool-call">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-segment-label">{humanLabel}</span>
+          <span className="feed-log-tool-call-status">{success ? 'Success' : 'Error'}</span>
+        </div>
+        <div className="feed-log-segment-body">
+          <p className="feed-log-tool-call-read-path">{path || '—'}</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (toolKey === 'shellToolCall') {
+    const output = getShellOutput(result)
+    return (
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-segment-label">{humanLabel}</span>
+        </div>
+        {output ? (
+          <pre className="feed-log-segment-body feed-log-terminal">{output}</pre>
+        ) : (
+          <div className="feed-log-segment-body" />
+        )}
+      </div>
+    )
+  }
+
+  if (toolKey === 'todo_writeToolCall') {
+    const todos = getTodoList(result)
+    return (
+      <div className="feed-log-segment feed-log-tool-call">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-segment-label">{humanLabel}</span>
+        </div>
+        <div className="feed-log-segment-body">
+          <ul className="feed-log-tool-call-todos">
+            {todos.map((t, i) => (
+              <li key={t.id ?? i}>
+                {[t.status, t.content].filter(Boolean).join(' – ')}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    )
+  }
+
+  if (toolKey === 'search_replaceToolCall') {
+    const diff = getEditDiff(result, args)
+    return (
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-diff">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-segment-label">{humanLabel}</span>
+        </div>
+        <pre className="feed-log-segment-body feed-log-terminal">{diff || '(no diff)'}</pre>
+      </div>
+    )
+  }
+
+  if (toolKey === 'writeToolCall') {
+    const diff = getEditDiff(result, args)
+    const content = diff || (args.contents != null ? String(args.contents) : '')
+    return (
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-diff">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-segment-label">{humanLabel}</span>
+        </div>
+        <pre className="feed-log-segment-body feed-log-terminal">{content || (typeof args.path === 'string' ? args.path : '')}</pre>
+      </div>
+    )
+  }
+
+  if (toolKey === 'web_searchToolCall') {
+    const url = getWebSearchUrl(result, args) || (typeof args.query === 'string' ? `https://search?q=${encodeURIComponent(args.query)}` : '')
+    const success = getWebSearchSuccess(result)
+    return (
+      <div className="feed-log-segment feed-log-tool-call">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-tool-call-web-icon" aria-hidden />
+          <span className="feed-log-segment-label">{humanLabel}</span>
+          <span className="feed-log-tool-call-status">{success ? 'Success' : 'Error'}</span>
+        </div>
+        <div className="feed-log-segment-body">
+          {url ? (
+            <a href={url.startsWith('http') ? url : `https://${url}`} target="_blank" rel="noopener noreferrer" className="feed-log-tool-call-link">
+              {url}
+            </a>
+          ) : null}
+        </div>
+      </div>
+    )
+  }
+
   const hasResult = result !== undefined && result !== null
   const resultStr = hasResult ? (typeof result === 'string' ? result : JSON.stringify(result, null, 2)) : ''
   return (

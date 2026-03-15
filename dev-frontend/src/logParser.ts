@@ -6,6 +6,7 @@
  */
 
 export interface ToolCallInfo {
+  toolKey: string
   humanLabel: string
   args: Record<string, unknown>
   result?: unknown
@@ -25,12 +26,14 @@ const TOOL_HUMAN_LABELS: Record<string, string> = {
   writeToolCall: 'Write file',
   search_replaceToolCall: 'Search and replace',
   run_terminal_cmdToolCall: 'Run command',
+  shellToolCall: 'Run command',
   list_dirToolCall: 'List directory',
   delete_fileToolCall: 'Delete file',
   edit_notebookToolCall: 'Edit notebook',
   web_searchToolCall: 'Web search',
   mcp_taskToolCall: 'Task',
   mcp_web_fetchToolCall: 'Fetch URL',
+  todo_writeToolCall: 'Update todo',
 }
 
 function humanLabelForTool(toolKey: string): string {
@@ -137,7 +140,7 @@ export function parseLogToSegments(raw: string): LogSegment[] {
       segments.push({
         type: 'tool_call',
         text: '',
-        toolCall: { humanLabel, args, result, status },
+        toolCall: { toolKey: tc.toolKey, humanLabel, args, result, status },
       })
     }
     toolCallGroups.clear()

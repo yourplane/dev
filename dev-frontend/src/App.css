@@ -754,6 +754,45 @@
 .feed-log-tool-call-result .feed-log-terminal {
   margin-top: 0.25rem;
 }
+.feed-log-tool-call-in-progress .feed-log-tool-call-header {
+  align-items: center;
+}
+.feed-log-tool-call-spinner {
+  display: inline-block;
+  width: 0.875rem;
+  height: 0.875rem;
+  border: 2px solid #ddd;
+  border-top-color: #0a0;
+  border-radius: 50%;
+  animation: command-spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+.feed-log-tool-call-web-icon {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cline x1='2' y1='12' x2='22' y2='12'/%3E%3Cpath d='M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z'/%3E%3C/svg%3E") center/contain no-repeat;
+  flex-shrink: 0;
+}
+.feed-log-tool-call-link {
+  color: #06c;
+  text-decoration: none;
+}
+.feed-log-tool-call-link:hover {
+  text-decoration: underline;
+}
+.feed-log-tool-call-read-path {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+.feed-log-tool-call-todos {
+  margin: 0;
+  padding-left: 1.25rem;
+}
+.feed-log-tool-call-todos li {
+  margin-bottom: 0.25rem;
+}
 .feed-log-terminal {
   margin: 0;
   padding: 0.6rem 0.75rem;

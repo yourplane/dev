@@ -24,6 +24,7 @@ describe('parseLogToSegments', () => {
     expect(segments).toHaveLength(1)
     expect(segments[0].type).toBe('tool_call')
     expect(segments[0].toolCall).toBeDefined()
+    expect(segments[0].toolCall?.toolKey).toBe('readToolCall')
     expect(segments[0].toolCall?.humanLabel).toBe('Read file')
     expect(segments[0].toolCall?.status).toBe('completed')
     expect(segments[0].toolCall?.args).toEqual({ path: '/foo' })
