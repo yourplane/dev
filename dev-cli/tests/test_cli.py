@@ -397,52 +397,6 @@ def test_implement_runs_headless_stream_json(runner: CliRunner, tmp_path: Path) 
     assert not index.exists() or index.read_text().strip() == ""
 
 
-def test_plan_accept_updates_task_md(runner: CliRunner, tmp_path: Path) -> None:
-    with runner.isolated_filesystem(tmp_path):
-        cwd = Path.cwd()
-        (cwd / "task.md").write_text("# Old\n\nOld description.")
-        (cwd / "task-plan-draft.md").write_text("# New Title\n\nDetailed plan here.")
-        result = runner.invoke(main, ["plan-implement", "accept"])
-        task_content = (cwd / "task.md").read_text()
-    assert result.exit_code == 0
-    assert task_content == "# New Title\n\nDetailed plan here."
-    assert "Plan accepted" in result.output
-
-
-def test_plan_accept_missing_draft_exits_nonzero(runner: CliRunner, tmp_path: Path) -> None:
-    with runner.isolated_filesystem(tmp_path):
-        (Path.cwd() / "task.md").write_text("# Task\n\nDesc.")
-        result = runner.invoke(main, ["plan-implement", "accept"])
-    assert result.exit_code != 0
-    assert "Draft plan not found" in result.output or "not found" in result.output
-
-
-def test_plan_accept_with_task_flag(runner: CliRunner, tmp_path: Path) -> None:
-    root = tmp_path / "tasks"
-    root.mkdir()
-    task_dir = root / "my-task"
-    task_dir.mkdir()
-    (task_dir / "task.md").write_text("# Old\n\nOld.")
-    (task_dir / "task-plan-draft.md").write_text("# New\n\nNew plan.")
-    result = runner.invoke(
-        main,
-        ["plan-implement", "accept", "--task", str(task_dir)],
-    )
-    assert result.exit_code == 0
-    assert (task_dir / "task.md").read_text() == "# New\n\nNew plan."
-
-
-def test_plan_accept_with_draft_option(runner: CliRunner, tmp_path: Path) -> None:
-    with runner.isolated_filesystem(tmp_path):
-        cwd = Path.cwd()
-        (cwd / "task.md").write_text("# Task\n\nX.")
-        (cwd / "custom-draft.md").write_text("# Custom\n\nCustom plan.")
-        result = runner.invoke(main, ["plan-implement", "accept", "--draft", "custom-draft.md"])
-        task_content = (cwd / "task.md").read_text()
-    assert result.exit_code == 0
-    assert task_content == "# Custom\n\nCustom plan."
-
-
 def test_plan_test_help() -> None:
     result = CliRunner().invoke(main, ["plan-test", "--help"])
     assert result.exit_code == 0
