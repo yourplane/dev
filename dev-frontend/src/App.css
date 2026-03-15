@@ -774,6 +774,73 @@
   background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2'%3E%3Ccircle cx='12' cy='12' r='10'/%3E%3Cline x1='2' y1='12' x2='22' y2='12'/%3E%3Cpath d='M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z'/%3E%3C/svg%3E") center/contain no-repeat;
   flex-shrink: 0;
 }
+.feed-log-tool-call-search-icon {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cpath d='m21 21-4.35-4.35'/%3E%3C/svg%3E") center/contain no-repeat;
+}
+/* Web search: search-bar style so it reads clearly as "search" */
+.feed-log-tool-call-web-search {
+  background: #f5f0f9;
+  border-left: 4px solid #7b1fa2;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+}
+.feed-log-tool-call-web-search .feed-log-tool-call-header {
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  align-items: center;
+}
+.feed-log-tool-call-web-search .feed-log-segment-label {
+  color: #6a1b9a;
+  font-weight: 600;
+}
+.feed-log-tool-call-search-query {
+  font-style: italic;
+  color: #4a148c;
+  font-size: 0.95rem;
+  background: rgba(255,255,255,0.6);
+  padding: 0.15rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid #ce93d8;
+}
+.feed-log-tool-call-web-search .feed-log-tool-call-status {
+  margin-left: auto;
+  font-size: 0.85rem;
+}
+/* Web fetch: link style with globe + favicon so it reads clearly as "fetch URL" */
+.feed-log-tool-call-web-fetch {
+  background: #e3f2fd;
+  border-left: 4px solid #1976d2;
+  border-radius: 6px;
+  padding: 0.5rem 0.75rem;
+}
+.feed-log-tool-call-web-fetch .feed-log-tool-call-header {
+  padding: 0;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.feed-log-tool-call-web-fetch-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: #1565c0;
+  text-decoration: none;
+  font-weight: 500;
+}
+.feed-log-tool-call-web-fetch-link:hover {
+  text-decoration: underline;
+  color: #0d47a1;
+}
+.feed-log-tool-call-favicon {
+  flex-shrink: 0;
+  border-radius: 2px;
+}
+.feed-log-tool-call-web-fetch .feed-log-tool-call-link {
+  color: inherit;
+}
 .feed-log-tool-call-link {
   color: #06c;
   text-decoration: none;

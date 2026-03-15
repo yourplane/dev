@@ -709,12 +709,13 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
   if (isStarted) {
     if (toolKey === 'shellToolCall') {
       const command = typeof args.command === 'string' ? args.command : ''
+      const partialOutput = toolCall.partialOutput ?? ''
+      const block = [command ? `$ ${command}` : '(running…)', partialOutput].filter(Boolean).join(partialOutput ? '\n\n' : '')
       return (
         <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
           <pre className="feed-log-shell-block">
             <span className="feed-log-tool-call-spinner" aria-hidden />
-            {' $ '}
-            {command || '(running…)'}
+            {block || ' '}
           </pre>
         </div>
       )
@@ -832,22 +833,50 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
     )
   }
 
-  if (toolKey === 'web_searchToolCall') {
-    const url = getWebSearchUrl(result, args) || (typeof args.query === 'string' ? `https://search?q=${encodeURIComponent(args.query)}` : '')
+  if (toolKey === 'web_searchToolCall' || toolKey === 'webSearchToolCall') {
+    const query =
+      (typeof args.searchTerm === 'string' ? args.searchTerm : null) ??
+      (typeof args.query === 'string' ? args.query : '')
     const success = getWebSearchSuccess(result)
     return (
-      <div className="feed-log-segment feed-log-tool-call">
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-web-search">
         <div className="feed-log-tool-call-header">
-          <span className="feed-log-tool-call-web-icon" aria-hidden />
+          <span className="feed-log-tool-call-search-icon" aria-hidden />
           <span className="feed-log-segment-label">{humanLabel}</span>
+          {query ? <span className="feed-log-tool-call-search-query">{query}</span> : null}
           <span className="feed-log-tool-call-status">{success ? 'Success' : 'Error'}</span>
         </div>
-        <div className="feed-log-segment-body">
-          {url ? (
-            <a href={url.startsWith('http') ? url : `https://${url}`} target="_blank" rel="noopener noreferrer" className="feed-log-tool-call-link">
-              {url}
-            </a>
-          ) : null}
+      </div>
+    )
+  }
+
+  if (toolKey === 'mcp_web_fetchToolCall' || toolKey === 'mcpWebFetchToolCall' || toolKey === 'webFetchToolCall') {
+    const url = typeof args.url === 'string' ? args.url : ''
+    if (!url) {
+      return (
+        <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-web-fetch">
+          <div className="feed-log-tool-call-header">
+            <span className="feed-log-segment-label">{humanLabel}</span>
+          </div>
+        </div>
+      )
+    }
+    const href = url.startsWith('http') ? url : `https://${url}`
+    let domain = ''
+    try {
+      domain = new URL(href).hostname
+    } catch {
+      domain = url
+    }
+    const faviconUrl = `https://www.google.com/s2/favicons?domain=${encodeURIComponent(domain)}&sz=32`
+    return (
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-web-fetch">
+        <div className="feed-log-tool-call-header">
+          <span className="feed-log-segment-label">{humanLabel}</span>
+          <a href={href} target="_blank" rel="noopener noreferrer" className="feed-log-tool-call-web-fetch-link">
+            <img src={faviconUrl} alt="" className="feed-log-tool-call-favicon" width={16} height={16} />
+            <span className="feed-log-tool-call-link">{url}</span>
+          </a>
         </div>
       </div>
     )

@@ -11,6 +11,8 @@ export interface ToolCallInfo {
   args: Record<string, unknown>
   result?: unknown
   status: 'started' | 'completed'
+  /** Accumulated output from progress/partial events (e.g. shell streaming). */
+  partialOutput?: string
 }
 
 export interface LogSegment {
@@ -32,8 +34,11 @@ const TOOL_HUMAN_LABELS: Record<string, string> = {
   delete_fileToolCall: 'Delete file',
   edit_notebookToolCall: 'Edit notebook',
   web_searchToolCall: 'Web search',
+  webSearchToolCall: 'Web search',
   mcp_taskToolCall: 'Task',
-  mcp_web_fetchToolCall: 'Fetch URL',
+  mcp_web_fetchToolCall: 'WEB FETCH',
+  mcpWebFetchToolCall: 'WEB FETCH',
+  webFetchToolCall: 'WEB FETCH',
   todo_writeToolCall: 'Update todo',
 }
 
@@ -127,6 +132,18 @@ export function parseLogToSegments(raw: string): LogSegment[] {
   let onlySystemInitSoFar = true
   const toolCallGroups = new Map<string, { firstIndex: number; events: ParsedEvent[] }>()
 
+  function getOutputFromResult(result: unknown): string {
+    if (result == null) return ''
+    const r = result as Record<string, unknown>
+    const inner = (r.success != null ? (r.success as Record<string, unknown>) : r) as Record<string, unknown>
+    if (typeof inner.output === 'string') return inner.output
+    if (typeof inner.combinedOutput === 'string') return inner.combinedOutput
+    if (typeof inner.interleavedOutput === 'string') return inner.interleavedOutput
+    const stdout = typeof inner.stdout === 'string' ? inner.stdout : ''
+    const stderr = typeof inner.stderr === 'string' ? inner.stderr : ''
+    return stderr ? stdout + (stdout ? '\n' : '') + stderr : stdout
+  }
+
   function flushToolCalls(): void {
     const order = [...toolCallGroups.entries()].sort((a, b) => a[1].firstIndex - b[1].firstIndex)
     for (const [, group] of order) {
@@ -138,10 +155,15 @@ export function parseLogToSegments(raw: string): LogSegment[] {
       const args = (started.toolCall?.args ?? {}) as Record<string, unknown>
       const result = completed?.toolCall?.result
       const humanLabel = humanLabelForTool(tc.toolKey)
+      const progressEvents = evs.filter((e) => e.toolCall?.subtype === 'progress' || e.toolCall?.subtype === 'partial')
+      const partialOutput = progressEvents
+        .map((e) => getOutputFromResult(e.toolCall?.result))
+        .filter(Boolean)
+        .join('')
       segments.push({
         type: 'tool_call',
         text: '',
-        toolCall: { toolKey: tc.toolKey, humanLabel, args, result, status },
+        toolCall: { toolKey: tc.toolKey, humanLabel, args, result, status, partialOutput: partialOutput || undefined },
       })
     }
     toolCallGroups.clear()
