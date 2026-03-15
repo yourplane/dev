@@ -34,6 +34,7 @@ const TOOL_HUMAN_LABELS: Record<string, string> = {
   delete_fileToolCall: 'Delete file',
   edit_notebookToolCall: 'Edit notebook',
   web_searchToolCall: 'Web search',
+  webSearchToolCall: 'Web search',
   mcp_taskToolCall: 'Task',
   mcp_web_fetchToolCall: 'Fetch URL',
   todo_writeToolCall: 'Update todo',

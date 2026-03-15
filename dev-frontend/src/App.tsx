@@ -833,8 +833,10 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
     )
   }
 
-  if (toolKey === 'web_searchToolCall') {
-    const query = typeof args.query === 'string' ? args.query : ''
+  if (toolKey === 'web_searchToolCall' || toolKey === 'webSearchToolCall') {
+    const query =
+      (typeof args.searchTerm === 'string' ? args.searchTerm : null) ??
+      (typeof args.query === 'string' ? args.query : '')
     const success = getWebSearchSuccess(result)
     return (
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-web-search">
