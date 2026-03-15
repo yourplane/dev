@@ -46,7 +46,7 @@ Useful commands: `systemctl --user start dev-daemon.service`, `systemctl --user 
 If you prefer to install the unit by hand:
 
 1. Create the unit directory: `mkdir -p ~/.config/systemd/user`
-2. Create `~/.config/systemd/user/dev-daemon.service` (see [dev-daemon.service.example](dev-daemon.service.example)); set `WorkingDirectory` and `ExecStart` to your dev repo path.
+2. Create `~/.config/systemd/user/dev-daemon.service` with `WorkingDirectory` set to your dev repo root and `ExecStart` set to `$REPO_ROOT/dev-daemon/start.sh` (use `Type=simple`, `Restart=on-failure`, `RestartSec=5`, `WantedBy=default.target`).
 3. Run `systemctl --user daemon-reload` and `systemctl --user enable --now dev-daemon.service`
 4. View logs: `journalctl --user -u dev-daemon.service -f`
 
