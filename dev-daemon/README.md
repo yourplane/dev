@@ -23,25 +23,31 @@ Open http://localhost:5173 to use the web UI.
 
 ## On startup
 
-To run the dev stack at login or boot, use one of the options below. The script stays in the foreground, so run it under a service manager or in a dedicated terminal/session.
+To run the dev stack at login, use the install script (systemd user service) or the manual options below.
 
-### systemd (user service)
+### Install script (recommended)
 
-Install a user unit so the daemon starts when you log in and stops when you log out:
+From the dev repo root:
 
-1. Create the unit directory:
-   ```bash
-   mkdir -p ~/.config/systemd/user
-   ```
+```bash
+./dev-daemon/install.sh
+```
 
-2. Create `~/.config/systemd/user/dev-daemon.service` (see [dev-daemon.service.example](dev-daemon.service.example) in this directory). Set `WorkingDirectory` and `ExecStart` to your dev repo path.
+This creates `~/.config/systemd/user/dev-daemon.service` with the correct paths, runs `systemctl --user daemon-reload`, and enables the service so it starts when you log in. To start immediately as well:
 
-3. Enable and start:
-   ```bash
-   systemctl --user daemon-reload
-   systemctl --user enable --now dev-daemon.service
-   ```
+```bash
+./dev-daemon/install.sh --now
+```
 
+Useful commands: `systemctl --user start dev-daemon.service`, `systemctl --user stop dev-daemon.service`, `journalctl --user -u dev-daemon.service -f`, `systemctl --user disable dev-daemon.service`.
+
+### systemd (manual)
+
+If you prefer to install the unit by hand:
+
+1. Create the unit directory: `mkdir -p ~/.config/systemd/user`
+2. Create `~/.config/systemd/user/dev-daemon.service` (see [dev-daemon.service.example](dev-daemon.service.example)); set `WorkingDirectory` and `ExecStart` to your dev repo path.
+3. Run `systemctl --user daemon-reload` and `systemctl --user enable --now dev-daemon.service`
 4. View logs: `journalctl --user -u dev-daemon.service -f`
 
 ### Shell (login session)
