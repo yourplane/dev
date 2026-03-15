@@ -412,6 +412,7 @@ function CreateTaskForm({
           {reposLoading ? (
             <span className="hint">Loading shorthands…</span>
           ) : (
+            <>
             <div className="repo-radio-group" role="radiogroup" aria-label="Repo">
               {Object.entries(repos).map(([name, url]) => (
                 <div key={name} className="repo-radio-option repo-radio-row">
@@ -482,6 +483,7 @@ function CreateTaskForm({
                 </button>
               </form>
             </div>
+            </>
           )}
         </label>
         <label>
