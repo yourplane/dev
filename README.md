@@ -90,6 +90,16 @@ To use the web UI for listing, creating, and archiving tasks:
 
 See `dev-frontend/README.md` for details.
 
+### Daemon (one command)
+
+To start both backend and frontend in one terminal (foreground; Ctrl+C stops both):
+
+```bash
+./dev-daemon/start.sh
+```
+
+Then open http://localhost:5173. See `dev-daemon/README.md` for run options and on-startup (e.g. systemd user service).
+
 ## Development
 
 Run tests:
