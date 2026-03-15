@@ -74,4 +74,29 @@ describe('parseLogToSegments', () => {
     // In JSON "hi\\n" is newline; joined with " there" gives "hi\n there"
     expect(segments[0].toolCall?.partialOutput).toBe('hi\n there')
   })
+
+  it('extracts stdout/stderr from failed shell result (top-level when success is false)', () => {
+    const raw = [
+      '{"type":"tool_call","subtype":"started","call_id":"sh1","tool_call":{"shellToolCall":{"args":{"command":"false"}}}}',
+      '{"type":"tool_call","subtype":"completed","call_id":"sh1","tool_call":{"shellToolCall":{"args":{"command":"false"},"result":{"success":false,"stdout":"out","stderr":"err","exitCode":1}}}}',
+    ].join('\n')
+    const segments = parseLogToSegments(raw)
+    expect(segments).toHaveLength(1)
+    expect(segments[0].toolCall?.status).toBe('completed')
+    expect(segments[0].toolCall?.result).toEqual({
+      success: false,
+      stdout: 'out',
+      stderr: 'err',
+      exitCode: 1,
+    })
+    // Parser uses getOutputFromResult for partialOutput; for completed we use result in UI.
+    // Verify we didn't break completed-with-success result shape
+    const successRaw = [
+      '{"type":"tool_call","subtype":"started","call_id":"sh2","tool_call":{"shellToolCall":{"args":{"command":"echo ok"}}}}',
+      '{"type":"tool_call","subtype":"completed","call_id":"sh2","tool_call":{"shellToolCall":{"args":{},"result":{"success":{"output":"ok\\n"}}}}}',
+    ].join('\n')
+    const successSegments = parseLogToSegments(successRaw)
+    expect(successSegments).toHaveLength(1)
+    expect(successSegments[0].toolCall?.result).toEqual({ success: { output: 'ok\n' } })
+  })
 })

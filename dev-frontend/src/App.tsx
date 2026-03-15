@@ -600,13 +600,18 @@ function ParsedLogView({ raw }: { raw: string }) {
 function getShellOutput(result: unknown): string {
   if (result == null) return ''
   const r = result as Record<string, unknown>
-  const inner = (r.success != null ? (r.success as Record<string, unknown>) : r) as Record<string, unknown>
-  if (typeof inner.output === 'string') return inner.output
-  if (typeof inner.combinedOutput === 'string') return inner.combinedOutput
-  if (typeof inner.interleavedOutput === 'string') return inner.interleavedOutput
-  const stdout = typeof inner.stdout === 'string' ? inner.stdout : ''
-  const stderr = typeof inner.stderr === 'string' ? inner.stderr : ''
-  return stderr ? stdout + (stdout ? '\n' : '') + stderr : stdout
+  const inner = (r.success != null && r.success !== false ? (r.success as Record<string, unknown>) : r) as Record<string, unknown>
+  function fromObj(obj: Record<string, unknown>): string {
+    if (typeof obj.output === 'string') return obj.output
+    if (typeof obj.combinedOutput === 'string') return obj.combinedOutput
+    if (typeof obj.interleavedOutput === 'string') return obj.interleavedOutput
+    const stdout = typeof obj.stdout === 'string' ? obj.stdout : ''
+    const stderr = typeof obj.stderr === 'string' ? obj.stderr : ''
+    return stderr ? stdout + (stdout ? '\n' : '') + stderr : stdout
+  }
+  const fromInner = fromObj(inner)
+  if (fromInner) return fromInner
+  return fromObj(r)
 }
 
 function getReadSuccess(result: unknown): boolean {
@@ -748,8 +753,19 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
     const command = typeof args.command === 'string' ? args.command : ''
     const output = getShellOutput(result)
     const block = [command ? `$ ${command}` : '', output].filter(Boolean).join('\n\n')
+    const failed =
+      result != null &&
+      typeof result === 'object' &&
+      ((result as Record<string, unknown>).success === false ||
+        (typeof (result as Record<string, unknown>).exitCode === 'number' &&
+          (result as Record<string, unknown>).exitCode !== 0))
     return (
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
+        {failed && (
+          <div className="feed-log-tool-call-header feed-log-tool-call-shell-failed">
+            <span className="feed-log-tool-call-status feed-log-tool-call-error">Command failed</span>
+          </div>
+        )}
         <pre className="feed-log-shell-block">{block || ' '}</pre>
       </div>
     )
