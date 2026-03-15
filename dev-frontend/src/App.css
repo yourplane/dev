@@ -330,14 +330,14 @@
 
 .repo-remove-btn {
   flex-shrink: 0;
-  width: 1.6rem;
-  height: 1.6rem;
+  width: 1.25rem;
+  height: 1.25rem;
   padding: 0;
-  border: 1px solid #c33;
-  border-radius: 4px;
-  background: #fff;
-  color: #c33;
-  font-size: 1.2rem;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: #888;
+  font-size: 1rem;
   line-height: 1;
   cursor: pointer;
   display: inline-flex;
@@ -346,82 +346,89 @@
 }
 
 .repo-remove-btn:hover:not(:disabled) {
-  background: #c33;
-  color: #fff;
+  background: #eee;
+  color: #555;
 }
 
 .repo-remove-btn:disabled {
-  opacity: 0.6;
+  opacity: 0.5;
   cursor: not-allowed;
 }
 
-.repo-radio-group .repo-custom {
-  margin-top: 0.25rem;
-  margin-left: 1.5rem;
+.repo-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
-.repo-custom {
-  margin-top: 0.35rem;
+.repo-add-open-btn {
+  align-self: flex-start;
+  padding: 0.4rem 0.75rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 0.95rem;
+  cursor: pointer;
 }
 
-.repo-add-section {
-  margin-top: 0.75rem;
-  padding-top: 0.75rem;
-  border-top: 1px solid #eee;
+.repo-add-open-btn:hover {
+  background: #f5f5f5;
 }
 
-.repo-add-label {
-  margin: 0 0 0.35rem;
+.repo-radio-group + .repo-add-open-btn {
+  margin-top: 0.5rem;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal-content {
+  background: #fff;
+  border-radius: 8px;
+  padding: 1.25rem;
+  max-width: 90vw;
+  width: 420px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.repo-add-modal .modal-title {
+  margin: 0 0 1rem;
+  font-size: 1.1rem;
+}
+
+.repo-add-modal label {
+  display: block;
+  margin-bottom: 0.75rem;
+}
+
+.repo-add-modal label span {
+  display: block;
+  margin-bottom: 0.25rem;
   font-size: 0.9rem;
   color: #555;
 }
 
-.repo-add-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.5rem;
-  align-items: center;
-}
-
-.repo-add-section .inline-error {
-  margin: 0 0 0.35rem;
-}
-
-.repo-add-name {
-  width: 8rem;
-  min-width: 6rem;
-  padding: 0.35rem 0.5rem;
+.repo-add-modal input {
+  width: 100%;
+  padding: 0.4rem 0.5rem;
   border: 1px solid #ccc;
   border-radius: 6px;
   font-size: 0.95rem;
 }
 
-.repo-add-url {
-  flex: 1;
-  min-width: 12rem;
-  padding: 0.35rem 0.5rem;
-  border: 1px solid #ccc;
-  border-radius: 6px;
-  font-size: 0.95rem;
+.repo-add-modal .inline-error {
+  margin-bottom: 0.5rem;
 }
 
-.repo-add-submit {
-  padding: 0.35rem 0.75rem;
-  border: 1px solid #1a1a1a;
-  border-radius: 6px;
-  background: #1a1a1a;
-  color: #fff;
-  font-size: 0.9rem;
-  cursor: pointer;
-}
-
-.repo-add-submit:hover:not(:disabled) {
-  background: #333;
-}
-
-.repo-add-submit:disabled {
-  opacity: 0.7;
-  cursor: not-allowed;
+.repo-add-modal .form-actions {
+  margin-top: 1rem;
 }
 
 .form-actions {
