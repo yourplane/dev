@@ -12,7 +12,6 @@ from dev_sdk.agent_run import (
     AGENT_CHAT_ID_FILE,
     AgentRunError,
     AgentTestSkipped,
-    TASK_PLAN_DRAFT,
     run_implement,
     run_plan_implement,
     run_plan_test,
@@ -434,46 +433,9 @@ def plan_implement_group(
     ctx: click.Context,
     task_path: Path | None,
 ) -> None:
-    """Run headless plan-implement mode or manage task plans (e.g. accept draft into task.md)."""
+    """Run headless plan-implement mode."""
     if ctx.invoked_subcommand is None:
         _run_plan_implement_mode(task_path=task_path)
-
-
-@plan_implement_group.command("accept")
-@click.option(
-    "--task",
-    "-t",
-    "task_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Path to task directory. If not set, use current working directory.",
-)
-@click.option(
-    "--draft",
-    type=click.Path(path_type=Path),
-    default=None,
-    help=f"Path to draft plan file (default: <task directory>/{TASK_PLAN_DRAFT}).",
-)
-def plan_accept(
-    task_path: Path | None,
-    draft: Path | None,
-) -> None:
-    """Write the accepted plan from task-plan-draft.md into task.md."""
-    task_dir = _resolve_task_dir(task_path)
-
-    draft_path = draft if draft is not None else task_dir / TASK_PLAN_DRAFT
-    task_md_path = task_dir / "task.md"
-
-    if not draft_path.exists():
-        click.echo(
-            f"Draft plan not found: {draft_path}. Run plan mode first (dev plan-implement).",
-            err=True,
-        )
-        raise SystemExit(1)
-
-    content = draft_path.read_text(encoding="utf-8")
-    task_md_path.write_text(content, encoding="utf-8")
-    click.echo(f"Plan accepted: {task_md_path} updated from {draft_path.name}.")
 
 
 @click.command("plan-test")
