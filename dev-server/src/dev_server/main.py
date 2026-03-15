@@ -285,16 +285,16 @@ def put_new_task_draft_endpoint(body: NewTaskDraftRequest) -> None:
 
 @app.get("/tasks/{task_name}/drafts/comment", response_class=PlainTextResponse)
 def get_task_comment_draft_endpoint(task_name: str) -> str:
-    """Return the comment draft for the task. Empty string if none."""
-    task_dir = _task_dir(task_name)
-    return get_task_comment_draft(task_dir)
+    """Return the comment draft for the task. Empty string if none. Draft stored in server .drafts, not task dir."""
+    _task_dir(task_name)  # validate task exists
+    return get_task_comment_draft(_tasks_root(), task_name)
 
 
 @app.put("/tasks/{task_name}/drafts/comment", status_code=204)
 def put_task_comment_draft_endpoint(task_name: str, body: TaskCommentDraftRequest) -> None:
-    """Save or clear the comment draft for the task. Empty content clears it."""
-    task_dir = _task_dir(task_name)
-    set_task_comment_draft(task_dir, body.content or "")
+    """Save or clear the comment draft for the task. Empty content clears it. Draft stored in server .drafts."""
+    _task_dir(task_name)  # validate task exists
+    set_task_comment_draft(_tasks_root(), task_name, body.content or "")
 
 
 @app.get("/tasks", response_model=ListTasksResponse)

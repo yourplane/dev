@@ -77,8 +77,8 @@ def test_task_comment_draft_get_empty(client: TestClient, task_dir: Path) -> Non
     assert resp.text == ""
 
 
-def test_task_comment_draft_put_and_get(client: TestClient, task_dir: Path) -> None:
-    """PUT task comment draft saves and GET returns it."""
+def test_task_comment_draft_put_and_get(client: TestClient, task_dir: Path, tasks_root: Path) -> None:
+    """PUT task comment draft saves and GET returns it. Draft lives in server .drafts, not task dir."""
     resp = client.put(
         "/tasks/mytask/drafts/comment",
         json={"content": "My comment draft."},
@@ -89,19 +89,20 @@ def test_task_comment_draft_put_and_get(client: TestClient, task_dir: Path) -> N
     assert resp2.status_code == 200
     assert resp2.text == "My comment draft."
 
-    draft_file = task_dir / ".drafts" / "comment"
+    draft_file = tasks_root / ".drafts" / "comment-mytask"
     assert draft_file.is_file()
     assert draft_file.read_text() == "My comment draft."
+    assert not (task_dir / ".drafts").exists()
 
 
-def test_task_comment_draft_put_empty_clears(client: TestClient, task_dir: Path) -> None:
+def test_task_comment_draft_put_empty_clears(client: TestClient, task_dir: Path, tasks_root: Path) -> None:
     """PUT with empty content clears the comment draft."""
     client.put("/tasks/mytask/drafts/comment", json={"content": "something"})
     client.put("/tasks/mytask/drafts/comment", json={"content": ""})
     resp = client.get("/tasks/mytask/drafts/comment")
     assert resp.status_code == 200
     assert resp.text == ""
-    assert not (task_dir / ".drafts" / "comment").exists()
+    assert not (tasks_root / ".drafts" / "comment-mytask").exists()
 
 
 def test_task_comment_draft_404_for_nonexistent_task(client: TestClient) -> None:
