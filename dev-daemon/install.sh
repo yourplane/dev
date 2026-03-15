@@ -35,6 +35,18 @@ if [[ ! -d "$REPO_ROOT/dev-server" ]] || [[ ! -d "$REPO_ROOT/dev-frontend" ]]; t
   exit 1
 fi
 
+# Resolve full paths so the service does not depend on PATH (e.g. uv in ~/.local/bin or via version manager)
+UV_PATH="$(command -v uv 2>/dev/null)" || true
+NPM_PATH="$(command -v npm 2>/dev/null)" || true
+if [[ -z "$UV_PATH" ]]; then
+  echo "install.sh: uv not found on PATH. Run install.sh from a shell where uv is available (e.g. after installing uv or loading nvm)." >&2
+  exit 1
+fi
+if [[ -z "$NPM_PATH" ]]; then
+  echo "install.sh: npm not found on PATH. Run install.sh from a shell where npm is available." >&2
+  exit 1
+fi
+
 mkdir -p "$UNIT_DIR"
 
 cat > "$SERVICE_FILE" << EOF
@@ -50,7 +62,8 @@ Restart=on-failure
 RestartSec=5
 
 Environment=HOME=%h
-Environment=PATH=$HOME/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=DEV_DAEMON_UV=$UV_PATH
+Environment=DEV_DAEMON_NPM=$NPM_PATH
 
 [Install]
 WantedBy=default.target

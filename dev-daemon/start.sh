@@ -6,8 +6,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 FRONTEND_DIR="$REPO_ROOT/dev-frontend"
 
-# So uv (and node/npm) are found when run with minimal PATH (e.g. systemd user service)
+# When run under systemd, install.sh passes DEV_DAEMON_UV and DEV_DAEMON_NPM (full paths)
 export PATH="${HOME:?}/.local/bin:/usr/local/bin:$PATH"
+UV_CMD="${DEV_DAEMON_UV:-uv}"
+NPM_CMD="${DEV_DAEMON_NPM:-npm}"
 
 if [[ ! -d "$REPO_ROOT/dev-server" ]] || [[ ! -d "$FRONTEND_DIR" ]]; then
   echo "dev-daemon: repo root not found (expected dev-server and dev-frontend under $REPO_ROOT)" >&2
@@ -29,7 +31,7 @@ trap 'cleanup $?' EXIT
 echo "Starting dev-server (backend) on 127.0.0.1:8000..."
 (
   cd "$REPO_ROOT"
-  exec uv run --project dev-server uvicorn dev_server.main:app --reload --host 127.0.0.1
+  exec "$UV_CMD" run --project dev-server uvicorn dev_server.main:app --reload --host 127.0.0.1
 ) &
 BACKEND_PID=$!
 
@@ -59,5 +61,5 @@ fi
 echo "Starting dev-frontend (Vite) on http://localhost:5173..."
 (
   cd "$FRONTEND_DIR"
-  exec npm run dev
+  exec "$NPM_CMD" run dev
 )
