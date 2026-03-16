@@ -1029,6 +1029,8 @@ export function TaskCommsPageContent({
   const hasScrolledInitialRef = useRef(false)
   const [archiving, setArchiving] = useState(false)
   const [archiveError, setArchiveError] = useState<string | null>(null)
+  const [downloadingCommsZip, setDownloadingCommsZip] = useState(false)
+  const [downloadCommsZipError, setDownloadCommsZipError] = useState<string | null>(null)
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set())
   const [loadingContentKeys, setLoadingContentKeys] = useState<Set<string>>(new Set())
 
@@ -1054,6 +1056,18 @@ export function TaskCommsPageContent({
       setArchiveError(e instanceof Error ? e.message : String(e))
     } finally {
       setArchiving(false)
+    }
+  }
+
+  const handleDownloadCommsZip = async () => {
+    setDownloadCommsZipError(null)
+    setDownloadingCommsZip(true)
+    try {
+      await api.downloadTaskCommsZip(taskName)
+    } catch (e) {
+      setDownloadCommsZipError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setDownloadingCommsZip(false)
     }
   }
 
@@ -1401,6 +1415,14 @@ export function TaskCommsPageContent({
         <div className="task-comms-header-actions">
           <button
             type="button"
+            className="download-comms-zip-btn archive-btn-task-view"
+            onClick={handleDownloadCommsZip}
+            disabled={downloadingCommsZip}
+          >
+            {downloadingCommsZip ? 'Downloading…' : 'Download comms (zip)'}
+          </button>
+          <button
+            type="button"
             className="archive-btn archive-btn-task-view"
             onClick={handleArchive}
             disabled={archiving}
@@ -1409,7 +1431,9 @@ export function TaskCommsPageContent({
           </button>
         </div>
       </div>
-      {archiveError && <p className="inline-error">{archiveError}</p>}
+      {(archiveError || downloadCommsZipError) && (
+        <p className="inline-error">{archiveError ?? downloadCommsZipError}</p>
+      )}
       <p><Link to="/">← Back to tasks</Link></p>
       {feedEntries.length === 0 ? (
         <p className="empty">No comms or agent logs yet for this task.</p>

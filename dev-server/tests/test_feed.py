@@ -1,6 +1,8 @@
 """Tests for task feed API."""
 
 import os
+import zipfile
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch
 
@@ -56,3 +58,25 @@ def test_list_task_feed_with_after(client_with_tasks: TestClient, task_dir: Path
     resp3 = client_with_tasks.get("/tasks/mytask/feed?after=0")
     assert resp3.status_code == 200
     assert len(resp3.json()["entries"]) == len(entries)
+
+
+def test_comms_zip_returns_only_comms_no_logs(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """GET /tasks/{task_name}/comms.zip returns a zip with comms files only (no agent logs)."""
+    comms_dir(task_dir).mkdir(parents=True)
+    index_path(task_dir).write_text("001-user.md\n002-agent-plan.md\n")
+    (task_dir / "comms" / "001-user.md").write_text("User message")
+    (task_dir / "comms" / "002-agent-plan.md").write_text("Agent plan")
+    (task_dir / LOGS_DIR).mkdir(parents=True)
+    (task_dir / LOGS_DIR / "dev-plan-stream-20260314-120000.log").write_text("agent log content")
+
+    resp = client_with_tasks.get("/tasks/mytask/comms.zip")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/zip"
+    assert "mytask-comms.zip" in resp.headers.get("content-disposition", "")
+
+    with zipfile.ZipFile(BytesIO(resp.content), "r") as zf:
+        names = set(zf.namelist())
+    assert "index.txt" in names
+    assert "001-user.md" in names
+    assert "002-agent-plan.md" in names
+    assert not any(n.endswith(".log") or LOGS_DIR in n for n in names)

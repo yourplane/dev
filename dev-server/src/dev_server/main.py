@@ -1,14 +1,16 @@
 """FastAPI app: create, list, archive tasks."""
 
 import asyncio
+import io
 import os
 import re
 import threading
+import zipfile
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from dev_sdk.agent_run import (
@@ -16,7 +18,7 @@ from dev_sdk.agent_run import (
     run_implement,
     run_plan_implement,
 )
-from dev_sdk.comms import add_comms, comms_dir, read_index
+from dev_sdk.comms import add_comms, comms_dir, index_path, read_index
 from dev_sdk.feed import LOGS_DIR, read_feed
 from dev_sdk.create_pr import CreatePRError, create_pull_request
 from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repos
@@ -342,6 +344,31 @@ def get_task_comms_file(task_name: str, filename: str) -> str:
     if not path.is_file() or path.resolve().parent != cdir.resolve():
         raise HTTPException(status_code=404, detail="File not found")
     return path.read_text(encoding="utf-8")
+
+
+@app.get("/tasks/{task_name}/comms.zip", response_class=Response)
+def get_task_comms_zip(task_name: str) -> Response:
+    """Download all task comms (no agent logs) as a zip file."""
+    task_dir = _task_dir(task_name)
+    cdir = comms_dir(task_dir)
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        idx = index_path(task_dir)
+        if idx.exists():
+            zf.writestr("index.txt", idx.read_text(encoding="utf-8"))
+        for filename in read_index(task_dir):
+            path = cdir / filename
+            if path.is_file() and path.resolve().parent == cdir.resolve():
+                zf.writestr(filename, path.read_text(encoding="utf-8"))
+    buf.seek(0)
+    safe_name = re.sub(r"[^\w\-]", "-", task_name).strip("-") or "comms"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}-comms.zip"'
+        },
+    )
 
 
 @app.get("/tasks/{task_name}/feed", response_model=ListFeedResponse)

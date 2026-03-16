@@ -511,6 +511,25 @@
   cursor: not-allowed;
 }
 
+.task-comms .download-comms-zip-btn {
+  border: 2px solid #555;
+  color: #333;
+  background: #fff;
+  padding: 0.35rem 0.65rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.task-comms .download-comms-zip-btn:hover:not(:disabled) {
+  background: #f5f5f5;
+}
+
+.task-comms .download-comms-zip-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 .task-commands {
   margin: 0.75rem 0;
 }
