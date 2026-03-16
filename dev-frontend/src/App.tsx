@@ -324,6 +324,7 @@ function CreateTaskForm({
   const [removing, setRemoving] = useState<string | null>(null)
   const [draftStatus, setDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
   const draftLoadedRef = useRef(false)
+  const lastSavedSnapshotRef = useRef<{ title: string; repo: string; comment: string } | null>(null)
 
   const loadRepos = useCallback(() => {
     return api.getRepos().then(setRepos)
@@ -344,9 +345,13 @@ function CreateTaskForm({
     let cancelled = false
     api.getNewTaskDraft().then((d) => {
       if (cancelled) return
-      if (d.title != null && d.title !== '') setTitle(d.title)
-      if (d.repo != null && d.repo !== '') setRepo(d.repo)
-      if (d.comment != null && d.comment !== '') setComment(d.comment)
+      const loadedTitle = d.title ?? ''
+      const loadedRepo = d.repo ?? ''
+      const loadedComment = d.comment ?? ''
+      setTitle(loadedTitle)
+      setRepo(loadedRepo)
+      setComment(loadedComment)
+      lastSavedSnapshotRef.current = { title: loadedTitle, repo: loadedRepo, comment: loadedComment }
       draftLoadedRef.current = true
       setDraftStatus('saved')
     }).catch(() => { /* ignore */ })
@@ -355,12 +360,18 @@ function CreateTaskForm({
 
   useEffect(() => {
     if (!draftLoadedRef.current) return
+    const snapshot = lastSavedSnapshotRef.current
+    if (snapshot && title === snapshot.title && repo === snapshot.repo && comment === snapshot.comment) {
+      setDraftStatus('saved')
+      return
+    }
     setDraftStatus('unsaved')
     const t = setTimeout(() => {
       const payload = { title, repo, comment }
       const empty = !title.trim() && !repo.trim() && !comment.trim()
       setDraftStatus('saving')
       api.setNewTaskDraft(empty ? {} : payload).then(() => {
+        lastSavedSnapshotRef.current = { title, repo, comment }
         setDraftStatus('saved')
       }).catch(() => {
         setDraftStatus('unsaved')
@@ -1074,6 +1085,7 @@ export function TaskCommsPageContent({
   const [loadingContentKeys, setLoadingContentKeys] = useState<Set<string>>(new Set())
   const [commentDraftStatus, setCommentDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
   const commentDraftLoadedRef = useRef(false)
+  const lastSavedCommentRef = useRef<string | null>(null)
 
   const toggleCollapsed = useCallback((key: string) => {
     setCollapsedKeys((prev) => {
@@ -1319,6 +1331,7 @@ export function TaskCommsPageContent({
     commentDraftLoadedRef.current = false
     api.getTaskCommentDraft(taskName).then((text) => {
       setCommentText(text)
+      lastSavedCommentRef.current = text
       commentDraftLoadedRef.current = true
       setCommentDraftStatus('saved')
     }).catch(() => { /* ignore */ })
@@ -1326,10 +1339,15 @@ export function TaskCommsPageContent({
 
   useEffect(() => {
     if (!commentDraftLoadedRef.current) return
+    if (lastSavedCommentRef.current !== null && commentText === lastSavedCommentRef.current) {
+      setCommentDraftStatus('saved')
+      return
+    }
     setCommentDraftStatus('unsaved')
     const t = setTimeout(() => {
       setCommentDraftStatus('saving')
       api.setTaskCommentDraft(taskName, commentText).then(() => {
+        lastSavedCommentRef.current = commentText
         setCommentDraftStatus('saved')
       }).catch(() => {
         setCommentDraftStatus('unsaved')
@@ -1352,6 +1370,7 @@ export function TaskCommsPageContent({
     try {
       await api.postTaskComms(taskName, content)
       setCommentText('')
+      lastSavedCommentRef.current = ''
       await loadFeed({ incremental: true, prefetchNew: true })
       setScrollToBottomAfterLoad(true)
     } catch (e) {
