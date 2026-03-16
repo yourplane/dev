@@ -424,7 +424,6 @@ function CreateTaskForm({
         repo: repo.trim(),
         comment: comment.trim() || undefined,
       })
-      await api.setNewTaskDraft({})
       onCreated(res.task_name)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
@@ -1339,7 +1338,6 @@ export function TaskCommsPageContent({
     try {
       await api.postTaskComms(taskName, content)
       setCommentText('')
-      await api.setTaskCommentDraft(taskName, '')
       await loadFeed({ incremental: true, prefetchNew: true })
       setScrollToBottomAfterLoad(true)
     } catch (e) {

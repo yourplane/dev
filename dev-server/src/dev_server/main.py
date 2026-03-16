@@ -331,6 +331,7 @@ def create_task(body: CreateTaskRequest) -> CreateTaskResponse:
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+    set_new_task_draft(_tasks_root(), "", "", "")
     task_dir = _tasks_root() / task_name
     return CreateTaskResponse(task_name=task_name, task_dir=str(task_dir))
 
@@ -390,6 +391,7 @@ def post_task_comms(task_name: str, body: PostCommsRequest) -> PostCommsResponse
     """Append a user comment to the task comms. Returns the new filename."""
     task_dir = _task_dir(task_name)
     path = add_comms(task_dir, "user", body.content.strip())
+    set_task_comment_draft(_tasks_root(), task_name, "")
     return PostCommsResponse(filename=path.name)
 
 
