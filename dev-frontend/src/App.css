@@ -243,6 +243,30 @@
   margin: 0;
 }
 
+.draft-status {
+  display: inline-block;
+  margin-bottom: 0.5rem;
+  padding: 0.15rem 0.4rem;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: #666;
+  background: transparent;
+  transition: color 0.15s ease;
+}
+
+.draft-status-saved {
+  color: #5a7a5a;
+}
+
+.draft-status-unsaved {
+  color: #9a6b2a;
+}
+
+.draft-status-saving {
+  color: #5a6a7a;
+}
+
 .inline-error {
   color: #b00;
   margin: 0 0 0.75rem;

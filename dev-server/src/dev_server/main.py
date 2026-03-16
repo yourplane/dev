@@ -19,6 +19,12 @@ from dev_sdk.agent_run import (
     run_plan_implement,
 )
 from dev_sdk.comms import add_comms, comms_dir, index_path, read_index
+from dev_sdk.drafts import (
+    get_new_task_draft,
+    get_task_comment_draft,
+    set_new_task_draft,
+    set_task_comment_draft,
+)
 from dev_sdk.feed import LOGS_DIR, read_feed
 from dev_sdk.create_pr import CreatePRError, create_pull_request
 from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repos
@@ -167,6 +173,22 @@ class ListFeedResponse(BaseModel):
     entries: list[FeedEntryModel]
 
 
+class NewTaskDraftResponse(BaseModel):
+    title: str | None = None
+    repo: str | None = None
+    comment: str | None = None
+
+
+class NewTaskDraftRequest(BaseModel):
+    title: str | None = None
+    repo: str | None = None
+    comment: str | None = None
+
+
+class TaskCommentDraftRequest(BaseModel):
+    content: str = ""
+
+
 def _task_dir(task_name: str) -> Path:
     """Return task directory path. Raises HTTPException 404 if task does not exist or path is invalid."""
     if not task_name or "/" in task_name or "\\" in task_name or task_name in (".", ".."):
@@ -237,6 +259,46 @@ def delete_repo(shorthand: str) -> None:
         raise HTTPException(status_code=404, detail=f"Repo shorthand {shorthand!r} not found.")
 
 
+@app.get("/drafts/new-task", response_model=NewTaskDraftResponse)
+def get_new_task_draft_endpoint() -> NewTaskDraftResponse:
+    """Return the new-task draft (title, repo, comment). Empty values if no draft."""
+    root = _tasks_root()
+    draft = get_new_task_draft(root)
+    if draft is None:
+        return NewTaskDraftResponse()
+    return NewTaskDraftResponse(
+        title=draft.get("title") or None,
+        repo=draft.get("repo") or None,
+        comment=draft.get("comment") or None,
+    )
+
+
+@app.put("/drafts/new-task", status_code=204)
+def put_new_task_draft_endpoint(body: NewTaskDraftRequest) -> None:
+    """Save or clear the new-task draft. Empty body clears the draft."""
+    root = _tasks_root()
+    set_new_task_draft(
+        root,
+        title=body.title or "",
+        repo=body.repo or "",
+        comment=body.comment or "",
+    )
+
+
+@app.get("/tasks/{task_name}/drafts/comment", response_class=PlainTextResponse)
+def get_task_comment_draft_endpoint(task_name: str) -> str:
+    """Return the comment draft for the task. Empty string if none. Draft stored in server .drafts, not task dir."""
+    _task_dir(task_name)  # validate task exists
+    return get_task_comment_draft(_tasks_root(), task_name)
+
+
+@app.put("/tasks/{task_name}/drafts/comment", status_code=204)
+def put_task_comment_draft_endpoint(task_name: str, body: TaskCommentDraftRequest) -> None:
+    """Save or clear the comment draft for the task. Empty content clears it. Draft stored in server .drafts."""
+    _task_dir(task_name)  # validate task exists
+    set_task_comment_draft(_tasks_root(), task_name, body.content or "")
+
+
 @app.get("/tasks", response_model=ListTasksResponse)
 def list_tasks() -> ListTasksResponse:
     manager = _get_manager()
@@ -271,6 +333,7 @@ def create_task(body: CreateTaskRequest) -> CreateTaskResponse:
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+    set_new_task_draft(_tasks_root(), "", "", "")
     task_dir = _tasks_root() / task_name
     return CreateTaskResponse(task_name=task_name, task_dir=str(task_dir))
 
@@ -330,6 +393,7 @@ def post_task_comms(task_name: str, body: PostCommsRequest) -> PostCommsResponse
     """Append a user comment to the task comms. Returns the new filename."""
     task_dir = _task_dir(task_name)
     path = add_comms(task_dir, "user", body.content.strip())
+    set_task_comment_draft(_tasks_root(), task_name, "")
     return PostCommsResponse(filename=path.name)
 
 

@@ -93,6 +93,43 @@ export const api = {
     });
   },
 
+  getNewTaskDraft(): Promise<{ title?: string; repo?: string; comment?: string }> {
+    return request('/drafts/new-task');
+  },
+
+  setNewTaskDraft(data: { title?: string; repo?: string; comment?: string }): Promise<void> {
+    return request('/drafts/new-task', {
+      method: 'PUT',
+      body: JSON.stringify(data),
+      parseJson: false,
+    });
+  },
+
+  async getTaskCommentDraft(taskName: string): Promise<string> {
+    const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/drafts/comment`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const text = await res.text();
+      let detail = text;
+      try {
+        const j = JSON.parse(text);
+        if (typeof j.detail === 'string') detail = j.detail;
+      } catch {
+        // use raw text
+      }
+      throw new Error(detail || `HTTP ${res.status}`);
+    }
+    return res.text();
+  },
+
+  setTaskCommentDraft(taskName: string, content: string): Promise<void> {
+    return request(`/tasks/${encodeURIComponent(taskName)}/drafts/comment`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+      parseJson: false,
+    });
+  },
+
   archiveTask(taskName: string): Promise<ArchiveTaskResponse> {
     return request(`/tasks/${encodeURIComponent(taskName)}/archive`, {
       method: 'POST',
