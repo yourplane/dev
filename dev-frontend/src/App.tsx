@@ -1068,6 +1068,8 @@ export function TaskCommsPageContent({
   const hasScrolledInitialRef = useRef(false)
   const [archiving, setArchiving] = useState(false)
   const [archiveError, setArchiveError] = useState<string | null>(null)
+  const [downloadingCommsZip, setDownloadingCommsZip] = useState(false)
+  const [downloadCommsZipError, setDownloadCommsZipError] = useState<string | null>(null)
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set())
   const [loadingContentKeys, setLoadingContentKeys] = useState<Set<string>>(new Set())
   const [commentDraftStatus, setCommentDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
@@ -1095,6 +1097,18 @@ export function TaskCommsPageContent({
       setArchiveError(e instanceof Error ? e.message : String(e))
     } finally {
       setArchiving(false)
+    }
+  }
+
+  const handleDownloadCommsZip = async () => {
+    setDownloadCommsZipError(null)
+    setDownloadingCommsZip(true)
+    try {
+      await api.downloadTaskCommsZip(taskName)
+    } catch (e) {
+      setDownloadCommsZipError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setDownloadingCommsZip(false)
     }
   }
 
@@ -1466,6 +1480,24 @@ export function TaskCommsPageContent({
         <div className="task-comms-header-actions">
           <button
             type="button"
+            className="download-comms-zip-btn archive-btn-task-view"
+            onClick={handleDownloadCommsZip}
+            disabled={downloadingCommsZip}
+            title="Download comms (zip)"
+            aria-label="Download comms (zip)"
+          >
+            {downloadingCommsZip ? (
+              <span className="download-comms-zip-spinner" aria-hidden />
+            ) : (
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="7 10 12 15 17 10" />
+                <line x1="12" x2="12" y1="15" y2="3" />
+              </svg>
+            )}
+          </button>
+          <button
+            type="button"
             className="archive-btn archive-btn-task-view"
             onClick={handleArchive}
             disabled={archiving}
@@ -1474,7 +1506,9 @@ export function TaskCommsPageContent({
           </button>
         </div>
       </div>
-      {archiveError && <p className="inline-error">{archiveError}</p>}
+      {(archiveError || downloadCommsZipError) && (
+        <p className="inline-error">{archiveError ?? downloadCommsZipError}</p>
+      )}
       <p><Link to="/">← Back to tasks</Link></p>
       {feedEntries.length === 0 ? (
         <p className="empty">No comms or agent logs yet for this task.</p>

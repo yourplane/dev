@@ -536,6 +536,39 @@
   cursor: not-allowed;
 }
 
+.task-comms .download-comms-zip-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.5rem;
+  height: 2.5rem;
+  padding: 0;
+  border: 2px solid #555;
+  color: #333;
+  background: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.task-comms .download-comms-zip-btn:hover:not(:disabled) {
+  background: #f5f5f5;
+}
+
+.task-comms .download-comms-zip-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.task-comms .download-comms-zip-spinner {
+  display: inline-block;
+  width: 1rem;
+  height: 1rem;
+  border: 2px solid #ddd;
+  border-top-color: #333;
+  border-radius: 50%;
+  animation: command-spin 0.8s linear infinite;
+}
+
 .task-commands {
   margin: 0.75rem 0;
 }
