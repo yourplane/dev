@@ -333,30 +333,20 @@ def post_task_comms(task_name: str, body: PostCommsRequest) -> PostCommsResponse
     return PostCommsResponse(filename=path.name)
 
 
-@app.get("/tasks/{task_name}/comms/{filename}", response_class=PlainTextResponse)
-def get_task_comms_file(task_name: str, filename: str) -> str:
-    """Return raw content of a single comms file. Plain text."""
-    if not filename or "/" in filename or "\\" in filename or filename in (".", ".."):
-        raise HTTPException(status_code=404, detail="Invalid filename")
+@app.get("/tasks/{task_name}/comms/download", response_class=Response)
+def get_task_comms_download(task_name: str) -> Response:
+    """Download all task comms (no agent logs) as a zip file. 404 if no comms."""
     task_dir = _task_dir(task_name)
     cdir = comms_dir(task_dir)
-    path = cdir / filename
-    if not path.is_file() or path.resolve().parent != cdir.resolve():
-        raise HTTPException(status_code=404, detail="File not found")
-    return path.read_text(encoding="utf-8")
-
-
-@app.get("/tasks/{task_name}/comms.zip", response_class=Response)
-def get_task_comms_zip(task_name: str) -> Response:
-    """Download all task comms (no agent logs) as a zip file."""
-    task_dir = _task_dir(task_name)
-    cdir = comms_dir(task_dir)
+    files = read_index(task_dir)
+    if not files:
+        raise HTTPException(status_code=404, detail="No comms to download")
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         idx = index_path(task_dir)
         if idx.exists():
             zf.writestr("index.txt", idx.read_text(encoding="utf-8"))
-        for filename in read_index(task_dir):
+        for filename in files:
             path = cdir / filename
             if path.is_file() and path.resolve().parent == cdir.resolve():
                 zf.writestr(filename, path.read_text(encoding="utf-8"))
@@ -369,6 +359,19 @@ def get_task_comms_zip(task_name: str) -> Response:
             "Content-Disposition": f'attachment; filename="{safe_name}-comms.zip"'
         },
     )
+
+
+@app.get("/tasks/{task_name}/comms/{filename}", response_class=PlainTextResponse)
+def get_task_comms_file(task_name: str, filename: str) -> str:
+    """Return raw content of a single comms file. Plain text."""
+    if not filename or "/" in filename or "\\" in filename or filename in (".", ".."):
+        raise HTTPException(status_code=404, detail="Invalid filename")
+    task_dir = _task_dir(task_name)
+    cdir = comms_dir(task_dir)
+    path = cdir / filename
+    if not path.is_file() or path.resolve().parent != cdir.resolve():
+        raise HTTPException(status_code=404, detail="File not found")
+    return path.read_text(encoding="utf-8")
 
 
 @app.get("/tasks/{task_name}/feed", response_model=ListFeedResponse)

@@ -60,8 +60,8 @@ def test_list_task_feed_with_after(client_with_tasks: TestClient, task_dir: Path
     assert len(resp3.json()["entries"]) == len(entries)
 
 
-def test_comms_zip_returns_only_comms_no_logs(client_with_tasks: TestClient, task_dir: Path) -> None:
-    """GET /tasks/{task_name}/comms.zip returns a zip with comms files only (no agent logs)."""
+def test_comms_download_returns_only_comms_no_logs(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """GET /tasks/{task_name}/comms/download returns a zip with comms files only (no agent logs)."""
     comms_dir(task_dir).mkdir(parents=True)
     index_path(task_dir).write_text("001-user.md\n002-agent-plan.md\n")
     (task_dir / "comms" / "001-user.md").write_text("User message")
@@ -69,7 +69,7 @@ def test_comms_zip_returns_only_comms_no_logs(client_with_tasks: TestClient, tas
     (task_dir / LOGS_DIR).mkdir(parents=True)
     (task_dir / LOGS_DIR / "dev-plan-stream-20260314-120000.log").write_text("agent log content")
 
-    resp = client_with_tasks.get("/tasks/mytask/comms.zip")
+    resp = client_with_tasks.get("/tasks/mytask/comms/download")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/zip"
     assert "mytask-comms.zip" in resp.headers.get("content-disposition", "")
@@ -80,3 +80,10 @@ def test_comms_zip_returns_only_comms_no_logs(client_with_tasks: TestClient, tas
     assert "001-user.md" in names
     assert "002-agent-plan.md" in names
     assert not any(n.endswith(".log") or LOGS_DIR in n for n in names)
+
+
+def test_comms_download_empty_returns_404(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """GET /tasks/{task_name}/comms/download returns 404 when there are no comms."""
+    resp = client_with_tasks.get("/tasks/mytask/comms/download")
+    assert resp.status_code == 404
+    assert "No comms" in resp.json()["detail"]
