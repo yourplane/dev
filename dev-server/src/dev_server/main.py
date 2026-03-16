@@ -1,14 +1,16 @@
 """FastAPI app: create, list, archive tasks."""
 
 import asyncio
+import io
 import os
 import re
 import threading
+import zipfile
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse, StreamingResponse
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from dev_sdk.agent_run import (
@@ -16,7 +18,7 @@ from dev_sdk.agent_run import (
     run_implement,
     run_plan_implement,
 )
-from dev_sdk.comms import add_comms, comms_dir, read_index
+from dev_sdk.comms import add_comms, comms_dir, index_path, read_index
 from dev_sdk.feed import LOGS_DIR, read_feed
 from dev_sdk.create_pr import CreatePRError, create_pull_request
 from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repos
@@ -329,6 +331,34 @@ def post_task_comms(task_name: str, body: PostCommsRequest) -> PostCommsResponse
     task_dir = _task_dir(task_name)
     path = add_comms(task_dir, "user", body.content.strip())
     return PostCommsResponse(filename=path.name)
+
+
+@app.get("/tasks/{task_name}/comms/download", response_class=Response)
+def get_task_comms_download(task_name: str) -> Response:
+    """Download all task comms (no agent logs) as a zip file. 404 if no comms."""
+    task_dir = _task_dir(task_name)
+    cdir = comms_dir(task_dir)
+    files = read_index(task_dir)
+    if not files:
+        raise HTTPException(status_code=404, detail="No comms to download")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        idx = index_path(task_dir)
+        if idx.exists():
+            zf.writestr("index.txt", idx.read_text(encoding="utf-8"))
+        for filename in files:
+            path = cdir / filename
+            if path.is_file() and path.resolve().parent == cdir.resolve():
+                zf.writestr(filename, path.read_text(encoding="utf-8"))
+    buf.seek(0)
+    safe_name = re.sub(r"[^\w\-]", "-", task_name).strip("-") or "comms"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{safe_name}-comms.zip"'
+        },
+    )
 
 
 @app.get("/tasks/{task_name}/comms/{filename}", response_class=PlainTextResponse)

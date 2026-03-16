@@ -200,4 +200,32 @@ export const api = {
     }
     return res.text();
   },
+
+  /**
+   * Download all task comms (no agent logs) as a zip file. Triggers a browser download.
+   */
+  async downloadTaskCommsZip(taskName: string): Promise<void> {
+    const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/comms/download`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const text = await res.text();
+      let detail = text;
+      try {
+        const j = JSON.parse(text);
+        if (typeof j.detail === 'string') detail = j.detail;
+      } catch {
+        // use raw text
+      }
+      throw new Error(detail || `HTTP ${res.status}`);
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get('Content-Disposition');
+    const match = disposition?.match(/filename="?([^";\n]+)"?/);
+    const filename = match?.[1]?.trim() ?? `${taskName}-comms.zip`;
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  },
 };
