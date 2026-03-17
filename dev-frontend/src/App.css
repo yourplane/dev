@@ -717,12 +717,19 @@
 }
 
 
+.feed-entry-header-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .comms-filename,
 .feed-entry-header {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  width: 100%;
+  flex: 1;
+  min-width: 0;
   padding: 0.4rem 0.6rem;
   background: #f5f5f5;
   font-size: 0.9rem;
@@ -735,6 +742,21 @@
 
 .feed-entry-header:hover {
   background: #eee;
+}
+
+.comms-entry-delete-btn {
+  flex-shrink: 0;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+  border: 1px solid #c44;
+  border-radius: 4px;
+  background: #fee;
+  color: #c44;
+  cursor: pointer;
+  font: inherit;
+}
+.comms-entry-delete-btn:hover {
+  background: #fdd;
 }
 
 .feed-entry-chevron {
