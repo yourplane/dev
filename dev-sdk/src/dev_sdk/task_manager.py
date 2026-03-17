@@ -41,8 +41,6 @@ class TaskManager:
         task_name: str,
         comment: str | None,
         repo_url: str,
-        agent_cmd: str = "cursor",
-        agent_create_chat_args: list[str] | None = None,
         on_progress: ProgressCallback | None = None,
     ) -> None:
         """Create task dir, comms dir (and optional first user comment), agent chat, and clone repo."""
@@ -52,7 +50,6 @@ class TaskManager:
             repo_url,
             self.tasks_root / task_name,
         )
-        agent_create_chat_args = agent_create_chat_args or ["agent", "create-chat"]
         task_dir = self.tasks_root / task_name
         task_dir.mkdir(parents=True, exist_ok=False)
         if on_progress:
@@ -68,7 +65,7 @@ class TaskManager:
 
         if on_progress:
             on_progress("Creating agent chat…")
-        chat_id = self._create_agent_chat(agent_cmd, agent_create_chat_args)
+        chat_id = self._create_agent_chat()
         if on_progress:
             on_progress("Agent chat created.")
         self._write_chat_id_file(task_dir, chat_id)
@@ -103,10 +100,8 @@ class TaskManager:
             encoding="utf-8",
         )
 
-    def _create_agent_chat(
-        self, agent_cmd: str, agent_create_chat_args: list[str]
-    ) -> str:
-        cmd = [agent_cmd] + agent_create_chat_args
+    def _create_agent_chat(self) -> str:
+        cmd = ["cursor", "agent", "create-chat"]
         logger.debug("Creating agent chat: cmd=%s", cmd)
         try:
             result = subprocess.run(
@@ -283,8 +278,6 @@ class TaskManager:
         self,
         archived_name: str,
         task_name_override: str | None = None,
-        agent_cmd: str = "cursor",
-        agent_create_chat_args: list[str] | None = None,
     ) -> Path:
         """Create a new task from an archived task: same name and comms, new agent chat, no logs.
         Copies comms/, .cursor/rules/, and any cloned repo dirs. Does not copy .logs/ or agent-chat-id.
@@ -327,8 +320,7 @@ class TaskManager:
             ):
                 shutil.copytree(p, dest / p.name)
         # New agent chat for the new task
-        agent_create_chat_args = agent_create_chat_args or ["agent", "create-chat"]
-        chat_id = self._create_agent_chat(agent_cmd, agent_create_chat_args)
+        chat_id = self._create_agent_chat()
         self._write_chat_id_file(dest, chat_id)
         # Ensure cursor rules exist if we only had partial copy
         if not (dest / ".cursor" / "rules" / "git-workspace.mdc").exists():

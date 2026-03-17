@@ -23,7 +23,6 @@ from dev_sdk.task_manager import TaskManager
 
 TASKS_ROOT = Path.home() / "tasks"
 AGENT_CMD = "cursor"
-AGENT_CREATE_CHAT_ARGS = ["agent", "create-chat"]
 
 
 def _task_dir_from_options(
@@ -256,8 +255,6 @@ def start_task(
             task_name=name,
             comment=comment,
             repo_url=repo_url,
-            agent_cmd=AGENT_CMD,
-            agent_create_chat_args=AGENT_CREATE_CHAT_ARGS,
             on_progress=click.echo,
         )
         task_dir = tasks_dir / name
