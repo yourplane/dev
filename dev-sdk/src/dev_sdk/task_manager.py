@@ -278,3 +278,62 @@ class TaskManager:
             raise FileExistsError(f"Task already exists: {task_name}")
         shutil.move(str(src), str(dest))
         return dest
+
+    def copy_task_from_archive(
+        self,
+        archived_name: str,
+        task_name_override: str | None = None,
+        agent_cmd: str = "cursor",
+        agent_create_chat_args: list[str] | None = None,
+    ) -> Path:
+        """Create a new task from an archived task: same name and comms, new agent chat, no logs.
+        Copies comms/, .cursor/rules/, and any cloned repo dirs. Does not copy .logs/ or agent-chat-id.
+        """
+        archived_name = archived_name.strip("/")
+        if not archived_name or ".." in archived_name or "/" in archived_name or "\\" in archived_name:
+            raise FileNotFoundError(f"Invalid archive name: {archived_name}")
+        archive_root = self.tasks_root / ".archive"
+        src = (archive_root / archived_name).resolve()
+        if not src.is_dir() or src.parent != archive_root.resolve():
+            raise FileNotFoundError(f"Archived task not found: {archived_name}")
+        task_name, _ = self.parse_archive_name(archived_name)
+        if task_name_override is not None and task_name_override.strip():
+            task_name = task_name_override.strip()
+        if not task_name:
+            raise FileNotFoundError(f"Invalid archive name: {archived_name}")
+        dest = self.tasks_root / task_name
+        if dest.exists():
+            raise FileExistsError(f"Task already exists: {task_name}")
+        dest.mkdir(parents=True)
+        # Copy comms (entire dir)
+        src_comms = src / "comms"
+        if src_comms.is_dir():
+            shutil.copytree(src_comms, dest / "comms")
+        # Copy .cursor/rules
+        src_rules = src / ".cursor" / "rules"
+        if src_rules.is_dir():
+            (dest / ".cursor").mkdir(parents=True, exist_ok=True)
+            shutil.copytree(src_rules, dest / ".cursor" / "rules")
+        else:
+            self._write_cursor_rules(dest)
+            self._ensure_comms_dir(dest)
+        # Copy any cloned repo dirs (directories containing .git, excluding comms and .cursor)
+        for p in src.iterdir():
+            if (
+                p.is_dir()
+                and not p.name.startswith(".")
+                and p.name not in ("comms", ".cursor")
+                and (p / ".git").is_dir()
+            ):
+                shutil.copytree(p, dest / p.name)
+        # New agent chat for the new task
+        agent_create_chat_args = agent_create_chat_args or ["agent", "create-chat"]
+        chat_id = self._create_agent_chat(agent_cmd, agent_create_chat_args)
+        self._write_chat_id_file(dest, chat_id)
+        # Ensure cursor rules exist if we only had partial copy
+        if not (dest / ".cursor" / "rules" / "git-workspace.mdc").exists():
+            self._write_cursor_rules(dest)
+        if not (dest / ".cursor" / "rules" / "task-comms.mdc").exists():
+            self._ensure_comms_dir(dest)
+        logger.debug("copy_task_from_archive: completed task_name=%s", task_name)
+        return dest

@@ -8,7 +8,7 @@ import threading
 import zipfile
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from pydantic import BaseModel, Field
@@ -130,6 +130,15 @@ class ListArchiveResponse(BaseModel):
 
 class UnarchiveTaskResponse(BaseModel):
     restored_task_name: str
+
+
+class CopyFromArchiveRequest(BaseModel):
+    task_name: str | None = Field(None, description="Override task name (default: base name from archive)")
+
+
+class CopyFromArchiveResponse(BaseModel):
+    task_name: str
+    task_dir: str
 
 
 class ListCommsResponse(BaseModel):
@@ -374,6 +383,24 @@ def unarchive_task(archived_name: str) -> UnarchiveTaskResponse:
     try:
         dest = manager.unarchive_task(archived_name)
         return UnarchiveTaskResponse(restored_task_name=dest.name)
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except FileExistsError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.post("/archive/{archived_name}/copy", response_model=CopyFromArchiveResponse, status_code=201)
+def copy_from_archive(
+    archived_name: str, body: CopyFromArchiveRequest | None = Body(None)
+) -> CopyFromArchiveResponse:
+    """Create a new task from an archived task: same name and comms, new agent chat, no logs."""
+    if not archived_name or ".." in archived_name or "/" in archived_name or "\\" in archived_name:
+        raise HTTPException(status_code=404, detail="Invalid archive name")
+    manager = _get_manager()
+    task_name_override = body.task_name if body and body.task_name else None
+    try:
+        dest = manager.copy_task_from_archive(archived_name, task_name_override=task_name_override)
+        return CopyFromArchiveResponse(task_name=dest.name, task_dir=str(dest))
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except FileExistsError as e:
