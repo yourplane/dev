@@ -30,7 +30,7 @@ cd dev-frontend
 npm run dev
 ```
 
-Open http://localhost:5173. All API calls go through the frontend origin via the proxy. You can list tasks, create a task (title, repo shorthand or custom URL, optional description, optional task name), and archive tasks. Repo shorthands are configured via the CLI (`dev repos add <name> <url>`) and stored in `~/.config/dev/repos.json`; the create form fetches them from `GET /repos`.
+Open http://localhost:5173. All API calls go through the frontend origin via the proxy. You can list tasks, create a task (title, repo shorthand or custom URL, optional description, optional task name), archive tasks, and on the Archive page **copy from archive** (creates a new task with the same name and comms, new agent chat and no old logs) or unarchive. Repo shorthands are configured via the CLI (`dev repos add <name> <url>`) and stored in `~/.config/dev/repos.json`; the create form fetches them from `GET /repos`.
 
 ## Build
 

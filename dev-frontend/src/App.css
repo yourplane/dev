@@ -228,6 +228,24 @@
   cursor: not-allowed;
 }
 
+.copy-from-archive-btn {
+  padding: 0.35rem 0.65rem;
+  border: 1px solid #36c;
+  border-radius: 6px;
+  background: #e8eeff;
+  color: #36c;
+  font-size: inherit;
+  cursor: pointer;
+  margin-right: 0.5rem;
+}
+.copy-from-archive-btn:hover:not(:disabled) {
+  background: #d0dcff;
+}
+.copy-from-archive-btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
 .archive-restored {
   margin: 0 0 0.5rem;
   padding: 0.4rem 0;

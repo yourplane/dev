@@ -63,6 +63,11 @@ export interface UnarchiveTaskResponse {
   restored_task_name: string;
 }
 
+export interface CopyFromArchiveResponse {
+  task_name: string;
+  task_dir: string;
+}
+
 export const api = {
   getTasks(): Promise<{ tasks: string[] }> {
     return request('/tasks');
@@ -144,6 +149,16 @@ export const api = {
   unarchiveTask(archivedName: string): Promise<UnarchiveTaskResponse> {
     return request(`/archive/${encodeURIComponent(archivedName)}/unarchive`, {
       method: 'POST',
+    });
+  },
+
+  copyFromArchive(
+    archivedName: string,
+    taskName?: string
+  ): Promise<CopyFromArchiveResponse> {
+    return request(`/archive/${encodeURIComponent(archivedName)}/copy`, {
+      method: 'POST',
+      body: taskName ? JSON.stringify({ task_name: taskName }) : '{}',
     });
   },
 

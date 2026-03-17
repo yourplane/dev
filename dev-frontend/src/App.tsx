@@ -203,6 +203,9 @@ function ArchivePage() {
   const [unarchiving, setUnarchiving] = useState<string | null>(null)
   const [unarchiveError, setUnarchiveError] = useState<string | null>(null)
   const [restoredTask, setRestoredTask] = useState<string | null>(null)
+  const [copyFromArchiveLoading, setCopyFromArchiveLoading] = useState<string | null>(null)
+  const [copyFromArchiveError, setCopyFromArchiveError] = useState<string | null>(null)
+  const [copiedTask, setCopiedTask] = useState<string | null>(null)
 
   const loadArchive = useCallback(async () => {
     setError(null)
@@ -242,6 +245,21 @@ function ArchivePage() {
     }
   }
 
+  const handleCopyFromArchive = async (archivedName: string) => {
+    if (!confirm('Create a new task from this archive? Same name and comms, new agent chat and no old logs.')) return
+    setCopyFromArchiveError(null)
+    setCopyFromArchiveLoading(archivedName)
+    setCopiedTask(null)
+    try {
+      const res = await api.copyFromArchive(archivedName)
+      setCopiedTask(res.task_name)
+    } catch (e) {
+      setCopyFromArchiveError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setCopyFromArchiveLoading(null)
+    }
+  }
+
   const byDate = entries.reduce<Record<string, typeof entries>>((acc, e) => {
     const d = e.archived_date || 'unknown'
     if (!acc[d]) acc[d] = []
@@ -264,10 +282,17 @@ function ArchivePage() {
     <section className="archive-view">
       <h2>Archive</h2>
       <p><Link to="/">← Back to tasks</Link></p>
-      {unarchiveError && <p className="inline-error">{unarchiveError}</p>}
+      {(unarchiveError || copyFromArchiveError) && (
+        <p className="inline-error">{unarchiveError ?? copyFromArchiveError}</p>
+      )}
       {restoredTask && (
         <p className="archive-restored">
           Restored. <Link to={`/task/${encodeURIComponent(restoredTask)}`}>Open {restoredTask}</Link>
+        </p>
+      )}
+      {copiedTask && (
+        <p className="archive-restored">
+          Task created. <Link to={`/task/${encodeURIComponent(copiedTask)}`}>Open {copiedTask}</Link>
         </p>
       )}
       {entries.length === 0 ? (
@@ -281,6 +306,15 @@ function ArchivePage() {
                 {byDate[dateKey].map((e) => (
                   <li key={e.archived_name} className="task-row">
                     <span className="task-name">{e.task_name}</span>
+                    <button
+                      type="button"
+                      className="copy-from-archive-btn"
+                      onClick={() => handleCopyFromArchive(e.archived_name)}
+                      disabled={copyFromArchiveLoading === e.archived_name}
+                      title="Create a new task with the same name and comms, new agent chat and no old logs"
+                    >
+                      {copyFromArchiveLoading === e.archived_name ? 'Copying…' : 'Copy from archive'}
+                    </button>
                     <button
                       type="button"
                       className="unarchive-btn"

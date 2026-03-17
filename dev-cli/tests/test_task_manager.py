@@ -76,8 +76,6 @@ def test_start_task(
         task_name="my-task",
         comment="Build the feature.",
         repo_url="https://github.com/user/repo.git",
-        agent_cmd="cursor",
-        agent_create_chat_args=["agent", "create-chat"],
     )
 
     task_dir = tmp_tasks_root / "my-task"
@@ -138,8 +136,6 @@ def test_start_task_calls_on_progress(
         task_name="my-task",
         comment="Build the feature.",
         repo_url="https://github.com/user/repo.git",
-        agent_cmd="cursor",
-        agent_create_chat_args=["agent", "create-chat"],
         on_progress=messages.append,
     )
 

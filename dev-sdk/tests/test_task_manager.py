@@ -75,8 +75,6 @@ def test_start_task(
         task_name="my-task",
         comment="Build the feature.",
         repo_url="https://github.com/user/repo.git",
-        agent_cmd="cursor",
-        agent_create_chat_args=["agent", "create-chat"],
     )
 
     task_dir = tmp_tasks_root / "my-task"
@@ -126,8 +124,6 @@ def test_start_task_calls_on_progress(
         task_name="my-task",
         comment="Build the feature.",
         repo_url="https://github.com/user/repo.git",
-        agent_cmd="cursor",
-        agent_create_chat_args=["agent", "create-chat"],
         on_progress=messages.append,
     )
 
@@ -275,3 +271,110 @@ def test_unarchive_task_not_found_raises(manager: TaskManager, tmp_tasks_root: P
     (tmp_tasks_root / ".archive").mkdir()
     with pytest.raises(FileNotFoundError, match="Archived task not found"):
         manager.unarchive_task("nonexistent-mar-14-abcdef")
+
+
+@patch("dev_sdk.task_manager.subprocess.run")
+def test_copy_task_from_archive(
+    mock_run: MagicMock,
+    manager: TaskManager,
+    tmp_tasks_root: Path,
+) -> None:
+    tmp_tasks_root.mkdir(parents=True)
+    archive_root = tmp_tasks_root / ".archive"
+    archive_root.mkdir()
+    archived = archive_root / "my-task-mar-14-a1b2c3"
+    archived.mkdir()
+    (archived / "comms").mkdir()
+    (archived / "comms" / "index.txt").write_text("001-user.md\n")
+    (archived / "comms" / "001-user.md").write_text("# Task\n")
+    (archived / ".cursor" / "rules").mkdir(parents=True)
+    (archived / ".cursor" / "rules" / "task-comms.mdc").write_text("rule")
+    (archived / ".cursor" / "rules" / "git-workspace.mdc").write_text("git rule")
+    (archived / ".logs").mkdir()
+    (archived / ".logs" / "dev-plan-stream-20260314.log").write_text("log content")
+    (archived / "agent-chat-id").write_text("old-chat-id")
+    mock_run.return_value = MagicMock(stdout="new-chat-id-789\n", stderr="", returncode=0)
+
+    dest = manager.copy_task_from_archive("my-task-mar-14-a1b2c3")
+
+    assert dest == tmp_tasks_root / "my-task"
+    assert dest.is_dir()
+    assert (dest / "comms" / "index.txt").read_text() == "001-user.md\n"
+    assert (dest / "comms" / "001-user.md").read_text() == "# Task\n"
+    assert (dest / ".cursor" / "rules" / "task-comms.mdc").exists()
+    assert (dest / ".cursor" / "rules" / "git-workspace.mdc").exists()
+    assert not (dest / ".logs").exists()
+    assert (dest / "agent-chat-id").read_text().strip() == "new-chat-id-789"
+    assert archived.is_dir()
+
+
+@patch("dev_sdk.task_manager.subprocess.run")
+def test_copy_task_from_archive_copies_repo(
+    mock_run: MagicMock,
+    manager: TaskManager,
+    tmp_tasks_root: Path,
+) -> None:
+    tmp_tasks_root.mkdir(parents=True)
+    archive_root = tmp_tasks_root / ".archive"
+    archive_root.mkdir()
+    archived = archive_root / "foo-mar-14-abcdef"
+    archived.mkdir()
+    (archived / "comms").mkdir()
+    (archived / "comms" / "index.txt").write_text("")
+    repo_dir = archived / "myrepo"
+    repo_dir.mkdir()
+    (repo_dir / ".git").mkdir()
+    (repo_dir / "README").write_text("repo content")
+    mock_run.return_value = MagicMock(stdout="chat-id\n", stderr="", returncode=0)
+
+    dest = manager.copy_task_from_archive("foo-mar-14-abcdef")
+
+    assert (dest / "myrepo").is_dir()
+    assert (dest / "myrepo" / ".git").is_dir()
+    assert (dest / "myrepo" / "README").read_text() == "repo content"
+
+
+@patch("dev_sdk.task_manager.subprocess.run")
+def test_copy_task_from_archive_target_exists_raises(
+    mock_run: MagicMock,
+    manager: TaskManager,
+    tmp_tasks_root: Path,
+) -> None:
+    tmp_tasks_root.mkdir(parents=True)
+    (tmp_tasks_root / "my-task").mkdir()
+    archive_root = tmp_tasks_root / ".archive"
+    archive_root.mkdir()
+    (archive_root / "my-task-mar-14-a1b2c3").mkdir()
+    (archive_root / "my-task-mar-14-a1b2c3" / "comms").mkdir()
+    (archive_root / "my-task-mar-14-a1b2c3" / "comms" / "index.txt").write_text("")
+
+    with pytest.raises(FileExistsError, match="Task already exists"):
+        manager.copy_task_from_archive("my-task-mar-14-a1b2c3")
+
+
+def test_copy_task_from_archive_not_found_raises(manager: TaskManager, tmp_tasks_root: Path) -> None:
+    tmp_tasks_root.mkdir(parents=True)
+    (tmp_tasks_root / ".archive").mkdir()
+    with pytest.raises(FileNotFoundError, match="Archived task not found"):
+        manager.copy_task_from_archive("nonexistent-mar-14-abcdef")
+
+
+@patch("dev_sdk.task_manager.subprocess.run")
+def test_copy_task_from_archive_task_name_override(
+    mock_run: MagicMock,
+    manager: TaskManager,
+    tmp_tasks_root: Path,
+) -> None:
+    tmp_tasks_root.mkdir(parents=True)
+    archive_root = tmp_tasks_root / ".archive"
+    archive_root.mkdir()
+    archived = archive_root / "original-mar-14-a1b2c3"
+    archived.mkdir()
+    (archived / "comms").mkdir()
+    (archived / "comms" / "index.txt").write_text("")
+    mock_run.return_value = MagicMock(stdout="chat-id\n", stderr="", returncode=0)
+
+    dest = manager.copy_task_from_archive("original-mar-14-a1b2c3", task_name_override="new-name")
+
+    assert dest == tmp_tasks_root / "new-name"
+    assert dest.is_dir()
