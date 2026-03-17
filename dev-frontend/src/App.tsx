@@ -615,6 +615,8 @@ const FeedEntryRow = memo(function FeedEntryRow({
   activeLogFilename,
   isLast,
   lastEntryRef,
+  canDeleteComms,
+  onDeleteComms,
 }: {
   entry: { type: string; id: string; created_at: number }
   contents: Record<string, string>
@@ -626,6 +628,8 @@ const FeedEntryRow = memo(function FeedEntryRow({
   activeLogFilename: string | null
   isLast: boolean
   lastEntryRef: React.RefObject<HTMLDivElement | null>
+  canDeleteComms?: boolean
+  onDeleteComms?: (filename: string) => void
 }) {
   useEffect(() => {
     if (!isCollapsed && contents[entry.id] === undefined && !loadingContentKeys.has(entryKey)) {
@@ -643,17 +647,30 @@ const FeedEntryRow = memo(function FeedEntryRow({
       ref={isLast ? lastEntryRef : undefined}
       className={entry.type === 'log' ? 'feed-entry feed-log-entry' : 'comms-entry'}
     >
-      <button
-        type="button"
-        className="feed-entry-header"
-        onClick={() => toggleCollapsed(entryKey)}
-        aria-expanded={!isCollapsed}
-      >
-        <span className="feed-entry-chevron" aria-hidden>
-          {isCollapsed ? '▶' : '▼'}
-        </span>
-        <span className="feed-entry-title">{title}</span>
-      </button>
+      <div className="feed-entry-header-row">
+        <button
+          type="button"
+          className="feed-entry-header"
+          onClick={() => toggleCollapsed(entryKey)}
+          aria-expanded={!isCollapsed}
+        >
+          <span className="feed-entry-chevron" aria-hidden>
+            {isCollapsed ? '▶' : '▼'}
+          </span>
+          <span className="feed-entry-title">{title}</span>
+        </button>
+        {entry.type === 'comms' && canDeleteComms && onDeleteComms && (
+          <button
+            type="button"
+            className="comms-entry-delete-btn"
+            onClick={() => onDeleteComms(entry.id)}
+            aria-label="Remove comms entry"
+            title="Remove this comms entry"
+          >
+            Remove
+          </button>
+        )}
+      </div>
       {!isCollapsed && (
         <div className="comms-content">
           {entry.type === 'log' ? (
@@ -1115,6 +1132,7 @@ export function TaskCommsPageContent({
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [downloadingCommsZip, setDownloadingCommsZip] = useState(false)
   const [downloadCommsZipError, setDownloadCommsZipError] = useState<string | null>(null)
+  const [deleteCommsError, setDeleteCommsError] = useState<string | null>(null)
   const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set())
   const [loadingContentKeys, setLoadingContentKeys] = useState<Set<string>>(new Set())
   const [commentDraftStatus, setCommentDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
@@ -1261,6 +1279,26 @@ export function TaskCommsPageContent({
         setError(e instanceof Error ? e.message : String(e))
       } finally {
         setLoading(false)
+      }
+    },
+    [taskName]
+  )
+
+  const canDeleteComms = feedEntries.length > 0 && !feedEntries.some((e) => e.type === 'log')
+  const handleDeleteComms = useCallback(
+    async (filename: string) => {
+      if (!confirm('Remove this comms entry?')) return
+      setDeleteCommsError(null)
+      try {
+        await api.deleteCommsFile(taskName, filename)
+        setFeedEntries((prev) => prev.filter((e) => !(e.type === 'comms' && e.id === filename)))
+        setContents((prev) => {
+          const next = { ...prev }
+          delete next[filename]
+          return next
+        })
+      } catch (e) {
+        setDeleteCommsError(e instanceof Error ? e.message : String(e))
       }
     },
     [taskName]
@@ -1559,8 +1597,8 @@ export function TaskCommsPageContent({
           </button>
         </div>
       </div>
-      {(archiveError || downloadCommsZipError) && (
-        <p className="inline-error">{archiveError ?? downloadCommsZipError}</p>
+      {(archiveError || downloadCommsZipError || deleteCommsError) && (
+        <p className="inline-error">{archiveError ?? downloadCommsZipError ?? deleteCommsError}</p>
       )}
       <p><Link to="/">← Back to tasks</Link></p>
       {feedEntries.length === 0 ? (
@@ -1583,6 +1621,8 @@ export function TaskCommsPageContent({
                 activeLogFilename={activeLogFilename}
                 isLast={isLast}
                 lastEntryRef={lastCommsEntryRef}
+                canDeleteComms={canDeleteComms}
+                onDeleteComms={handleDeleteComms}
               />
             )
           })}

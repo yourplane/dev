@@ -11,7 +11,7 @@ from dev_sdk.agent_run import (
     run_plan_test,
     run_test,
 )
-from dev_sdk.comms import add_comms, comms_dir, read_index
+from dev_sdk.comms import add_comms, comms_dir, has_agent_logs, read_index, remove_comms
 from dev_sdk.create_pr import CreatePRError, create_pull_request
 from dev_sdk.task_manager import TaskManager
 
@@ -22,7 +22,9 @@ __all__ = [
     "TaskManager",
     "add_comms",
     "comms_dir",
+    "has_agent_logs",
     "read_index",
+    "remove_comms",
     "run_implement",
     "run_plan_implement",
     "run_plan_test",

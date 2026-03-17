@@ -166,6 +166,13 @@ export const api = {
     return request(`/tasks/${encodeURIComponent(taskName)}/comms`);
   },
 
+  deleteCommsFile(taskName: string, filename: string): Promise<void> {
+    return request(`/tasks/${encodeURIComponent(taskName)}/comms/${encodeURIComponent(filename)}`, {
+      method: 'DELETE',
+      parseJson: false,
+    });
+  },
+
   getTaskFeed(
     taskName: string,
     opts?: { after?: number }

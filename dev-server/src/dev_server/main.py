@@ -18,7 +18,7 @@ from dev_sdk.agent_run import (
     run_implement,
     run_plan_implement,
 )
-from dev_sdk.comms import add_comms, comms_dir, index_path, read_index
+from dev_sdk.comms import add_comms, comms_dir, index_path, read_index, remove_comms
 from dev_sdk.drafts import (
     get_new_task_draft,
     get_task_comment_draft,
@@ -463,6 +463,20 @@ def get_task_comms_file(task_name: str, filename: str) -> str:
     if not path.is_file() or path.resolve().parent != cdir.resolve():
         raise HTTPException(status_code=404, detail="File not found")
     return path.read_text(encoding="utf-8")
+
+
+@app.delete("/tasks/{task_name}/comms/{filename}", status_code=204)
+def delete_task_comms_file(task_name: str, filename: str) -> None:
+    """Remove a comms file and its index entry. Not allowed when the task has agent logs."""
+    if not filename or "/" in filename or "\\" in filename or filename.strip() in ("", ".", ".."):
+        raise HTTPException(status_code=404, detail="Invalid filename")
+    task_dir = _task_dir(task_name)
+    try:
+        remove_comms(task_dir, filename)
+    except ValueError as e:
+        if "agent logs" in str(e).lower():
+            raise HTTPException(status_code=400, detail=str(e)) from e
+        raise HTTPException(status_code=404, detail=str(e)) from e
 
 
 @app.get("/tasks/{task_name}/feed", response_model=ListFeedResponse)

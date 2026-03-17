@@ -4,6 +4,7 @@ from pathlib import Path
 
 COMMS_DIR = "comms"
 INDEX_FILE = "index.txt"
+LOGS_DIR = ".logs"
 
 
 def comms_dir(task_dir: Path) -> Path:
@@ -87,3 +88,31 @@ def read_comms_content(task_dir: Path) -> str:
         if p.exists():
             parts.append(p.read_text(encoding="utf-8").strip())
     return "\n\n---\n\n".join(parts) if parts else ""
+
+
+def has_agent_logs(task_dir: Path) -> bool:
+    """Return True if the task has at least one agent log file in .logs/."""
+    logs_dir = task_dir / LOGS_DIR
+    if not logs_dir.is_dir():
+        return False
+    return any(p.is_file() and p.suffix == ".log" for p in logs_dir.iterdir())
+
+
+def remove_comms(task_dir: Path, filename: str) -> None:
+    """Remove a comms file and its index entry. Not allowed when the task has agent logs."""
+    if not filename or "/" in filename or "\\" in filename or filename.strip() in ("", ".", ".."):
+        raise ValueError("Invalid filename")
+    filename = filename.strip()
+    if has_agent_logs(task_dir):
+        raise ValueError("Cannot remove comms when the task has agent logs")
+    cdir = comms_dir(task_dir)
+    path = (cdir / filename).resolve()
+    if not path.parent.resolve().samefile(cdir.resolve()):
+        raise ValueError("Invalid filename")
+    if path.is_file():
+        path.unlink()
+    idx = index_path(task_dir)
+    if idx.exists():
+        lines = [line.strip() for line in idx.read_text(encoding="utf-8").splitlines() if line.strip()]
+        new_lines = [line for line in lines if line != filename]
+        idx.write_text("\n".join(new_lines) + ("\n" if new_lines else ""), encoding="utf-8")
