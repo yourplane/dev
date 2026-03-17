@@ -1291,17 +1291,17 @@ export function TaskCommsPageContent({
       setDeleteCommsError(null)
       try {
         await api.deleteCommsFile(taskName, filename)
+        setFeedEntries((prev) => prev.filter((e) => !(e.type === 'comms' && e.id === filename)))
         setContents((prev) => {
           const next = { ...prev }
           delete next[filename]
           return next
         })
-        await loadFeed()
       } catch (e) {
         setDeleteCommsError(e instanceof Error ? e.message : String(e))
       }
     },
-    [taskName, loadFeed]
+    [taskName]
   )
 
   useEffect(() => {
