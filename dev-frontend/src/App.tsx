@@ -1176,26 +1176,6 @@ export function TaskCommsPageContent({
     }
   }
 
-  const canDeleteComms = feedEntries.length > 0 && !feedEntries.some((e) => e.type === 'log')
-  const handleDeleteComms = useCallback(
-    async (filename: string) => {
-      if (!confirm('Remove this comms entry?')) return
-      setDeleteCommsError(null)
-      try {
-        await api.deleteCommsFile(taskName, filename)
-        setContents((prev) => {
-          const next = { ...prev }
-          delete next[filename]
-          return next
-        })
-        await loadFeed()
-      } catch (e) {
-        setDeleteCommsError(e instanceof Error ? e.message : String(e))
-      }
-    },
-    [taskName, loadFeed]
-  )
-
   const loadCommandStatus = useCallback(async () => {
     try {
       const res = await api.getTaskCommandStatus(taskName)
@@ -1302,6 +1282,26 @@ export function TaskCommsPageContent({
       }
     },
     [taskName]
+  )
+
+  const canDeleteComms = feedEntries.length > 0 && !feedEntries.some((e) => e.type === 'log')
+  const handleDeleteComms = useCallback(
+    async (filename: string) => {
+      if (!confirm('Remove this comms entry?')) return
+      setDeleteCommsError(null)
+      try {
+        await api.deleteCommsFile(taskName, filename)
+        setContents((prev) => {
+          const next = { ...prev }
+          delete next[filename]
+          return next
+        })
+        await loadFeed()
+      } catch (e) {
+        setDeleteCommsError(e instanceof Error ? e.message : String(e))
+      }
+    },
+    [taskName, loadFeed]
   )
 
   useEffect(() => {
