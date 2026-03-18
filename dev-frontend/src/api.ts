@@ -222,12 +222,14 @@ export const api = {
 
   startTaskCommand(
     taskName: string,
-    command: string
+    command: string,
+    prompt?: string
   ): Promise<{ command: string; status: string }> {
+    const body = prompt != null ? { command, prompt } : { command }
     return request(`/tasks/${encodeURIComponent(taskName)}/commands`, {
       method: 'POST',
-      body: JSON.stringify({ command }),
-    });
+      body: JSON.stringify(body),
+    })
   },
 
   cancelTaskCommand(taskName: string): Promise<void> {

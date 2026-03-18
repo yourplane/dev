@@ -94,6 +94,59 @@ def test_start_unsupported_command_returns_400(client_with_tasks: TestClient) ->
     assert "Unsupported" in resp.json()["detail"]
 
 
+def test_start_do_requires_prompt_returns_400(client_with_tasks: TestClient) -> None:
+    """Starting do without prompt returns 400."""
+    resp = client_with_tasks.post("/tasks/mytask/commands", json={"command": "do"})
+    assert resp.status_code == 400
+    assert "prompt" in resp.json()["detail"].lower()
+
+
+def test_start_do_empty_prompt_returns_400(client_with_tasks: TestClient) -> None:
+    """Starting do with empty prompt returns 400."""
+    resp = client_with_tasks.post("/tasks/mytask/commands", json={"command": "do", "prompt": "   "})
+    assert resp.status_code == 400
+    assert "prompt" in resp.json()["detail"].lower()
+
+
+def test_start_do_returns_201_and_status_active(
+    client_with_tasks: TestClient, task_dir: Path
+) -> None:
+    """Starting do returns 201 and GET status shows active while the run is blocking."""
+    block = threading.Event()
+    received: dict[str, object] = {}
+
+    def blocking_run_do(*args: object, **kwargs: object) -> None:
+        received["prompt"] = kwargs.get("prompt")
+        # The real runner would call on_start; this mock intentionally blocks.
+        block.wait()
+        block.set()
+
+    with patch("dev_server.main.run_do", side_effect=blocking_run_do):
+        resp = client_with_tasks.post(
+            "/tasks/mytask/commands",
+            json={"command": "do", "prompt": "DO-PROMPT"},
+        )
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["command"] == "do"
+    assert data["status"] == "running"
+    assert received["prompt"] == "DO-PROMPT"
+
+    resp2 = client_with_tasks.get("/tasks/mytask/commands")
+    assert resp2.status_code == 200
+    assert resp2.json()["active"] is True
+    assert resp2.json()["command"] == "do"
+    assert "active_log_filename" in resp2.json()
+
+    # Release the blocking runner and wait for command completion.
+    block.set()
+    time.sleep(0.3)
+    resp3 = client_with_tasks.get("/tasks/mytask/commands")
+    assert resp3.status_code == 200
+    assert resp3.json()["active"] is False
+
+
 def test_get_commands_404_for_nonexistent_task(client_with_tasks: TestClient) -> None:
     """GET commands for nonexistent task returns 404."""
     resp = client_with_tasks.get("/tasks/nonexistent/commands")
