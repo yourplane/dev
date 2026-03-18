@@ -602,6 +602,7 @@ function CreateTaskForm({
 const COMMAND_LABEL: Record<string, string> = {
   'plan-implement': 'Plan',
   implement: 'Implement',
+  do: 'Do',
 }
 
 const FeedEntryRow = memo(function FeedEntryRow({
@@ -1470,6 +1471,27 @@ export function TaskCommsPageContent({
     }
   }
 
+  const handleDoFromComment = async () => {
+    const prompt = commentText.trim()
+    if (!prompt) return
+    setPostError(null)
+    setCommandError(null)
+    setStartingCommand('do')
+    try {
+      await api.startTaskCommand(taskName, 'do', prompt)
+      // loadCommandStatus will populate activeCommand/activeLogFilename via polling,
+      // but we call it once now so the UI updates immediately.
+      await loadCommandStatus()
+      setCommentText('')
+      lastSavedCommentRef.current = ''
+      setScrollToBottomAfterLoad(true)
+    } catch (e) {
+      setCommandError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setStartingCommand(null)
+    }
+  }
+
   const PROGRAMMATIC_SCROLL_MS = 150
   const PROGRAMMATIC_SCROLL_SMOOTH_MS = 800
 
@@ -1725,6 +1747,14 @@ export function TaskCommsPageContent({
         <div className="form-actions">
           <button type="submit" disabled={posting || !commentText.trim()}>
             {posting ? 'Posting…' : 'Post comment'}
+          </button>
+          <button
+            type="button"
+            className="do-btn command-btn"
+            disabled={posting || !commentText.trim() || !!startingCommand || !!activeCommand}
+            onClick={handleDoFromComment}
+          >
+            {startingCommand === 'do' ? 'Starting…' : 'Do'}
           </button>
         </div>
       </form>

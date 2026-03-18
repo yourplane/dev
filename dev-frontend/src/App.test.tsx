@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
+import { fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { Layout, TaskCommsPageContent } from './App'
 
@@ -62,5 +63,34 @@ describe('App', () => {
     await waitFor(() => {
       expect(container.textContent?.toLowerCase()).toMatch(/comms|loading/)
     }, { timeout: 2000 })
+  })
+
+  it('clicking Do runs do command with textarea prompt and clears textarea', async () => {
+    const noop = () => {}
+    const { api } = await import('./api')
+    vi.mocked(api.startTaskCommand).mockResolvedValue({ command: 'do', status: 'running' })
+
+    render(
+      <MemoryRouter>
+        <TaskCommsPageContent taskName="test-task" navigate={noop} />
+      </MemoryRouter>
+    )
+
+    const textarea = await screen.findByPlaceholderText('Write a comment…')
+    const doButton = await screen.findByRole('button', { name: 'Do' })
+
+    fireEvent.change(textarea, { target: { value: 'DO-PROMPT' } })
+    await waitFor(() => {
+      expect((doButton as HTMLButtonElement).disabled).toBe(false)
+    })
+    fireEvent.click(doButton)
+
+    await waitFor(() => {
+      expect(vi.mocked(api.startTaskCommand)).toHaveBeenCalledWith('test-task', 'do', 'DO-PROMPT')
+    })
+
+    await waitFor(() => {
+      expect((textarea as HTMLTextAreaElement).value).toBe('')
+    })
   })
 })

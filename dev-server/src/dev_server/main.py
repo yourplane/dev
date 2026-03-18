@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from dev_sdk.agent_run import (
     AgentRunError,
     run_implement,
+    run_do,
     run_plan_implement,
 )
 from dev_sdk.comms import add_comms, comms_dir, index_path, read_index, remove_comms
@@ -30,7 +31,7 @@ from dev_sdk.create_pr import CreatePRError, create_pull_request, find_existing_
 from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repos
 from dev_sdk.task_manager import ArchivedTaskEntry, TaskManager
 
-SUPPORTED_COMMANDS = ("plan-implement", "implement")
+SUPPORTED_COMMANDS = ("plan-implement", "implement", "do")
 
 # In-memory registry: task_name -> { "command_id", "thread" }
 _command_registry: dict[str, dict] = {}
@@ -42,6 +43,7 @@ def _run_command_in_thread(
     command_id: str,
     task_dir: Path,
     cancel_requested: threading.Event,
+    prompt: str | None,
 ) -> None:
     """Run run_plan_implement or run_implement in this thread; clear registry when done."""
 
@@ -53,8 +55,14 @@ def _run_command_in_thread(
     try:
         if command_id == "plan-implement":
             run_plan_implement(task_dir, on_start=on_start, cancel_event=cancel_requested)
-        else:
+        elif command_id == "implement":
             run_implement(task_dir, on_start=on_start, cancel_event=cancel_requested)
+        else:
+            # "do" command
+            if prompt is None or not prompt.strip():
+                # Defensive: request validation should prevent this.
+                raise AgentRunError("Missing prompt for do command.")
+            run_do(task_dir, prompt=prompt, on_start=on_start, cancel_event=cancel_requested)
     except AgentRunError:
         pass
     finally:
@@ -154,7 +162,11 @@ class PostCommsResponse(BaseModel):
 
 
 class StartCommandRequest(BaseModel):
-    command: str = Field(..., description="Command id: plan-implement or implement")
+    command: str = Field(..., description="Command id: plan-implement, implement, or do")
+    prompt: str | None = Field(
+        None,
+        description="Optional prompt for do command (used as the agent --trust prompt).",
+    )
 
 
 class StartCommandResponse(BaseModel):
@@ -572,6 +584,9 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
             status_code=400,
             detail=f"Unsupported command: {body.command!r}. Supported: {list(SUPPORTED_COMMANDS)}",
         )
+    if body.command == "do":
+        if body.prompt is None or not body.prompt.strip():
+            raise HTTPException(status_code=400, detail="prompt is required for do command")
     task_dir = _task_dir(task_name)
     if "DEV_TASKS_DIR" not in os.environ:
         os.environ["DEV_TASKS_DIR"] = str(_tasks_root())
@@ -584,7 +599,7 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
         cancel_requested = threading.Event()
         thread = threading.Thread(
             target=_run_command_in_thread,
-            args=(task_name, body.command, task_dir, cancel_requested),
+            args=(task_name, body.command, task_dir, cancel_requested, body.prompt),
             daemon=True,
         )
         _command_registry[task_name] = {
