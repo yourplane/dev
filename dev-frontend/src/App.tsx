@@ -627,7 +627,7 @@ const FeedEntryRow = memo(function FeedEntryRow({
   loadEntryContent: (entryId: string, type: string) => void
   activeLogFilename: string | null
   isLast: boolean
-  lastEntryRef: React.RefObject<HTMLDivElement | null>
+  lastEntryRef: React.RefObject<HTMLDivElement>
   canDeleteComms?: boolean
   onDeleteComms?: (filename: string) => void
 }) {
@@ -755,14 +755,6 @@ function getEditFilePath(args: Record<string, unknown>, result: unknown): string
     if (success && typeof success.path === 'string') return success.path
   }
   return typeof args.path === 'string' ? args.path : ''
-}
-
-function getWebSearchUrl(result: unknown, args: Record<string, unknown>): string {
-  if (result != null) {
-    const r = result as Record<string, unknown>
-    if (typeof r.url === 'string') return r.url
-  }
-  return typeof args.url === 'string' ? args.url : ''
 }
 
 function getWebSearchSuccess(result: unknown): boolean {
@@ -1117,12 +1109,13 @@ export function TaskCommsPageContent({
   const [creatingPr, setCreatingPr] = useState(false)
   const [prUrl, setPrUrl] = useState<string | null>(null)
   const [prError, setPrError] = useState<string | null>(null)
+  const prRehydrateRunIdRef = useRef(0)
   const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false)
   const [lockedToBottom, setLockedToBottom] = useState(false)
   const programmaticScrollRef = useRef(false)
   const feedLengthRef = useRef(0)
   const lastLockedScrollTimeRef = useRef(0)
-  const lastCommsEntryRef = useRef<HTMLDivElement | null>(null)
+  const lastCommsEntryRef = useRef<HTMLDivElement>(null)
   const feedEntriesRef = useRef(feedEntries)
   feedEntriesRef.current = feedEntries
   const activeLogFilenameRef = useRef(activeLogFilename)
@@ -1381,6 +1374,8 @@ export function TaskCommsPageContent({
   }
 
   const handleCreatePr = async () => {
+    // Invalidate any in-flight "rehydrate existing PR" request.
+    prRehydrateRunIdRef.current += 1
     setPrError(null)
     setPrUrl(null)
     setCreatingPr(true)
@@ -1393,6 +1388,29 @@ export function TaskCommsPageContent({
       setCreatingPr(false)
     }
   }
+
+  useEffect(() => {
+    let cancelled = false
+    const runId = prRehydrateRunIdRef.current + 1
+    prRehydrateRunIdRef.current = runId
+
+    setPrError(null)
+    api.getTaskPr(taskName)
+      .then((res) => {
+        if (cancelled) return
+        if (prRehydrateRunIdRef.current !== runId) return
+        setPrUrl(res.pr_url)
+      })
+      .catch((e) => {
+        if (cancelled) return
+        if (prRehydrateRunIdRef.current !== runId) return
+        setPrError(e instanceof Error ? e.message : String(e))
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [taskName])
 
   useEffect(() => {
     loadFeed()
@@ -1518,9 +1536,11 @@ export function TaskCommsPageContent({
     }
   }, [lockedToBottom, feedEntries.length])
 
+  const activeLogContent = activeLogFilename ? contents[activeLogFilename] : ''
+
   // When streaming: if locked or near bottom, scroll to bottom (throttled + only when behind to reduce jitter)
   useEffect(() => {
-    if (!activeLogFilename || !contents[activeLogFilename] || feedEntries.length === 0) return
+    if (!activeLogFilename || !activeLogContent || feedEntries.length === 0) return
     const scrollHeight = document.documentElement.scrollHeight
     const nearBottom =
       window.scrollY + window.innerHeight >= scrollHeight - SCROLL_NEAR_BOTTOM_PX
@@ -1537,7 +1557,7 @@ export function TaskCommsPageContent({
         }, PROGRAMMATIC_SCROLL_MS)
       }
     }
-  }, [activeLogFilename, contents[activeLogFilename], feedEntries.length, lockedToBottom])
+  }, [activeLogFilename, activeLogContent, feedEntries.length, lockedToBottom])
 
   const scrollToTop = () => {
     programmaticScrollRef.current = true

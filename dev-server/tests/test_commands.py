@@ -154,3 +154,32 @@ def test_create_pr_returns_422_on_error(client_with_tasks: TestClient, task_dir:
         resp = client_with_tasks.post("/tasks/mytask/create-pr")
     assert resp.status_code == 422
     assert "feature branch" in resp.json()["detail"]
+
+
+def test_get_pr_returns_pr_url(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """GET pr returns 200 and pr_url when a PR already exists."""
+    with patch(
+        "dev_server.main.find_existing_pull_request",
+        return_value="https://github.com/owner/repo/pull/1",
+    ):
+        resp = client_with_tasks.get("/tasks/mytask/pr")
+    assert resp.status_code == 200
+    assert resp.json()["pr_url"] == "https://github.com/owner/repo/pull/1"
+
+
+def test_get_pr_returns_null_when_not_found(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """GET pr returns pr_url: null when no PR exists."""
+    with patch("dev_server.main.find_existing_pull_request", return_value=None):
+        resp = client_with_tasks.get("/tasks/mytask/pr")
+    assert resp.status_code == 200
+    assert resp.json()["pr_url"] is None
+
+
+def test_get_pr_returns_422_on_error(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """GET pr returns 422 with detail when lookup raises CreatePRError."""
+    from dev_sdk.create_pr import CreatePRError
+
+    with patch("dev_server.main.find_existing_pull_request", side_effect=CreatePRError("GitHub API error: boom")):
+        resp = client_with_tasks.get("/tasks/mytask/pr")
+    assert resp.status_code == 422
+    assert "boom" in resp.json()["detail"]

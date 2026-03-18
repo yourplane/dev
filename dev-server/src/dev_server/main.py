@@ -26,7 +26,7 @@ from dev_sdk.drafts import (
     set_task_comment_draft,
 )
 from dev_sdk.feed import LOGS_DIR, read_feed
-from dev_sdk.create_pr import CreatePRError, create_pull_request
+from dev_sdk.create_pr import CreatePRError, create_pull_request, find_existing_pull_request
 from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repos
 from dev_sdk.task_manager import ArchivedTaskEntry, TaskManager
 
@@ -170,6 +170,10 @@ class CommandStatusResponse(BaseModel):
 
 class CreatePRResponse(BaseModel):
     pr_url: str
+
+
+class GetTaskPrResponse(BaseModel):
+    pr_url: str | None = None
 
 
 class FeedEntryModel(BaseModel):
@@ -630,3 +634,14 @@ def create_task_pr(task_name: str) -> CreatePRResponse:
         return CreatePRResponse(pr_url=pr_url)
     except CreatePRError as e:
         raise HTTPException(status_code=422, detail=str(e))
+
+
+@app.get("/tasks/{task_name}/pr", response_model=GetTaskPrResponse)
+def get_task_pr(task_name: str) -> GetTaskPrResponse:
+    """Return the existing pull request URL for the task, if any."""
+    task_dir = _task_dir(task_name)
+    try:
+        pr_url = find_existing_pull_request(task_dir)
+    except CreatePRError as e:
+        raise HTTPException(status_code=422, detail=str(e))
+    return GetTaskPrResponse(pr_url=pr_url)

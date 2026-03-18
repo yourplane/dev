@@ -243,6 +243,10 @@ export const api = {
     });
   },
 
+  getTaskPr(taskName: string): Promise<{ pr_url: string | null }> {
+    return request(`/tasks/${encodeURIComponent(taskName)}/pr`);
+  },
+
   async getTaskCommsFile(taskName: string, filename: string): Promise<string> {
     const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/comms/${encodeURIComponent(filename)}`;
     const res = await fetch(url);

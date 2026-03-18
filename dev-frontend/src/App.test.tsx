@@ -11,6 +11,8 @@ vi.mock('./api', () => ({
     archiveTask: vi.fn(),
     getTaskCommsList: vi.fn(),
     getTaskFeed: vi.fn(),
+    getTaskCommentDraft: vi.fn(),
+    setTaskCommentDraft: vi.fn(),
     getTaskCommsFile: vi.fn(),
     getTaskLogFile: vi.fn(),
     postTaskComms: vi.fn(),
@@ -18,6 +20,7 @@ vi.mock('./api', () => ({
     openTaskLogStream: vi.fn(),
     startTaskCommand: vi.fn(),
     createTaskPr: vi.fn(),
+    getTaskPr: vi.fn(),
   },
 }))
 
@@ -29,6 +32,9 @@ describe('App', () => {
     vi.mocked(api.getRepos).mockResolvedValue({})
     vi.mocked(api.getTaskCommsList).mockResolvedValue({ files: [] })
     vi.mocked(api.getTaskFeed).mockResolvedValue({ entries: [] })
+    vi.mocked(api.getTaskPr).mockResolvedValue({ pr_url: null })
+    vi.mocked(api.getTaskCommentDraft).mockResolvedValue('')
+    vi.mocked(api.setTaskCommentDraft).mockResolvedValue(undefined)
     vi.mocked(api.getTaskCommandStatus).mockResolvedValue({
       active: false,
       command: null,
