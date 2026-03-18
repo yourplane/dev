@@ -12,6 +12,7 @@ import subprocess
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -392,3 +393,88 @@ def create_pull_request(task_root: Path, *, allow_dirty: bool = False) -> str:
 
     pr = json.loads(resp_body)
     return pr["html_url"]
+
+
+def _list_pull_requests_api(
+    token: str,
+    owner: str,
+    repo: str,
+    *,
+    head: str,
+    base: str = "main",
+) -> tuple[int, str]:
+    """GET pull requests filtered by `head` and `base`."""
+    # GitHub expects `head` like: owner:branch
+    # Encode the whole value to safely embed into query params (':' -> '%3A', etc).
+    head_enc = urllib.parse.quote(head, safe="")
+    base_enc = urllib.parse.quote(base, safe="")
+    url = (
+        f"https://api.github.com/repos/{owner}/{repo}/pulls"
+        f"?head={head_enc}&base={base_enc}&state=all"
+        f"&sort=created&direction=desc&per_page=10"
+    )
+    return _github_request(token, "GET", url)
+
+
+def find_existing_pull_request(task_root: Path) -> str | None:
+    """
+    Find the existing PR for a task, if any.
+
+    Assumes the task maps to a single git repository under the task root; the PR is
+    identified by the task's current branch name (head) and base branch (`main`).
+    Returns the PR HTML URL or None when no PR exists.
+    """
+    task_root = task_root.resolve()
+    _validate_task_root(task_root)
+    repo_root = _find_single_git_repo_under(task_root)
+
+    head_branch = _current_branch(repo_root)
+    if head_branch == "main":
+        return None
+
+    token = _get_github_token()
+    remote_url = _git_output(repo_root, "remote", "get-url", "origin")
+    try:
+        owner, repo = _parse_owner_repo(remote_url)
+    except ValueError as e:
+        raise CreatePRError(str(e))
+
+    head = f"{owner}:{head_branch}"
+    status, resp_body = _list_pull_requests_api(token, owner, repo, head=head, base="main")
+    if status != 200:
+        try:
+            data = json.loads(resp_body)
+            msg = data.get("message", resp_body)
+            raise CreatePRError(msg)
+        except (ValueError, TypeError):
+            raise CreatePRError(f"GitHub API error: {resp_body}")
+
+    pulls = json.loads(resp_body)
+    if not isinstance(pulls, list):
+        raise CreatePRError(f"GitHub API error: expected list, got {type(pulls).__name__}")
+
+    # `base=main` and `head` filters should keep this small and deterministic, but we
+    # still validate to avoid returning the wrong PR if GitHub returns unexpected items.
+    title = task_root.name
+    exact_title_matches = [p for p in pulls if isinstance(p, dict) and p.get("title") == title]
+    candidate_matches = [p for p in pulls if isinstance(p, dict)]
+
+    # Prefer exact title match (create-pr uses title=task_root.name).
+    chosen: dict | None = None
+    if len(exact_title_matches) == 1:
+        chosen = exact_title_matches[0]
+    elif len(exact_title_matches) > 1:
+        # The task model promises "one or none PRs per task"; multiple indicates something went wrong.
+        raise CreatePRError(
+            f"Expected at most one PR for task {task_root.name}, found {len(exact_title_matches)}"
+        )
+    else:
+        # No title matches; fall back to the newest candidate (list is created desc).
+        if not candidate_matches:
+            return None
+        chosen = candidate_matches[0]
+
+    pr_url = chosen.get("html_url")
+    if not isinstance(pr_url, str) or not pr_url:
+        raise CreatePRError("GitHub PR response did not include html_url")
+    return pr_url
