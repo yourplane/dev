@@ -1628,6 +1628,7 @@ export function TaskCommsPageContent({
   }, [activeLogFilename, activeLogContent, feedEntries.length, lockedToBottom])
 
   const scrollToTop = () => {
+    setLockedToBottom(false)
     programmaticScrollRef.current = true
     window.scrollTo({ top: 0, behavior: 'smooth' })
     setTimeout(() => {
@@ -1635,6 +1636,7 @@ export function TaskCommsPageContent({
     }, PROGRAMMATIC_SCROLL_SMOOTH_MS)
   }
   const scrollToBottomClick = () => {
+    setLockedToBottom(true)
     programmaticScrollRef.current = true
     window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'smooth' })
     setTimeout(() => {
