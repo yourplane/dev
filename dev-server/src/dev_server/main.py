@@ -5,7 +5,6 @@ import io
 import os
 import re
 import threading
-import time
 import zipfile
 from pathlib import Path
 
@@ -33,7 +32,6 @@ from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repo
 from dev_sdk.task_manager import ArchivedTaskEntry, TaskManager
 
 SUPPORTED_COMMANDS = ("plan-implement", "implement", "do")
-COMMAND_FINISHED_TTL_SEC = 30.0
 
 # In-memory registry: task_name -> { "command_id", "thread" }
 _command_registry: dict[str, dict] = {}
@@ -74,24 +72,6 @@ def _run_command_in_thread(
             if entry:
                 entry["finished"] = True
                 entry["error"] = error_text
-                entry["finished_at"] = time.time()
-
-        def cleanup_finished_later() -> None:
-            time.sleep(COMMAND_FINISHED_TTL_SEC)
-            with _command_registry_lock:
-                entry = _command_registry.get(task_name)
-                if not entry:
-                    return
-                if not entry.get("finished"):
-                    return
-                finished_at = entry.get("finished_at")
-                if not isinstance(finished_at, (int, float)):
-                    _command_registry.pop(task_name, None)
-                    return
-                if time.time() - float(finished_at) >= COMMAND_FINISHED_TTL_SEC:
-                    _command_registry.pop(task_name, None)
-
-        threading.Thread(target=cleanup_finished_later, daemon=True).start()
 
 app = FastAPI(
     title="dev-server",
@@ -640,7 +620,6 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
             "cancel_requested": cancel_requested,
             "finished": False,
             "error": None,
-            "finished_at": None,
         }
         thread.start()
     return StartCommandResponse(command=body.command)
