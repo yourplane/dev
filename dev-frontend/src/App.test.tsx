@@ -27,6 +27,7 @@ vi.mock('./api', () => ({
 
 describe('App', () => {
   beforeEach(async () => {
+    vi.useRealTimers()
     vi.resetModules()
     const { api } = await import('./api')
     vi.mocked(api.getTasks).mockResolvedValue({ tasks: [] })
@@ -40,7 +41,14 @@ describe('App', () => {
       active: false,
       command: null,
       active_log_filename: null,
+      finished: false,
+      error: null,
     })
+    vi.mocked(api.openTaskLogStream).mockReturnValue({
+      onmessage: null,
+      onerror: null,
+      close: vi.fn(),
+    } as unknown as EventSource)
   })
 
   it('renders task list without throwing', async () => {
@@ -95,6 +103,34 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(vi.mocked(api.setTaskCommentDraft)).toHaveBeenCalledWith('test-task', '')
+    })
+  })
+
+  it('shows browser notification when command completes', async () => {
+    const noop = () => {}
+    const { api } = await import('./api')
+    const notificationMock = vi.fn()
+    ;(globalThis as unknown as { Notification?: unknown }).Notification = Object.assign(notificationMock, {
+      permission: 'granted',
+      requestPermission: vi.fn().mockResolvedValue('granted'),
+    })
+
+    vi.mocked(api.getTaskCommandStatus).mockResolvedValue({
+      active: false,
+      command: 'implement',
+      active_log_filename: null,
+      finished: true,
+      error: null,
+    })
+
+    render(
+      <MemoryRouter>
+        <TaskCommsPageContent taskName="test-task" navigate={noop} />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(notificationMock).toHaveBeenCalled()
     })
   })
 })

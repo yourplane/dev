@@ -76,7 +76,7 @@ def test_start_command_again_returns_409(client_with_tasks: TestClient, task_dir
 
 
 def test_status_inactive_after_process_exits(client_with_tasks: TestClient, task_dir: Path) -> None:
-    """After the run finishes, status becomes inactive."""
+    """After the run finishes, status reports completion and GET does not mutate it."""
     with patch("dev_server.main.run_implement") as mock_run:
         mock_run.return_value = None
         client_with_tasks.post("/tasks/mytask/commands", json={"command": "implement"})
@@ -84,7 +84,15 @@ def test_status_inactive_after_process_exits(client_with_tasks: TestClient, task
     resp = client_with_tasks.get("/tasks/mytask/commands")
     assert resp.status_code == 200
     assert resp.json()["active"] is False
-    assert resp.json()["command"] is None
+    assert resp.json()["finished"] is True
+    assert resp.json()["command"] == "implement"
+    assert resp.json()["error"] is None
+
+    resp2 = client_with_tasks.get("/tasks/mytask/commands")
+    assert resp2.status_code == 200
+    assert resp2.json()["active"] is False
+    assert resp2.json()["finished"] is True
+    assert resp2.json()["command"] == "implement"
 
 
 def test_start_unsupported_command_returns_400(client_with_tasks: TestClient) -> None:
@@ -145,6 +153,7 @@ def test_start_do_returns_201_and_status_active(
     resp3 = client_with_tasks.get("/tasks/mytask/commands")
     assert resp3.status_code == 200
     assert resp3.json()["active"] is False
+    assert resp3.json()["finished"] is True
 
 
 def test_start_do_clears_comment_draft(client_with_tasks: TestClient, task_dir: Path) -> None:
@@ -201,6 +210,50 @@ def test_cancel_command_sets_event_and_status_becomes_inactive(
     resp3 = client_with_tasks.get("/tasks/mytask/commands")
     assert resp3.status_code == 200
     assert resp3.json()["active"] is False
+    assert resp3.json()["finished"] is True
+
+
+def test_status_reports_error_when_command_fails(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """Failed command returns inactive+finished and includes the runner error message."""
+    from dev_sdk.agent_run import AgentRunError
+
+    with patch("dev_server.main.run_do", side_effect=AgentRunError("boom failure")):
+        resp = client_with_tasks.post(
+            "/tasks/mytask/commands",
+            json={"command": "do", "prompt": "DO-PROMPT"},
+        )
+    assert resp.status_code == 201
+
+    time.sleep(0.3)
+    status_resp = client_with_tasks.get("/tasks/mytask/commands")
+    assert status_resp.status_code == 200
+    status_data = status_resp.json()
+    assert status_data["active"] is False
+    assert status_data["finished"] is True
+    assert status_data["command"] == "do"
+    assert status_data["error"] == "boom failure"
+
+
+def test_start_new_command_after_finished_status_succeeds(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """Finished status should not block starting a new command."""
+    with patch("dev_server.main.run_implement", return_value=None):
+        resp = client_with_tasks.post("/tasks/mytask/commands", json={"command": "implement"})
+    assert resp.status_code == 201
+    time.sleep(0.2)
+
+    status_resp = client_with_tasks.get("/tasks/mytask/commands")
+    assert status_resp.status_code == 200
+    assert status_resp.json()["finished"] is True
+
+    block = threading.Event()
+
+    def blocking_run_plan(*args: object, **kwargs: object) -> None:
+        block.wait()
+
+    with patch("dev_server.main.run_plan_implement", side_effect=blocking_run_plan):
+        resp2 = client_with_tasks.post("/tasks/mytask/commands", json={"command": "plan-implement"})
+    assert resp2.status_code == 201
+    block.set()
 
 
 def test_cancel_command_404_when_no_command_running(client_with_tasks: TestClient, task_dir: Path) -> None:
