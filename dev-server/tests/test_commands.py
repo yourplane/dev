@@ -147,6 +147,25 @@ def test_start_do_returns_201_and_status_active(
     assert resp3.json()["active"] is False
 
 
+def test_start_do_clears_comment_draft(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """Starting a do command clears the persisted comment draft for the task."""
+    root = task_dir.parent
+    drafts_dir = root / ".drafts"
+    drafts_dir.mkdir(exist_ok=True)
+    (drafts_dir / "comment-mytask").write_text("my draft comment")
+
+    with patch("dev_server.main.run_do"):
+        resp = client_with_tasks.post(
+            "/tasks/mytask/commands",
+            json={"command": "do", "prompt": "DO-PROMPT"},
+        )
+    assert resp.status_code == 201
+
+    resp2 = client_with_tasks.get("/tasks/mytask/drafts/comment")
+    assert resp2.status_code == 200
+    assert resp2.text == ""
+
+
 def test_get_commands_404_for_nonexistent_task(client_with_tasks: TestClient) -> None:
     """GET commands for nonexistent task returns 404."""
     resp = client_with_tasks.get("/tasks/nonexistent/commands")

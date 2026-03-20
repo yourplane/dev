@@ -92,5 +92,9 @@ describe('App', () => {
     await waitFor(() => {
       expect((textarea as HTMLTextAreaElement).value).toBe('')
     })
+
+    await waitFor(() => {
+      expect(vi.mocked(api.setTaskCommentDraft)).toHaveBeenCalledWith('test-task', '')
+    })
   })
 })
