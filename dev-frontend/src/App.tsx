@@ -1104,6 +1104,10 @@ export function TaskCommsPageContent({
   const [postError, setPostError] = useState<string | null>(null)
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
   const [activeLogFilename, setActiveLogFilename] = useState<string | null>(null)
+  const [lastCompletedCommand, setLastCompletedCommand] = useState<{
+    command: string
+    error: string | null
+  } | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [startingCommand, setStartingCommand] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
@@ -1170,6 +1174,31 @@ export function TaskCommsPageContent({
     }
   }
 
+  const notifyBrowserCommandFinished = useCallback(
+    async (command: string, errorMessage: string | null) => {
+      if (typeof window === 'undefined' || typeof Notification === 'undefined') return
+      let permission = Notification.permission
+      if (permission === 'default') {
+        try {
+          permission = await Notification.requestPermission()
+        } catch {
+          return
+        }
+      }
+      if (permission !== 'granted') return
+      const commandLabel = COMMAND_LABEL[command] ?? command
+      const body = errorMessage
+        ? `${commandLabel} failed for ${taskName}: ${errorMessage}`
+        : `${commandLabel} finished for ${taskName}`
+      try {
+        new Notification(`Task ${taskName}`, { body })
+      } catch {
+        // Ignore browser notification errors.
+      }
+    },
+    [taskName]
+  )
+
   const loadCommandStatus = useCallback(async () => {
     try {
       const res = await api.getTaskCommandStatus(taskName)
@@ -1177,6 +1206,12 @@ export function TaskCommsPageContent({
       setActiveCommand(nextActive)
       if (!nextActive) setCancelling(false)
       setActiveLogFilename(res.active && res.active_log_filename ? res.active_log_filename : null)
+      if (!res.active && res.finished && res.command) {
+        setLastCompletedCommand({
+          command: res.command,
+          error: res.error,
+        })
+      }
     } catch {
       // ignore; task might not exist yet
     }
@@ -1314,6 +1349,18 @@ export function TaskCommsPageContent({
     }
     prevActiveCommandRef.current = activeCommand
   }, [activeCommand, loadFeed])
+
+  useEffect(() => {
+    if (!lastCompletedCommand) return
+    void notifyBrowserCommandFinished(lastCompletedCommand.command, lastCompletedCommand.error)
+    const commandLabel = COMMAND_LABEL[lastCompletedCommand.command] ?? lastCompletedCommand.command
+    const baseTitle = `Dev – ${taskName}`
+    document.title = lastCompletedCommand.error ? `x ${commandLabel} failed – ${taskName}` : `Done ${commandLabel} – ${taskName}`
+    const timer = setTimeout(() => {
+      document.title = baseTitle
+    }, 5000)
+    return () => clearTimeout(timer)
+  }, [lastCompletedCommand, notifyBrowserCommandFinished, taskName])
 
   useEffect(() => {
     const interval = setInterval(

@@ -52,6 +52,7 @@ def _run_command_in_thread(
             if task_name in _command_registry:
                 _command_registry[task_name]["active_log_filename"] = stream_log_path.name
 
+    error_text: str | None = None
     try:
         if command_id == "plan-implement":
             run_plan_implement(task_dir, on_start=on_start, cancel_event=cancel_requested)
@@ -63,11 +64,14 @@ def _run_command_in_thread(
                 # Defensive: request validation should prevent this.
                 raise AgentRunError("Missing prompt for do command.")
             run_do(task_dir, prompt=prompt, on_start=on_start, cancel_event=cancel_requested)
-    except AgentRunError:
-        pass
+    except AgentRunError as e:
+        error_text = str(e)
     finally:
         with _command_registry_lock:
-            _command_registry.pop(task_name, None)
+            entry = _command_registry.get(task_name)
+            if entry:
+                entry["finished"] = True
+                entry["error"] = error_text
 
 app = FastAPI(
     title="dev-server",
@@ -178,6 +182,8 @@ class CommandStatusResponse(BaseModel):
     active: bool
     command: str | None = None
     active_log_filename: str | None = None
+    finished: bool = False
+    error: str | None = None
 
 
 class CreatePRResponse(BaseModel):
@@ -593,7 +599,11 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
     if "DEV_TASKS_DIR" not in os.environ:
         os.environ["DEV_TASKS_DIR"] = str(_tasks_root())
     with _command_registry_lock:
-        if task_name in _command_registry:
+        existing = _command_registry.get(task_name)
+        if existing and existing.get("finished"):
+            _command_registry.pop(task_name, None)
+            existing = None
+        if existing:
             raise HTTPException(
                 status_code=409,
                 detail="A command is already running for this task.",
@@ -608,6 +618,8 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
             "command_id": body.command,
             "thread": thread,
             "cancel_requested": cancel_requested,
+            "finished": False,
+            "error": None,
         }
         thread.start()
     return StartCommandResponse(command=body.command)
@@ -619,12 +631,30 @@ def get_task_command_status(task_name: str) -> CommandStatusResponse:
     _task_dir(task_name)
     with _command_registry_lock:
         entry = _command_registry.get(task_name)
+        if entry and entry.get("finished"):
+            response = CommandStatusResponse(
+                active=False,
+                command=entry["command_id"],
+                active_log_filename=entry.get("active_log_filename"),
+                finished=True,
+                error=entry.get("error"),
+            )
+            _command_registry.pop(task_name, None)
+            return response
     if entry is None:
-        return CommandStatusResponse(active=False, command=None, active_log_filename=None)
+        return CommandStatusResponse(
+            active=False,
+            command=None,
+            active_log_filename=None,
+            finished=False,
+            error=None,
+        )
     return CommandStatusResponse(
         active=True,
         command=entry["command_id"],
         active_log_filename=entry.get("active_log_filename"),
+        finished=False,
+        error=None,
     )
 
 
