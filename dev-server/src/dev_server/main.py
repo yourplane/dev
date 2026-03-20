@@ -588,6 +588,8 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
         if body.prompt is None or not body.prompt.strip():
             raise HTTPException(status_code=400, detail="prompt is required for do command")
     task_dir = _task_dir(task_name)
+    if body.command == "do":
+        set_task_comment_draft(_tasks_root(), task_name, "")
     if "DEV_TASKS_DIR" not in os.environ:
         os.environ["DEV_TASKS_DIR"] = str(_tasks_root())
     with _command_registry_lock:

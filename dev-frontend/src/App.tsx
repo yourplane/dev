@@ -1479,11 +1479,10 @@ export function TaskCommsPageContent({
     setStartingCommand('do')
     try {
       await api.startTaskCommand(taskName, 'do', prompt)
-      // loadCommandStatus will populate activeCommand/activeLogFilename via polling,
-      // but we call it once now so the UI updates immediately.
       await loadCommandStatus()
       setCommentText('')
       lastSavedCommentRef.current = ''
+      api.setTaskCommentDraft(taskName, '').catch(() => {})
       setScrollToBottomAfterLoad(true)
     } catch (e) {
       setCommandError(e instanceof Error ? e.message : String(e))
