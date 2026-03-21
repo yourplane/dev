@@ -31,6 +31,24 @@ describe('parseLogToSegments', () => {
     expect(segments[0].toolCall?.result).toEqual({ success: { content: 'hello' } })
   })
 
+  it('does not duplicate assistant text when the same string appears twice in content blocks', () => {
+    const raw =
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello"},{"type":"text","text":"Hello"}]}}'
+    const segments = parseLogToSegments(raw)
+    expect(segments).toHaveLength(1)
+    expect(segments[0].text).toBe('Hello')
+  })
+
+  it('uses latest cumulative assistant line instead of concatenating full snapshots', () => {
+    const raw = [
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello"}]}}',
+      '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Hello world"}]}}',
+    ].join('\n')
+    const segments = parseLogToSegments(raw)
+    expect(segments).toHaveLength(1)
+    expect(segments[0].text).toBe('Hello world')
+  })
+
   it('omits segments with empty or whitespace-only text', () => {
     const raw = [
       '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"\n\n"}]}}',
