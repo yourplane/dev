@@ -761,9 +761,32 @@ function getTodoListFromToolCall(args: Record<string, unknown>, result: unknown)
 }
 
 function isTodoWriteTool(toolKey: string): boolean {
-  if (toolKey === 'todo_writeToolCall' || toolKey === 'todoWriteToolCall') return true
+  if (
+    toolKey === 'todo_writeToolCall' ||
+    toolKey === 'todoWriteToolCall' ||
+    toolKey === 'updateTodosToolCall' ||
+    toolKey === 'update_todosToolCall'
+  ) {
+    return true
+  }
   const lower = toolKey.toLowerCase()
-  return lower.includes('todo') && lower.includes('write') && lower.endsWith('toolcall')
+  if (!lower.endsWith('toolcall')) return false
+  if (!lower.includes('todo')) return false
+  // e.g. todo_write*, *Todos* (update todos), todo merge tools
+  return (
+    lower.includes('write') ||
+    lower.includes('todos') ||
+    (lower.includes('update') && lower.includes('todo'))
+  )
+}
+
+/** Maps Cursor / proto enums (TODO_STATUS_COMPLETED) and plain names to UI buckets. */
+function classifyTodoStatus(statusRaw: string | undefined): 'done' | 'active' | 'cancelled' | 'pending' {
+  const s = (statusRaw ?? '').toLowerCase()
+  if (s.includes('completed') || s === 'done') return 'done'
+  if (s.includes('cancelled') || s === 'canceled') return 'cancelled'
+  if (s.includes('in_progress') || s.includes('inprogress')) return 'active'
+  return 'pending'
 }
 
 function TodoWriteCheckboxList({ items }: { items: TodoWriteItem[] }) {
@@ -773,10 +796,10 @@ function TodoWriteCheckboxList({ items }: { items: TodoWriteItem[] }) {
   return (
     <ul className="feed-log-tool-call-todos feed-log-todo-checkbox-list" role="list" aria-label="Todo list">
       {items.map((t, i) => {
-        const status = (t.status ?? 'pending').toLowerCase().replace(/\s+/g, '_')
-        const isDone = status === 'completed' || status === 'done'
-        const isCancelled = status === 'cancelled'
-        const isInProgress = status === 'in_progress'
+        const bucket = classifyTodoStatus(t.status)
+        const isDone = bucket === 'done'
+        const isCancelled = bucket === 'cancelled'
+        const isInProgress = bucket === 'active'
         const rowClass = [
           'feed-log-todo-row',
           isDone && 'feed-log-todo-row--done',

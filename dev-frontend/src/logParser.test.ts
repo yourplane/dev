@@ -62,6 +62,15 @@ describe('parseLogToSegments', () => {
     expect(segments[0].toolCall?.humanLabel).toBe('Custom Tool Call')
   })
 
+  it('recognizes updateTodosToolCall with a fixed human label', () => {
+    const raw =
+      '{"type":"tool_call","subtype":"completed","call_id":"td1","tool_call":{"updateTodosToolCall":{"args":{"merge":false,"todos":[{"id":"a","content":"Task","status":"TODO_STATUS_COMPLETED"}]},"result":{"success":true}}}}'
+    const segments = parseLogToSegments(raw)
+    expect(segments).toHaveLength(1)
+    expect(segments[0].toolCall?.toolKey).toBe('updateTodosToolCall')
+    expect(segments[0].toolCall?.humanLabel).toBe('Update todos')
+  })
+
   it('accumulates partialOutput from progress/partial tool_call events for same call_id', () => {
     const raw = [
       '{"type":"tool_call","subtype":"started","call_id":"sh1","tool_call":{"shellToolCall":{"args":{"command":"echo hi"}}}}',
