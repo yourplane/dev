@@ -726,12 +726,84 @@ function getReadPath(args: Record<string, unknown>, result: unknown): string {
   return typeof args.path === 'string' ? args.path : ''
 }
 
-function getTodoList(result: unknown): Array<{ id?: string; content?: string; status?: string }> {
+type TodoWriteItem = { id?: string; content?: string; status?: string }
+
+function normalizeTodoItems(raw: unknown): TodoWriteItem[] {
+  if (!Array.isArray(raw)) return []
+  return raw.map((item) => {
+    if (item && typeof item === 'object' && !Array.isArray(item)) {
+      const o = item as Record<string, unknown>
+      return {
+        id: typeof o.id === 'string' ? o.id : undefined,
+        content: typeof o.content === 'string' ? o.content : undefined,
+        status: typeof o.status === 'string' ? o.status : undefined,
+      }
+    }
+    return {}
+  })
+}
+
+function getTodoListFromResult(result: unknown): TodoWriteItem[] {
   if (result == null) return []
   const r = result as Record<string, unknown>
   const success = r.success as Record<string, unknown> | undefined
   const todos = success?.todos ?? success?.todo ?? r.todos ?? r.todo
-  return Array.isArray(todos) ? todos : []
+  return normalizeTodoItems(todos)
+}
+
+/** Todos live in args while streaming; result may mirror them when completed. */
+function getTodoListFromToolCall(args: Record<string, unknown>, result: unknown): TodoWriteItem[] {
+  const fromArgs = args.todos ?? args.todo
+  if (Array.isArray(fromArgs) && fromArgs.length > 0) {
+    return normalizeTodoItems(fromArgs)
+  }
+  return getTodoListFromResult(result)
+}
+
+function isTodoWriteTool(toolKey: string): boolean {
+  if (toolKey === 'todo_writeToolCall' || toolKey === 'todoWriteToolCall') return true
+  const lower = toolKey.toLowerCase()
+  return lower.includes('todo') && lower.includes('write') && lower.endsWith('toolcall')
+}
+
+function TodoWriteCheckboxList({ items }: { items: TodoWriteItem[] }) {
+  if (items.length === 0) {
+    return <p className="feed-log-todo-empty">(no items)</p>
+  }
+  return (
+    <ul className="feed-log-tool-call-todos feed-log-todo-checkbox-list" role="list" aria-label="Todo list">
+      {items.map((t, i) => {
+        const status = (t.status ?? 'pending').toLowerCase().replace(/\s+/g, '_')
+        const isDone = status === 'completed' || status === 'done'
+        const isCancelled = status === 'cancelled'
+        const isInProgress = status === 'in_progress'
+        const rowClass = [
+          'feed-log-todo-row',
+          isDone && 'feed-log-todo-row--done',
+          isCancelled && 'feed-log-todo-row--cancelled',
+          isInProgress && 'feed-log-todo-row--active',
+        ]
+          .filter(Boolean)
+          .join(' ')
+        return (
+          <li key={t.id ?? `todo-${i}`} className={rowClass}>
+            <span
+              className={[
+                'feed-log-todo-box',
+                isDone && 'feed-log-todo-box--done',
+                isCancelled && 'feed-log-todo-box--cancelled',
+                isInProgress && 'feed-log-todo-box--active',
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              aria-hidden
+            />
+            <span className="feed-log-todo-label">{t.content ?? ''}</span>
+          </li>
+        )
+      })}
+    </ul>
+  )
 }
 
 function getEditDiff(result: unknown, args: Record<string, unknown>): string {
@@ -814,6 +886,20 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
         </div>
       )
     }
+    if (isTodoWriteTool(toolKey)) {
+      const todos = getTodoListFromToolCall(args, result)
+      return (
+        <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-todo-write">
+          <div className="feed-log-tool-call-header">
+            <span className="feed-log-tool-call-spinner" aria-hidden />
+            <span className="feed-log-segment-label">{humanLabel}</span>
+          </div>
+          <div className="feed-log-segment-body">
+            <TodoWriteCheckboxList items={todos} />
+          </div>
+        </div>
+      )
+    }
     return (
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-in-progress">
         <div className="feed-log-tool-call-header">
@@ -849,21 +935,15 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
     )
   }
 
-  if (toolKey === 'todo_writeToolCall') {
-    const todos = getTodoList(result)
+  if (isTodoWriteTool(toolKey)) {
+    const todos = getTodoListFromToolCall(args, result)
     return (
-      <div className="feed-log-segment feed-log-tool-call">
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-todo-write">
         <div className="feed-log-tool-call-header">
           <span className="feed-log-segment-label">{humanLabel}</span>
         </div>
         <div className="feed-log-segment-body">
-          <ul className="feed-log-tool-call-todos">
-            {todos.map((t, i) => (
-              <li key={t.id ?? i}>
-                {[t.status, t.content].filter(Boolean).join(' – ')}
-              </li>
-            ))}
-          </ul>
+          <TodoWriteCheckboxList items={todos} />
         </div>
       </div>
     )

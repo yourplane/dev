@@ -964,6 +964,104 @@
 .feed-log-tool-call-todos li {
   margin-bottom: 0.25rem;
 }
+
+.feed-log-tool-call-todo-write {
+  background: #f8faf8;
+  border-left: 3px solid #43a047;
+  border-radius: 4px;
+  padding: 0.5rem 0.6rem;
+}
+.feed-log-tool-call-todo-write .feed-log-segment-label {
+  color: #2e7d32;
+  font-weight: 600;
+}
+.feed-log-todo-checkbox-list {
+  list-style: none;
+  padding: 0.35rem 0 0 0;
+  margin: 0;
+}
+.feed-log-todo-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  margin-bottom: 0.35rem;
+  line-height: 1.35;
+  font-size: 0.9rem;
+}
+.feed-log-todo-row:last-child {
+  margin-bottom: 0;
+}
+.feed-log-todo-box {
+  flex-shrink: 0;
+  width: 1rem;
+  height: 1rem;
+  margin-top: 0.12rem;
+  border: 1.5px solid #888;
+  border-radius: 3px;
+  background: #fff;
+  box-sizing: border-box;
+}
+.feed-log-todo-box--active {
+  border-color: #1565c0;
+  background: linear-gradient(135deg, #e3f2fd 50%, #fff 50%);
+  box-shadow: inset 0 0 0 1px rgba(21, 101, 192, 0.25);
+}
+.feed-log-todo-box--done {
+  border-color: #2e7d32;
+  background: #2e7d32;
+  position: relative;
+}
+.feed-log-todo-box--done::after {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 2px;
+  width: 5px;
+  height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.feed-log-todo-box--cancelled {
+  position: relative;
+  border-style: dashed;
+  border-color: #9e9e9e;
+  background: #fafafa;
+}
+.feed-log-todo-box--cancelled::after {
+  content: '×';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -52%);
+  font-size: 0.85rem;
+  line-height: 1;
+  color: #757575;
+  font-weight: 700;
+}
+.feed-log-todo-row--cancelled .feed-log-todo-label {
+  text-decoration: line-through;
+  color: #888;
+}
+.feed-log-todo-row--done .feed-log-todo-label {
+  color: #555;
+}
+.feed-log-todo-row--active .feed-log-todo-label {
+  color: #0d47a1;
+  font-weight: 500;
+}
+.feed-log-todo-label {
+  color: #333;
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+.feed-log-todo-empty {
+  margin: 0;
+  font-size: 0.85rem;
+  color: #777;
+  font-style: italic;
+}
 .feed-log-tool-call-read-line {
   flex-wrap: wrap;
   gap: 0.35rem;

@@ -40,6 +40,7 @@ const TOOL_HUMAN_LABELS: Record<string, string> = {
   mcpWebFetchToolCall: 'WEB FETCH',
   webFetchToolCall: 'WEB FETCH',
   todo_writeToolCall: 'Update todo',
+  todoWriteToolCall: 'Update todo',
 }
 
 function humanLabelForTool(toolKey: string): string {
