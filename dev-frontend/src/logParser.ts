@@ -74,10 +74,16 @@ function getTextFromLine(obj: Record<string, unknown>): string | null {
     case 'user': {
       const msg = obj.message as Record<string, unknown> | undefined
       const content = Array.isArray(msg?.content) ? msg.content : []
-      const parts = content
+      const rawParts = content
         .filter((c): c is Record<string, unknown> => c && typeof c === 'object')
         .filter((c) => c.type === 'text' && typeof c.text === 'string')
         .map((c) => c.text as string)
+      // Stream-json often repeats the same text in multiple content blocks; join would duplicate.
+      const parts: string[] = []
+      for (const p of rawParts) {
+        if (parts.length && parts[parts.length - 1] === p) continue
+        parts.push(p)
+      }
       return parts.length ? parts.join('') : null
     }
     case 'tool_call':
@@ -200,7 +206,18 @@ export function parseLogToSegments(raw: string): LogSegment[] {
       const last = segments[segments.length - 1]
       const text = ev.text ?? ''
       if (last && last.type === ev.type && !last.toolCall) {
-        last.text += text
+        if (ev.type === 'thinking' || ev.type === 'assistant') {
+          // Stream-json often sends cumulative full text per line; concatenating duplicates output.
+          if (last.text !== text) {
+            if (text.startsWith(last.text)) {
+              last.text = text
+            } else {
+              last.text += text
+            }
+          }
+        } else {
+          last.text += text
+        }
       } else {
         const seg: LogSegment = { type: ev.type, text }
         if (hasContent(seg)) segments.push(seg)
