@@ -255,3 +255,28 @@ def test_get_pr_returns_422_on_error(client_with_tasks: TestClient, task_dir: Pa
         resp = client_with_tasks.get("/tasks/mytask/pr")
     assert resp.status_code == 422
     assert "boom" in resp.json()["detail"]
+
+
+def test_pull_pr_comments_returns_count_and_filename(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """POST pull-pr-comments returns PR URL and number of newly written comments."""
+    with patch(
+        "dev_server.main.pull_pr_comments",
+        return_value=("https://github.com/owner/repo/pull/1", 3, "006-agent-pr-comments.md"),
+    ):
+        resp = client_with_tasks.post("/tasks/mytask/pull-pr-comments")
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "pr_url": "https://github.com/owner/repo/pull/1",
+        "new_comments_count": 3,
+        "comms_filename": "006-agent-pr-comments.md",
+    }
+
+
+def test_pull_pr_comments_returns_422_on_error(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """POST pull-pr-comments returns 422 when PR pull fails."""
+    from dev_sdk.create_pr import CreatePRError
+
+    with patch("dev_server.main.pull_pr_comments", side_effect=CreatePRError("No existing PR found for this task.")):
+        resp = client_with_tasks.post("/tasks/mytask/pull-pr-comments")
+    assert resp.status_code == 422
+    assert "No existing PR" in resp.json()["detail"]
