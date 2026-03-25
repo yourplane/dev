@@ -1329,7 +1329,19 @@ export function TaskCommsPageContent({
           if (newEntries.length === 0) return
           // New log files change the removal cutoff; refresh the full feed so comms `deletable` updates.
           if (newEntries.some((e) => e.type === 'log')) {
-            await loadFeed({ prefetchNew: opts?.prefetchNew })
+            const full = await api.getTaskFeed(taskName)
+            setFeedEntries(full.entries)
+            setContents((prev) => {
+              const next: Record<string, string> = {}
+              full.entries.forEach((e) => {
+                if (prev[e.id] !== undefined) next[e.id] = prev[e.id]
+              })
+              const activeLog = activeLogFilenameRef.current
+              if (activeLog && (prev[activeLog] ?? '').length > 0) {
+                next[activeLog] = prev[activeLog]
+              }
+              return next
+            })
             return
           }
           setFeedEntries((prev) => {
