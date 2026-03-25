@@ -251,6 +251,12 @@ export const api = {
     return request(`/tasks/${encodeURIComponent(taskName)}/pr`);
   },
 
+  pullTaskPrComments(taskName: string): Promise<{ pr_url: string; new_comments_count: number; comms_filename: string | null }> {
+    return request(`/tasks/${encodeURIComponent(taskName)}/pull-pr-comments`, {
+      method: 'POST',
+    });
+  },
+
   async getTaskCommsFile(taskName: string, filename: string): Promise<string> {
     const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/comms/${encodeURIComponent(filename)}`;
     const res = await fetch(url);
