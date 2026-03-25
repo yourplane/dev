@@ -192,6 +192,7 @@ class FeedEntryModel(BaseModel):
     type: str  # "comms" | "log"
     id: str
     created_at: float
+    deletable: bool | None = None  # comms: DELETE allowed; logs: null
 
 
 class ListFeedResponse(BaseModel):
@@ -483,14 +484,14 @@ def get_task_comms_file(task_name: str, filename: str) -> str:
 
 @app.delete("/tasks/{task_name}/comms/{filename}", status_code=204)
 def delete_task_comms_file(task_name: str, filename: str) -> None:
-    """Remove a comms file and its index entry. Not allowed when the task has agent logs."""
+    """Remove a comms file and its index entry. Blocked if agent logs exist and the comm is not after them."""
     if not filename or "/" in filename or "\\" in filename or filename.strip() in ("", ".", ".."):
         raise HTTPException(status_code=404, detail="Invalid filename")
     task_dir = _task_dir(task_name)
     try:
         remove_comms(task_dir, filename)
     except ValueError as e:
-        if "agent logs" in str(e).lower():
+        if "cannot remove comms" in str(e).lower():
             raise HTTPException(status_code=400, detail=str(e)) from e
         raise HTTPException(status_code=404, detail=str(e)) from e
 
@@ -505,7 +506,10 @@ def list_task_feed(task_name: str, after: float | None = None) -> ListFeedRespon
     if after is not None:
         entries = [e for e in entries if e.created_at > after]
     return ListFeedResponse(
-        entries=[FeedEntryModel(type=e.type, id=e.id, created_at=e.created_at) for e in entries]
+        entries=[
+            FeedEntryModel(type=e.type, id=e.id, created_at=e.created_at, deletable=e.deletable)
+            for e in entries
+        ]
     )
 
 

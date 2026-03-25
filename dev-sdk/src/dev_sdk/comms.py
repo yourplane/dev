@@ -1,5 +1,6 @@
 """Comms directory: ordered list of user/agent comms files at task root."""
 
+import json
 from pathlib import Path
 
 COMMS_DIR = "comms"
@@ -98,17 +99,99 @@ def has_agent_logs(task_dir: Path) -> bool:
     return any(p.is_file() and p.suffix == ".log" for p in logs_dir.iterdir())
 
 
+def _comms_file_created_epoch_secs(path: Path) -> float:
+    """Same ordering key as feed: birthtime when available, else mtime."""
+    try:
+        st = path.stat()
+        if hasattr(st, "st_birthtime") and st.st_birthtime:
+            return float(st.st_birthtime)
+        return float(st.st_mtime)
+    except OSError:
+        return 0.0
+
+
+def _log_end_epoch_secs(log_path: Path) -> float:
+    """
+    Approximate end time of an agent JSONL log: timestamp_ms on the last parseable JSON line,
+    else max timestamp_ms in the file, else the log file's birthtime/mtime (same as feed).
+    """
+    try:
+        text = log_path.read_text(encoding="utf-8")
+    except OSError:
+        return 0.0
+    lines = [ln for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return _comms_file_created_epoch_secs(log_path)
+
+    last_obj: dict | None = None
+    for line in reversed(lines):
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            last_obj = obj
+            break
+    if last_obj is not None:
+        ts = last_obj.get("timestamp_ms")
+        if isinstance(ts, (int, float)) and ts > 0:
+            return float(ts) / 1000.0
+
+    max_sec: float | None = None
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            ts = obj.get("timestamp_ms")
+            if isinstance(ts, (int, float)) and ts > 0:
+                sec = float(ts) / 1000.0
+                if max_sec is None or sec > max_sec:
+                    max_sec = sec
+    if max_sec is not None:
+        return max_sec
+    return _comms_file_created_epoch_secs(log_path)
+
+
+def _agent_logs_cutoff_epoch_secs(task_dir: Path) -> float | None:
+    """Latest log-end time among .logs/*.log, or None if there are no log files."""
+    logs_dir = task_dir / LOGS_DIR
+    if not logs_dir.is_dir():
+        return None
+    log_files = [p for p in logs_dir.iterdir() if p.is_file() and p.suffix == ".log"]
+    if not log_files:
+        return None
+    return max(_log_end_epoch_secs(p) for p in log_files)
+
+
+def comms_file_removable(task_dir: Path, comm_path: Path) -> bool:
+    """True if an existing comms file at comm_path may be removed (same rules as remove_comms)."""
+    cutoff = _agent_logs_cutoff_epoch_secs(task_dir)
+    if cutoff is None:
+        return True
+    if not comm_path.is_file():
+        return True
+    return _comms_file_created_epoch_secs(comm_path) > cutoff
+
+
 def remove_comms(task_dir: Path, filename: str) -> None:
-    """Remove a comms file and its index entry. Not allowed when the task has agent logs."""
+    """Remove a comms file and its index entry.
+
+    When agent logs exist, removal is allowed only if the comm file is strictly newer than the
+    end of the last agent log event (JSONL timestamp_ms), per task policy.
+    """
     if not filename or "/" in filename or "\\" in filename or filename.strip() in ("", ".", ".."):
         raise ValueError("Invalid filename")
     filename = filename.strip()
-    if has_agent_logs(task_dir):
-        raise ValueError("Cannot remove comms when the task has agent logs")
     cdir = comms_dir(task_dir)
     path = (cdir / filename).resolve()
     if not path.parent.resolve().samefile(cdir.resolve()):
         raise ValueError("Invalid filename")
+    if path.is_file() and not comms_file_removable(task_dir, path):
+        raise ValueError(
+            "Cannot remove comms that are not strictly after the last agent log event"
+        )
     if path.is_file():
         path.unlink()
     idx = index_path(task_dir)

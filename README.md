@@ -100,6 +100,11 @@ To start both backend and frontend in one terminal (foreground; Ctrl+C stops bot
 
 Then open http://localhost:5173. See `dev-daemon/README.md` for run options and on-startup (e.g. systemd user service).
 
+## Logs (troubleshooting)
+
+- **dev-sdk:** Debug logs from the `dev_sdk` logger go to `~/.local/share/dev/sdk-debug.log` by default. Set `DEV_SDK_LOG` to use a different path. See [dev-sdk/README.md](dev-sdk/README.md#debugging).
+- **dev-server:** Uvicorn/FastAPI write to **stdout/stderr** of the process (the terminal where you start the server; see [Web UI (dev-frontend)](#web-ui-dev-frontend)). There is no default on-disk server log file. If you run the stack via **systemd** (`dev-daemon`), stream logs with `journalctl --user -u dev-daemon.service -f` (see [dev-daemon/README.md](dev-daemon/README.md)).
+
 ## Development
 
 Run tests:
