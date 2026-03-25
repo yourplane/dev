@@ -1327,6 +1327,11 @@ export function TaskCommsPageContent({
           const existingKeys = new Set(current.map((e) => `${e.type}:${e.id}`))
           const newEntries = res.entries.filter((e) => !existingKeys.has(`${e.type}:${e.id}`))
           if (newEntries.length === 0) return
+          // New log files change the removal cutoff; refresh the full feed so comms `deletable` updates.
+          if (newEntries.some((e) => e.type === 'log')) {
+            await loadFeed({ prefetchNew: opts?.prefetchNew })
+            return
+          }
           setFeedEntries((prev) => {
             const keys = new Set(prev.map((e) => `${e.type}:${e.id}`))
             const toAdd = newEntries.filter((e) => !keys.has(`${e.type}:${e.id}`))
