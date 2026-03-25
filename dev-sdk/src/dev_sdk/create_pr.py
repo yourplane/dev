@@ -596,6 +596,40 @@ def pull_pr_comments(task_root: Path) -> tuple[str, int, str | None]:
 
     new_items.sort(key=_sort_key)
 
+    def _context_lines_for_comment(kind: str, payload: dict) -> list[str]:
+        """File/line and optional diff snippet for review comments; note for issue comments."""
+        out: list[str] = []
+        if kind != "review":
+            out.append("- Context: general PR conversation (not tied to a file or line)")
+            return out
+        path = payload.get("path")
+        if isinstance(path, str) and path.strip():
+            out.append(f"- File: `{path.strip()}`")
+        line = payload.get("line")
+        original_line = payload.get("original_line")
+        start_line = payload.get("start_line")
+        if isinstance(start_line, int) and isinstance(line, int) and start_line != line:
+            out.append(f"- Lines: {start_line}-{line}")
+        elif isinstance(line, int):
+            out.append(f"- Line: {line}")
+        elif isinstance(original_line, int):
+            out.append(f"- Line (as of original diff): {original_line}")
+        elif path:
+            out.append("- Line: _(not reported by API for this comment)_")
+        diff_hunk = payload.get("diff_hunk")
+        if isinstance(diff_hunk, str) and diff_hunk.strip():
+            snippet = diff_hunk.strip()
+            max_chars = 4000
+            if len(snippet) > max_chars:
+                snippet = snippet[:max_chars] + "\n… _(truncated)_"
+            out.append("")
+            out.append("Surrounding diff:")
+            out.append("")
+            out.append("```diff")
+            out.append(snippet)
+            out.append("```")
+        return out
+
     lines: list[str] = []
     lines.append(f"# Pulled PR comments ({len(new_items)} new)")
     lines.append("")
@@ -616,6 +650,7 @@ def pull_pr_comments(task_root: Path) -> tuple[str, int, str | None]:
         lines.append(f"- Created: {created_at}")
         if html_url:
             lines.append(f"- URL: {html_url}")
+        lines.extend(_context_lines_for_comment(kind, payload))
         lines.append("")
         lines.append(body if body else "_(no body)_")
         lines.append("")
