@@ -403,14 +403,14 @@ def _list_pull_requests_api(
     head: str,
     base: str = "main",
 ) -> tuple[int, str]:
-    """GET pull requests filtered by `head` and `base`."""
+    """GET open pull requests filtered by `head` and `base`."""
     # GitHub expects `head` like: owner:branch
     # Encode the whole value to safely embed into query params (':' -> '%3A', etc).
     head_enc = urllib.parse.quote(head, safe="")
     base_enc = urllib.parse.quote(base, safe="")
     url = (
         f"https://api.github.com/repos/{owner}/{repo}/pulls"
-        f"?head={head_enc}&base={base_enc}&state=all"
+        f"?head={head_enc}&base={base_enc}&state=open"
         f"&sort=created&direction=desc&per_page=10"
     )
     return _github_request(token, "GET", url)
@@ -418,11 +418,11 @@ def _list_pull_requests_api(
 
 def find_existing_pull_request(task_root: Path) -> str | None:
     """
-    Find the existing PR for a task, if any.
+    Find an open pull request for the task's branch, if any.
 
     Assumes the task maps to a single git repository under the task root; the PR is
     identified by the task's current branch name (head) and base branch (`main`).
-    Returns the PR HTML URL or None when no PR exists.
+    Closed or merged PRs are ignored. Returns the PR HTML URL or None when no open PR exists.
     """
     task_root = task_root.resolve()
     _validate_task_root(task_root)
@@ -453,11 +453,14 @@ def find_existing_pull_request(task_root: Path) -> str | None:
     if not isinstance(pulls, list):
         raise CreatePRError(f"GitHub API error: expected list, got {type(pulls).__name__}")
 
+    # Only open PRs count; ignore closed/merged even if the API response is wrong.
+    open_pulls = [p for p in pulls if isinstance(p, dict) and p.get("state") == "open"]
+
     # `base=main` and `head` filters should keep this small and deterministic, but we
     # still validate to avoid returning the wrong PR if GitHub returns unexpected items.
     title = task_root.name
-    exact_title_matches = [p for p in pulls if isinstance(p, dict) and p.get("title") == title]
-    candidate_matches = [p for p in pulls if isinstance(p, dict)]
+    exact_title_matches = [p for p in open_pulls if p.get("title") == title]
+    candidate_matches = open_pulls
 
     # Prefer exact title match (create-pr uses title=task_root.name).
     chosen: dict | None = None
