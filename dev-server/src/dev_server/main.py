@@ -192,6 +192,7 @@ class FeedEntryModel(BaseModel):
     type: str  # "comms" | "log"
     id: str
     created_at: float
+    deletable: bool | None = None  # comms: DELETE allowed; logs: null
 
 
 class ListFeedResponse(BaseModel):
@@ -505,7 +506,10 @@ def list_task_feed(task_name: str, after: float | None = None) -> ListFeedRespon
     if after is not None:
         entries = [e for e in entries if e.created_at > after]
     return ListFeedResponse(
-        entries=[FeedEntryModel(type=e.type, id=e.id, created_at=e.created_at) for e in entries]
+        entries=[
+            FeedEntryModel(type=e.type, id=e.id, created_at=e.created_at, deletable=e.deletable)
+            for e in entries
+        ]
     )
 
 

@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
-from dev_sdk.comms import comms_dir, read_index
+from dev_sdk.comms import comms_dir, comms_file_removable, read_index
 
 LOGS_DIR = ".logs"
 
@@ -30,6 +30,7 @@ class FeedEntry:
     type: str  # "comms" | "log"
     id: str  # filename for comms, filename for log (e.g. "dev-plan-stream-20260314-195628.log")
     created_at: float  # Unix timestamp for sorting
+    deletable: bool | None = None  # comms: whether API DELETE is allowed; log entries: None
 
 
 def read_feed(task_dir: Path) -> list[FeedEntry]:
@@ -43,14 +44,17 @@ def read_feed(task_dir: Path) -> list[FeedEntry]:
             path = cdir / filename
             if path.is_file():
                 entries.append(
-                    FeedEntry(type="comms", id=filename, created_at=_file_created_at(path))
+                    FeedEntry(
+                        type="comms",
+                        id=filename,
+                        created_at=_file_created_at(path),
+                        deletable=comms_file_removable(task_dir, path),
+                    )
                 )
     logs_dir = task_dir / LOGS_DIR
     if logs_dir.is_dir():
         for p in sorted(logs_dir.iterdir()):
             if p.is_file() and p.suffix == ".log":
-                entries.append(
-                    FeedEntry(type="log", id=p.name, created_at=_file_created_at(p))
-                )
+                entries.append(FeedEntry(type="log", id=p.name, created_at=_file_created_at(p), deletable=None))
     entries.sort(key=lambda e: (e.created_at, e.id))
     return entries

@@ -176,7 +176,9 @@ export const api = {
   getTaskFeed(
     taskName: string,
     opts?: { after?: number }
-  ): Promise<{ entries: Array<{ type: string; id: string; created_at: number }> }> {
+  ): Promise<{
+    entries: Array<{ type: string; id: string; created_at: number; deletable?: boolean | null }>;
+  }> {
     const params = opts?.after != null ? `?after=${opts.after}` : '';
     return request(`/tasks/${encodeURIComponent(taskName)}/feed${params}`);
   },

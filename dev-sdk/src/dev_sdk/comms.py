@@ -165,6 +165,16 @@ def _agent_logs_cutoff_epoch_secs(task_dir: Path) -> float | None:
     return max(_log_end_epoch_secs(p) for p in log_files)
 
 
+def comms_file_removable(task_dir: Path, comm_path: Path) -> bool:
+    """True if an existing comms file at comm_path may be removed (same rules as remove_comms)."""
+    cutoff = _agent_logs_cutoff_epoch_secs(task_dir)
+    if cutoff is None:
+        return True
+    if not comm_path.is_file():
+        return True
+    return _comms_file_created_epoch_secs(comm_path) > cutoff
+
+
 def remove_comms(task_dir: Path, filename: str) -> None:
     """Remove a comms file and its index entry.
 
@@ -178,13 +188,10 @@ def remove_comms(task_dir: Path, filename: str) -> None:
     path = (cdir / filename).resolve()
     if not path.parent.resolve().samefile(cdir.resolve()):
         raise ValueError("Invalid filename")
-    cutoff = _agent_logs_cutoff_epoch_secs(task_dir)
-    if cutoff is not None and path.is_file():
-        comm_ts = _comms_file_created_epoch_secs(path)
-        if not (comm_ts > cutoff):
-            raise ValueError(
-                "Cannot remove comms that are not strictly after the last agent log event"
-            )
+    if path.is_file() and not comms_file_removable(task_dir, path):
+        raise ValueError(
+            "Cannot remove comms that are not strictly after the last agent log event"
+        )
     if path.is_file():
         path.unlink()
     idx = index_path(task_dir)
