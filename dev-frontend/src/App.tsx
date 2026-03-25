@@ -616,10 +616,9 @@ const FeedEntryRow = memo(function FeedEntryRow({
   activeLogFilename,
   isLast,
   lastEntryRef,
-  canDeleteComms,
   onDeleteComms,
 }: {
-  entry: { type: string; id: string; created_at: number }
+  entry: { type: string; id: string; created_at: number; deletable?: boolean | null }
   contents: Record<string, string>
   loadingContentKeys: Set<string>
   isCollapsed: boolean
@@ -629,7 +628,6 @@ const FeedEntryRow = memo(function FeedEntryRow({
   activeLogFilename: string | null
   isLast: boolean
   lastEntryRef: React.RefObject<HTMLDivElement>
-  canDeleteComms?: boolean
   onDeleteComms?: (filename: string) => void
 }) {
   useEffect(() => {
@@ -660,13 +658,13 @@ const FeedEntryRow = memo(function FeedEntryRow({
           </span>
           <span className="feed-entry-title">{title}</span>
         </button>
-        {entry.type === 'comms' && canDeleteComms && onDeleteComms && (
+        {entry.type === 'comms' && entry.deletable === true && onDeleteComms && (
           <button
             type="button"
             className="comms-entry-delete-btn"
             onClick={() => onDeleteComms(entry.id)}
             aria-label="Remove comms entry"
-            title="Remove this comms entry"
+            title="Remove this comms entry (only entries after the last agent log can be removed)"
           >
             Remove
           </button>
@@ -1198,7 +1196,9 @@ export function TaskCommsPageContent({
   taskName: string
   navigate: (to: string) => void
 }) {
-  const [feedEntries, setFeedEntries] = useState<Array<{ type: string; id: string; created_at: number }>>([])
+  const [feedEntries, setFeedEntries] = useState<
+    Array<{ type: string; id: string; created_at: number; deletable?: boolean | null }>
+  >([])
   const [contents, setContents] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -1383,7 +1383,6 @@ export function TaskCommsPageContent({
     [taskName]
   )
 
-  const canDeleteComms = feedEntries.length > 0 && !feedEntries.some((e) => e.type === 'log')
   const handleDeleteComms = useCallback(
     async (filename: string) => {
       if (!confirm('Remove this comms entry?')) return
@@ -1793,7 +1792,6 @@ export function TaskCommsPageContent({
                 activeLogFilename={activeLogFilename}
                 isLast={isLast}
                 lastEntryRef={lastCommsEntryRef}
-                canDeleteComms={canDeleteComms}
                 onDeleteComms={handleDeleteComms}
               />
             )

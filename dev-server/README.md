@@ -14,7 +14,7 @@ FastAPI server for dev task management: create, list, archive.
 - `GET /tasks/{task_name}/comms` — list comms filenames for a task (index order)
 - `POST /tasks/{task_name}/comms` — append a user comment (body: `content`); returns `{ "filename": "…" }` (201)
 - `GET /tasks/{task_name}/comms/{filename}` — raw content of one comms file (plain text)
-- `DELETE /tasks/{task_name}/comms/{filename}` — remove a comms file and its index entry. Returns 204 when allowed. Returns 400 when the task has agent logs (deletion not allowed).
+- `DELETE /tasks/{task_name}/comms/{filename}` — remove a comms file and its index entry. Returns 204 when allowed. Returns 400 when agent logs exist and the comm is not strictly after the last agent log event.
 - `GET /tasks/{task_name}/feed` — list feed entries (comms + agent logs) sorted by creation date
 - `GET /tasks/{task_name}/logs/{filename}` — raw content of one agent log file (plain text)
 - `GET /tasks/{task_name}/logs/stream` — stream the **active** log file via Server-Sent Events (404 if no command is running)
@@ -43,3 +43,7 @@ Or with the dev-server directory as cwd:
 ```bash
 cd dev-server && uv run uvicorn dev_server.main:app --reload --host 127.0.0.1
 ```
+
+## Logs
+
+The server logs to **stdout/stderr** in the terminal where uvicorn runs; there is no default log file. If you start the full stack with **systemd** (`dev-daemon`), use `journalctl --user -u dev-daemon.service -f`. For **dev-sdk** debug logs (e.g. from CLI code paths), see [dev-sdk/README.md](../dev-sdk/README.md#debugging) (`~/.local/share/dev/sdk-debug.log`, or `DEV_SDK_LOG`).

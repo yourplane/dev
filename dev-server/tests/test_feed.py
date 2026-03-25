@@ -1,5 +1,6 @@
 """Tests for task feed API."""
 
+import json
 import os
 import zipfile
 from io import BytesIO
@@ -87,3 +88,25 @@ def test_comms_download_empty_returns_404(client_with_tasks: TestClient, task_di
     resp = client_with_tasks.get("/tasks/mytask/comms/download")
     assert resp.status_code == 404
     assert "No comms" in resp.json()["detail"]
+
+
+def test_list_task_feed_comms_deletable_field(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """Feed entries include deletable for comms (true only when after last log event)."""
+    comms_dir(task_dir).mkdir(parents=True)
+    index_path(task_dir).write_text("001-user.md\n002-user.md\n")
+    (task_dir / "comms" / "001-user.md").write_text("Old")
+    (task_dir / "comms" / "002-user.md").write_text("New")
+    (task_dir / LOGS_DIR).mkdir(parents=True)
+    (task_dir / LOGS_DIR / "dev.log").write_text(
+        json.dumps({"type": "thinking", "timestamp_ms": 5_000_000}) + "\n",
+        encoding="utf-8",
+    )
+    os.utime(task_dir / "comms" / "001-user.md", (1, 1))
+    os.utime(task_dir / "comms" / "002-user.md", (10_000, 10_000))
+
+    resp = client_with_tasks.get("/tasks/mytask/feed")
+    assert resp.status_code == 200
+    by_id = {e["id"]: e for e in resp.json()["entries"]}
+    assert by_id["001-user.md"]["deletable"] is False
+    assert by_id["002-user.md"]["deletable"] is True
+    assert by_id["dev.log"]["deletable"] is None
