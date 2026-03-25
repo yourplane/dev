@@ -1,5 +1,7 @@
 """Tests for comms module."""
 
+import json
+import os
 from pathlib import Path
 
 import pytest
@@ -71,13 +73,39 @@ def test_remove_comms_when_no_agent_logs(task_dir: Path) -> None:
     assert read_index(task_dir) == ["002-agent-plan.md"]
 
 
-def test_remove_comms_when_agent_logs_raises(task_dir: Path) -> None:
+def test_remove_comms_when_agent_logs_and_comm_not_after_log_raises(task_dir: Path) -> None:
     (task_dir / "comms").mkdir(parents=True)
     add_comms(task_dir, "user", "Hello")
     (task_dir / ".logs").mkdir()
-    (task_dir / ".logs" / "dev.log").write_text("x")
-    with pytest.raises(ValueError, match="Cannot remove comms when the task has agent logs"):
+    last_ms = 5_000_000
+    (task_dir / ".logs" / "dev.log").write_text(
+        json.dumps({"type": "system", "subtype": "init"}) + "\n"
+        + json.dumps({"type": "thinking", "timestamp_ms": last_ms}) + "\n",
+        encoding="utf-8",
+    )
+    comm_path = task_dir / "comms" / "001-user.md"
+    os.utime(comm_path, (1, 1))
+    with pytest.raises(
+        ValueError,
+        match="Cannot remove comms that are not strictly after the last agent log event",
+    ):
         remove_comms(task_dir, "001-user.md")
+
+
+def test_remove_comms_when_agent_logs_and_comm_after_log_allowed(task_dir: Path) -> None:
+    (task_dir / "comms").mkdir(parents=True)
+    add_comms(task_dir, "user", "Hello")
+    (task_dir / ".logs").mkdir()
+    last_ms = 5_000_000
+    (task_dir / ".logs" / "dev.log").write_text(
+        json.dumps({"type": "thinking", "timestamp_ms": last_ms}) + "\n",
+        encoding="utf-8",
+    )
+    comm_path = task_dir / "comms" / "001-user.md"
+    os.utime(comm_path, (10_000, 10_000))
+    remove_comms(task_dir, "001-user.md")
+    assert not comm_path.exists()
+    assert read_index(task_dir) == []
 
 
 def test_remove_comms_invalid_filename_raises(task_dir: Path) -> None:
