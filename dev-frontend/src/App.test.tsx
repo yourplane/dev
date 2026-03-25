@@ -22,6 +22,7 @@ vi.mock('./api', () => ({
     startTaskCommand: vi.fn(),
     createTaskPr: vi.fn(),
     getTaskPr: vi.fn(),
+    pullTaskPrComments: vi.fn(),
   },
 }))
 
@@ -96,5 +97,30 @@ describe('App', () => {
     await waitFor(() => {
       expect(vi.mocked(api.setTaskCommentDraft)).toHaveBeenCalledWith('test-task', '')
     })
+  })
+
+  it('shows Pull Comments and triggers pull when PR exists', async () => {
+    const noop = () => {}
+    const { api } = await import('./api')
+    vi.mocked(api.getTaskPr).mockResolvedValue({ pr_url: 'https://github.com/acme/repo/pull/12' })
+    vi.mocked(api.pullTaskPrComments).mockResolvedValue({
+      pr_url: 'https://github.com/acme/repo/pull/12',
+      new_comments_count: 2,
+      comms_filename: '005-agent-pr-comments.md',
+    })
+
+    render(
+      <MemoryRouter>
+        <TaskCommsPageContent taskName="test-task" navigate={noop} />
+      </MemoryRouter>
+    )
+
+    const pullBtn = await screen.findByRole('button', { name: 'Pull Comments' })
+    fireEvent.click(pullBtn)
+
+    await waitFor(() => {
+      expect(vi.mocked(api.pullTaskPrComments)).toHaveBeenCalledWith('test-task')
+    })
+    await expect(screen.findByText('Pulled 2 new PR comments.')).resolves.toBeInTheDocument()
   })
 })

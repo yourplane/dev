@@ -1211,8 +1211,10 @@ export function TaskCommsPageContent({
   const [startingCommand, setStartingCommand] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [creatingPr, setCreatingPr] = useState(false)
+  const [pullingPrComments, setPullingPrComments] = useState(false)
   const [prUrl, setPrUrl] = useState<string | null>(null)
   const [prError, setPrError] = useState<string | null>(null)
+  const [prCommentsStatus, setPrCommentsStatus] = useState<string | null>(null)
   const prRehydrateRunIdRef = useRef(0)
   const [scrollToBottomAfterLoad, setScrollToBottomAfterLoad] = useState(false)
   const [lockedToBottom, setLockedToBottom] = useState(false)
@@ -1498,6 +1500,7 @@ export function TaskCommsPageContent({
     prRehydrateRunIdRef.current += 1
     setPrError(null)
     setPrUrl(null)
+    setPrCommentsStatus(null)
     setCreatingPr(true)
     try {
       const res = await api.createTaskPr(taskName)
@@ -1509,12 +1512,35 @@ export function TaskCommsPageContent({
     }
   }
 
+  const handlePullPrComments = async () => {
+    setPrError(null)
+    setPrCommentsStatus(null)
+    setPullingPrComments(true)
+    try {
+      const res = await api.pullTaskPrComments(taskName)
+      setPrUrl(res.pr_url)
+      setPrCommentsStatus(
+        res.new_comments_count === 0
+          ? 'No new PR comments.'
+          : `Pulled ${res.new_comments_count} new PR comment${res.new_comments_count === 1 ? '' : 's'}.`
+      )
+      if (res.new_comments_count > 0) {
+        await loadFeed({ incremental: true, prefetchNew: true })
+      }
+    } catch (e) {
+      setPrError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setPullingPrComments(false)
+    }
+  }
+
   useEffect(() => {
     let cancelled = false
     const runId = prRehydrateRunIdRef.current + 1
     prRehydrateRunIdRef.current = runId
 
     setPrError(null)
+    setPrCommentsStatus(null)
     api.getTaskPr(taskName)
       .then((res) => {
         if (cancelled) return
@@ -1831,16 +1857,19 @@ export function TaskCommsPageContent({
             <button
               type="button"
               className="command-btn"
-              disabled={!!startingCommand || creatingPr}
-              onClick={handleCreatePr}
-              aria-busy={creatingPr}
+              disabled={!!startingCommand || creatingPr || pullingPrComments}
+              onClick={prUrl ? handlePullPrComments : handleCreatePr}
+              aria-busy={creatingPr || pullingPrComments}
             >
-              {creatingPr ? 'Creating PR…' : 'Create PR'}
+              {prUrl
+                ? (pullingPrComments ? 'Pulling comments…' : 'Pull Comments')
+                : (creatingPr ? 'Creating PR…' : 'Create PR')}
             </button>
           </div>
         )}
         {commandError && <p className="inline-error">{commandError}</p>}
         {prError && <p className="inline-error">{prError}</p>}
+        {prCommentsStatus && <p>{prCommentsStatus}</p>}
         {prUrl && (
           <p className="pr-result">
             <a href={prUrl} target="_blank" rel="noopener noreferrer">Open PR</a>
