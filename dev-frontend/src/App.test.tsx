@@ -128,12 +128,14 @@ describe('App', () => {
     await expect(screen.findByText('Pulled 2 new PR comments.')).resolves.toBeInTheDocument()
   })
 
-  it('shows spinner status updates while creating a task', async () => {
+  it('shows spinner status from createTask progress callback', async () => {
     const { api } = await import('./api')
     vi.mocked(api.getRepos).mockResolvedValue({ desk: 'https://github.com/acme/repo.git' })
-    vi.mocked(api.createTask).mockImplementation(
-      () => new Promise(() => {}) // keep pending to verify status updates
-    )
+    // Leave the request pending so navigation does not unmount the form before we assert.
+    vi.mocked(api.createTask).mockImplementation((_body, onProgress) => {
+      onProgress?.('Comms directory ready.')
+      return new Promise(() => {})
+    })
 
     render(
       <MemoryRouter initialEntries={['/new']}>
@@ -146,12 +148,7 @@ describe('App', () => {
     fireEvent.click(await screen.findByRole('radio', { name: /desk/i }))
     fireEvent.click(screen.getByRole('button', { name: 'Create task' }))
 
-    await expect(screen.findByText('Created task directory.')).resolves.toBeInTheDocument()
+    await expect(screen.findByText('Comms directory ready.')).resolves.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Creating…' })).toBeDisabled()
-
-    await waitFor(
-      () => expect(screen.getByText('Comms directory ready.')).toBeInTheDocument(),
-      { timeout: 2500 }
-    )
   })
 })

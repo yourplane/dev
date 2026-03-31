@@ -6,7 +6,7 @@ FastAPI server for dev task management: create, list, archive.
 
 - `GET /tasks` — list active task names
 - `GET /repos` — list repo shorthands (from `~/.config/dev/repos.json`), for use by the frontend
-- `POST /tasks` — create a task (body: `title`, `repo` URL or shorthand, optional `comment`, optional `task_name`)
+- `POST /tasks` — create a task (body: `title`, `repo` URL or shorthand, optional `comment`, optional `task_name`). Returns **200** with `Content-Type: application/x-ndjson`: one JSON object per line — `{"type":"progress","message":"…"}` (same strings as CLI `dev task create` / `TaskManager.start_task` `on_progress`), then `{"type":"complete","task_name":"…","task_dir":"…"}` on success, or `{"type":"error","detail":"…","status":…}` on failure.
 - `POST /tasks/{task_name}/archive` — archive a task
 - `GET /archive` — list archived tasks (entries with `archived_name`, `task_name`, `archived_date`)
 - `POST /archive/{archived_name}/unarchive` — move archived task back to active (restore)
