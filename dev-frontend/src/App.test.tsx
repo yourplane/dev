@@ -8,6 +8,8 @@ vi.mock('./api', () => ({
   api: {
     getTasks: vi.fn(),
     getRepos: vi.fn(),
+    getNewTaskDraft: vi.fn(),
+    setNewTaskDraft: vi.fn(),
     createTask: vi.fn(),
     archiveTask: vi.fn(),
     getTaskCommsList: vi.fn(),
@@ -32,6 +34,8 @@ describe('App', () => {
     const { api } = await import('./api')
     vi.mocked(api.getTasks).mockResolvedValue({ tasks: [] })
     vi.mocked(api.getRepos).mockResolvedValue({})
+    vi.mocked(api.getNewTaskDraft).mockResolvedValue({})
+    vi.mocked(api.setNewTaskDraft).mockResolvedValue(undefined)
     vi.mocked(api.getTaskCommsList).mockResolvedValue({ files: [] })
     vi.mocked(api.getTaskFeed).mockResolvedValue({ entries: [] })
     vi.mocked(api.getTaskPr).mockResolvedValue({ pr_url: null })
@@ -122,5 +126,29 @@ describe('App', () => {
       expect(vi.mocked(api.pullTaskPrComments)).toHaveBeenCalledWith('test-task')
     })
     await expect(screen.findByText('Pulled 2 new PR comments.')).resolves.toBeInTheDocument()
+  })
+
+  it('shows spinner status from createTask progress callback', async () => {
+    const { api } = await import('./api')
+    vi.mocked(api.getRepos).mockResolvedValue({ desk: 'https://github.com/acme/repo.git' })
+    // Leave the request pending so navigation does not unmount the form before we assert.
+    vi.mocked(api.createTask).mockImplementation((_body, onProgress) => {
+      onProgress?.('Comms directory ready.')
+      return new Promise(() => {})
+    })
+
+    render(
+      <MemoryRouter initialEntries={['/new']}>
+        <Layout />
+      </MemoryRouter>
+    )
+
+    const titleInput = await screen.findByPlaceholderText('Task title')
+    fireEvent.change(titleInput, { target: { value: 'my task' } })
+    fireEvent.click(await screen.findByRole('radio', { name: /desk/i }))
+    fireEvent.click(screen.getByRole('button', { name: 'Create task' }))
+
+    await expect(screen.findByText('Comms directory ready.')).resolves.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Creating…' })).toBeDisabled()
   })
 })

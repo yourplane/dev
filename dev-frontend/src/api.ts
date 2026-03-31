@@ -91,11 +91,94 @@ export const api = {
     });
   },
 
-  createTask(body: CreateTaskBody): Promise<CreateTaskResponse> {
-    return request('/tasks', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
+  async createTask(
+    body: CreateTaskBody,
+    onProgress?: (message: string) => void,
+  ): Promise<CreateTaskResponse> {
+    const url = `${apiBaseUrl}/tasks`;
+    let res: Response;
+    try {
+      res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      throw new Error(
+        `Could not reach dev-server at ${apiBaseUrl}. ${msg === 'Failed to fetch' ? 'Check that the backend is running (and that the Vite proxy target matches).' : msg}`
+      );
+    }
+    if (!res.ok) {
+      const text = await res.text();
+      let detail = text;
+      try {
+        const j = JSON.parse(text) as { detail?: string };
+        if (typeof j.detail === 'string') detail = j.detail;
+      } catch {
+        // use raw text
+      }
+      throw new Error(detail || `HTTP ${res.status}`);
+    }
+    const reader = res.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body from create task');
+    }
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let result: CreateTaskResponse | null = null;
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        const obj = JSON.parse(trimmed) as {
+          type: string;
+          message?: string;
+          task_name?: string;
+          task_dir?: string;
+          detail?: string;
+        };
+        if (obj.type === 'progress' && typeof obj.message === 'string') {
+          onProgress?.(obj.message);
+        }
+        if (obj.type === 'complete' && typeof obj.task_name === 'string' && typeof obj.task_dir === 'string') {
+          result = { task_name: obj.task_name, task_dir: obj.task_dir };
+        }
+        if (obj.type === 'error' && typeof obj.detail === 'string') {
+          throw new Error(obj.detail);
+        }
+      }
+      if (done) {
+        break;
+      }
+    }
+    if (buffer.trim()) {
+      const trimmed = buffer.trim();
+      const obj = JSON.parse(trimmed) as {
+        type: string;
+        message?: string;
+        task_name?: string;
+        task_dir?: string;
+        detail?: string;
+      };
+      if (obj.type === 'progress' && typeof obj.message === 'string') {
+        onProgress?.(obj.message);
+      }
+      if (obj.type === 'complete' && typeof obj.task_name === 'string' && typeof obj.task_dir === 'string') {
+        result = { task_name: obj.task_name, task_dir: obj.task_dir };
+      }
+      if (obj.type === 'error' && typeof obj.detail === 'string') {
+        throw new Error(obj.detail);
+      }
+    }
+    if (!result) {
+      throw new Error('Task creation finished without a result');
+    }
+    return result;
   },
 
   getNewTaskDraft(): Promise<{ title?: string; repo?: string; comment?: string }> {

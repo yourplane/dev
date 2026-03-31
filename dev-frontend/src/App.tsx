@@ -349,6 +349,7 @@ function CreateTaskForm({
   const [repo, setRepo] = useState('')
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [createStatusMessage, setCreateStatusMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [addName, setAddName] = useState('')
@@ -462,18 +463,23 @@ function CreateTaskForm({
     setError(null)
     if (!title.trim()) { setError('Title is required'); return }
     if (!repo.trim()) { setError('Select a repo'); return }
+    setCreateStatusMessage(null)
     setSubmitting(true)
     try {
-      const res = await api.createTask({
-        title: title.trim(),
-        repo: repo.trim(),
-        comment: comment.trim() || undefined,
-      })
+      const res = await api.createTask(
+        {
+          title: title.trim(),
+          repo: repo.trim(),
+          comment: comment.trim() || undefined,
+        },
+        (msg) => setCreateStatusMessage(msg),
+      )
       onCreated(res.task_name)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setSubmitting(false)
+      setCreateStatusMessage(null)
     }
   }
 
@@ -551,7 +557,13 @@ function CreateTaskForm({
             rows={3}
           />
         </label>
-        <div className="form-actions">
+        <div className="form-actions create-form-submit-row">
+          {submitting && (
+            <p className="command-status create-task-status" role="status" aria-live="polite">
+              <span className="command-spinner" aria-hidden />
+              {createStatusMessage ?? 'Starting…'}
+            </p>
+          )}
           <button type="submit" disabled={submitting}>
             {submitting ? 'Creating…' : 'Create task'}
           </button>

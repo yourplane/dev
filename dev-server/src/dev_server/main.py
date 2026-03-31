@@ -2,7 +2,9 @@
 
 import asyncio
 import io
+import json
 import os
+import queue
 import re
 import threading
 import zipfile
@@ -342,37 +344,66 @@ def list_tasks() -> ListTasksResponse:
     return ListTasksResponse(tasks=manager.list_tasks())
 
 
-@app.post("/tasks", response_model=CreateTaskResponse, status_code=201)
-def create_task(body: CreateTaskRequest) -> CreateTaskResponse:
+@app.post("/tasks")
+def create_task(body: CreateTaskRequest) -> StreamingResponse:
+    """Create a task; streams NDJSON lines as work progresses (same messages as CLI `on_progress`)."""
     manager = _get_manager()
     task_name = body.task_name if body.task_name is not None else _slugify(body.title)
     try:
         repo_url = resolve_repo(body.repo)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    progress: list[str] = []
 
-    def on_progress(msg: str) -> None:
-        progress.append(msg)
+    tasks_root = _tasks_root()
 
-    try:
-        manager.start_task(
-            title=body.title,
-            task_name=task_name,
-            comment=body.comment,
-            repo_url=repo_url,
-            on_progress=on_progress,
-        )
-    except FileExistsError as e:
-        raise HTTPException(status_code=409, detail=f"Task already exists: {task_name}")
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    def ndjson_events():
+        q: queue.Queue = queue.Queue()
 
-    set_new_task_draft(_tasks_root(), "", "", "")
-    task_dir = _tasks_root() / task_name
-    return CreateTaskResponse(task_name=task_name, task_dir=str(task_dir))
+        def worker() -> None:
+            try:
+                manager.start_task(
+                    title=body.title,
+                    task_name=task_name,
+                    comment=body.comment,
+                    repo_url=repo_url,
+                    on_progress=lambda msg: q.put(("progress", msg)),
+                )
+                set_new_task_draft(tasks_root, "", "", "")
+                task_dir = tasks_root / task_name
+                q.put(("complete", str(task_dir)))
+            except FileExistsError:
+                q.put(("error", 409, f"Task already exists: {task_name}"))
+            except ValueError as e:
+                q.put(("error", 400, str(e)))
+            except Exception as e:
+                q.put(("error", 500, str(e)))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+        while True:
+            item = q.get()
+            if item[0] == "progress":
+                yield json.dumps({"type": "progress", "message": item[1]}) + "\n"
+            elif item[0] == "complete":
+                task_dir = item[1]
+                yield json.dumps(
+                    {
+                        "type": "complete",
+                        "task_name": task_name,
+                        "task_dir": task_dir,
+                    }
+                ) + "\n"
+                break
+            elif item[0] == "error":
+                _, status_code, detail = item
+                yield json.dumps({"type": "error", "detail": detail, "status": status_code}) + "\n"
+                break
+
+    return StreamingResponse(
+        ndjson_events(),
+        media_type="application/x-ndjson",
+        status_code=200,
+    )
 
 
 @app.post("/tasks/{task_name}/archive", response_model=ArchiveTaskResponse)
