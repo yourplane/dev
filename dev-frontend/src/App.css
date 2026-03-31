@@ -630,6 +630,10 @@
   color: #555;
 }
 
+.create-task-status {
+  margin: 0 0 0.5rem;
+}
+
 .command-cancel-btn {
   background: #6b7280;
 }

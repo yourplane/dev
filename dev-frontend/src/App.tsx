@@ -335,6 +335,18 @@ function ArchivePage() {
 }
 
 const DRAFT_DEBOUNCE_MS = 400
+const CREATE_TASK_STATUS_STEP_MS = 1200
+const CREATE_TASK_PROGRESS_MESSAGES = [
+  'Created task directory.',
+  'Comms directory ready.',
+  'Added initial comment to comms.',
+  'Creating agent chat…',
+  'Agent chat created.',
+  'Cloning repository…',
+  'Repository cloned.',
+  'Checking out feature branch…',
+  'Feature branch created.',
+]
 
 function CreateTaskForm({
   onCreated,
@@ -349,6 +361,8 @@ function CreateTaskForm({
   const [repo, setRepo] = useState('')
   const [comment, setComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [createStatusMessages, setCreateStatusMessages] = useState<string[]>([])
+  const [createStatusIndex, setCreateStatusIndex] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [addModalOpen, setAddModalOpen] = useState(false)
   const [addName, setAddName] = useState('')
@@ -462,6 +476,11 @@ function CreateTaskForm({
     setError(null)
     if (!title.trim()) { setError('Title is required'); return }
     if (!repo.trim()) { setError('Select a repo'); return }
+    const messages = comment.trim()
+      ? CREATE_TASK_PROGRESS_MESSAGES
+      : CREATE_TASK_PROGRESS_MESSAGES.filter((msg) => msg !== 'Added initial comment to comms.')
+    setCreateStatusMessages(messages)
+    setCreateStatusIndex(0)
     setSubmitting(true)
     try {
       const res = await api.createTask({
@@ -477,6 +496,16 @@ function CreateTaskForm({
     }
   }
 
+  useEffect(() => {
+    if (!submitting || createStatusMessages.length <= 1) return
+    const intervalId = setInterval(() => {
+      setCreateStatusIndex((current) => (
+        current < createStatusMessages.length - 1 ? current + 1 : current
+      ))
+    }, CREATE_TASK_STATUS_STEP_MS)
+    return () => clearInterval(intervalId)
+  }, [submitting, createStatusMessages])
+
   return (
     <section className="create-form">
       <h2>New task</h2>
@@ -487,6 +516,12 @@ function CreateTaskForm({
       </div>
       <form onSubmit={handleSubmit}>
         {error && <p className="inline-error">{error}</p>}
+        {submitting && createStatusMessages.length > 0 && (
+          <p className="command-status create-task-status" role="status" aria-live="polite">
+            <span className="command-spinner" aria-hidden />
+            {createStatusMessages[createStatusIndex]}
+          </p>
+        )}
         <label>
           <span>Title <span className="required">*</span></span>
           <input
