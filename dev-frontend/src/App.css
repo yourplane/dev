@@ -630,8 +630,15 @@
   color: #555;
 }
 
-.create-task-status {
-  margin: 0 0 0.5rem;
+.create-form-submit-row {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.create-form-submit-row .create-task-status {
+  flex: 1 1 12rem;
+  margin: 0;
+  min-width: 0;
 }
 
 .command-cancel-btn {

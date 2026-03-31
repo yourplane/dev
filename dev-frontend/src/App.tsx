@@ -493,12 +493,6 @@ function CreateTaskForm({
       </div>
       <form onSubmit={handleSubmit}>
         {error && <p className="inline-error">{error}</p>}
-        {submitting && (
-          <p className="command-status create-task-status" role="status" aria-live="polite">
-            <span className="command-spinner" aria-hidden />
-            {createStatusMessage ?? 'Starting…'}
-          </p>
-        )}
         <label>
           <span>Title <span className="required">*</span></span>
           <input
@@ -563,7 +557,13 @@ function CreateTaskForm({
             rows={3}
           />
         </label>
-        <div className="form-actions">
+        <div className="form-actions create-form-submit-row">
+          {submitting && (
+            <p className="command-status create-task-status" role="status" aria-live="polite">
+              <span className="command-spinner" aria-hidden />
+              {createStatusMessage ?? 'Starting…'}
+            </p>
+          )}
           <button type="submit" disabled={submitting}>
             {submitting ? 'Creating…' : 'Create task'}
           </button>
