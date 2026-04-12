@@ -41,8 +41,9 @@ def create_pr(
     upstream or is not in sync with the remote, runs git push (with -u when
     setting upstream) automatically. PR title is the task name; PR body is
     built from commit messages not on main.
-    Token: fetches GitHub App credentials from AWS Secrets Manager (secret name
-    github-desk) and obtains an installation token with pull_requests write.
+    Token: resolves the AWS secret name for this repo's GitHub owner from
+    ~/.config/git-auth/bots.json, fetches GitHub App credentials from AWS Secrets
+    Manager, and obtains an installation token with pull_requests write.
     """
     task_root = _resolve_task_root(task_path)
     try:
