@@ -147,13 +147,14 @@ def test_create_pr_sets_upstream_when_no_upstream(
         response.__exit__ = lambda *a: None
         return response
 
-    with patch("dev_sdk.create_pr._get_github_token", return_value="secret"):
-        with patch("dev_sdk.create_pr.subprocess.run", side_effect=run):
-            with patch(
-                "dev_sdk.create_pr.urllib.request.urlopen",
-                side_effect=urlopen,
-            ):
-                result = runner.invoke(create_pr, ["--task", str(tmp_path)])
+    with patch("dev_sdk.create_pr._secret_name_for_github_owner", return_value="dummy-secret"):
+        with patch("dev_sdk.create_pr._get_github_token", return_value="secret"):
+            with patch("dev_sdk.create_pr.subprocess.run", side_effect=run):
+                with patch(
+                    "dev_sdk.create_pr.urllib.request.urlopen",
+                    side_effect=urlopen,
+                ):
+                    result = runner.invoke(create_pr, ["--task", str(tmp_path)])
     assert result.exit_code == 0
     assert "https://github.com/owner/repo/pull/99" in result.output
 
@@ -193,13 +194,14 @@ def test_create_pr_pushes_when_out_of_sync(
         response.__exit__ = lambda *a: None
         return response
 
-    with patch("dev_sdk.create_pr._get_github_token", return_value="secret"):
-        with patch("dev_sdk.create_pr.subprocess.run", side_effect=run):
-            with patch(
-                "dev_sdk.create_pr.urllib.request.urlopen",
-                side_effect=urlopen,
-            ):
-                result = runner.invoke(create_pr, ["--task", str(tmp_path)])
+    with patch("dev_sdk.create_pr._secret_name_for_github_owner", return_value="dummy-secret"):
+        with patch("dev_sdk.create_pr._get_github_token", return_value="secret"):
+            with patch("dev_sdk.create_pr.subprocess.run", side_effect=run):
+                with patch(
+                    "dev_sdk.create_pr.urllib.request.urlopen",
+                    side_effect=urlopen,
+                ):
+                    result = runner.invoke(create_pr, ["--task", str(tmp_path)])
     assert result.exit_code == 0
     assert "https://github.com/owner/repo/pull/11" in result.output
 
@@ -287,13 +289,14 @@ def test_create_pr_success(runner: CliRunner, tmp_path: Path) -> None:
         response.__exit__ = lambda *a: None
         return response
 
-    with patch("dev_sdk.create_pr._get_github_token", return_value="secret"):
-        with patch("dev_sdk.create_pr.subprocess.run", side_effect=run):
-            with patch(
-                "dev_sdk.create_pr.urllib.request.urlopen",
-                side_effect=urlopen,
-            ):
-                result = runner.invoke(create_pr, ["--task", str(tmp_path)])
+    with patch("dev_sdk.create_pr._secret_name_for_github_owner", return_value="dummy-secret"):
+        with patch("dev_sdk.create_pr._get_github_token", return_value="secret"):
+            with patch("dev_sdk.create_pr.subprocess.run", side_effect=run):
+                with patch(
+                    "dev_sdk.create_pr.urllib.request.urlopen",
+                    side_effect=urlopen,
+                ):
+                    result = runner.invoke(create_pr, ["--task", str(tmp_path)])
     assert result.exit_code == 0
     assert "https://github.com/owner/repo/pull/42" in result.output
     assert "#42" in result.output

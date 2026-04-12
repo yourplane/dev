@@ -198,18 +198,73 @@ def _get_github_app_installation_token(
     return token
 
 
-GITHUB_APP_SECRET_NAME = "github-desk"
+def _git_auth_bots_path() -> Path:
+    """Machine-local mapping of GitHub owner -> AWS Secrets Manager secret name."""
+    return Path.home() / ".config" / "git-auth" / "bots.json"
 
 
-def _get_github_token() -> str:
+def _secret_name_for_github_owner(owner: str) -> str:
+    """
+    Resolve AWS Secrets Manager secret id for a GitHub owner (org or user).
+
+    Reads ~/.config/git-auth/bots.json: {"bots": [{"org": "...", "secret": "..."}, ...]}.
+    Matching on org vs owner is case-insensitive. Missing file, invalid JSON, or no
+    matching entry is an error (no fallback).
+    """
+    path = _git_auth_bots_path()
+    if not path.is_file():
+        raise CreatePRError(
+            f"GitHub bot config not found: {path}. "
+            "Create this file with a \"bots\" array of {{\"org\", \"secret\"}} objects."
+        )
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise CreatePRError(f"Invalid JSON in {path}: {e}")
+    if not isinstance(raw, dict):
+        raise CreatePRError(f"Expected a JSON object at root in {path}")
+    bots = raw.get("bots")
+    if not isinstance(bots, list):
+        raise CreatePRError(f"Missing or invalid \"bots\" array in {path}")
+
+    owner_lower = owner.lower()
+    for entry in bots:
+        if not isinstance(entry, dict):
+            continue
+        org = entry.get("org")
+        secret = entry.get("secret")
+        if not isinstance(org, str) or not isinstance(secret, str):
+            continue
+        if org.lower() == owner_lower:
+            s = secret.strip()
+            if not s:
+                raise CreatePRError(f"Empty \"secret\" for org {org!r} in {path}")
+            return s
+
+    raise CreatePRError(
+        f"No GitHub bot secret configured for owner {owner!r} in {path}. "
+        "Add a matching {{\"org\": ..., \"secret\": ...}} entry under \"bots\"."
+    )
+
+
+def _owner_repo_from_repo_root(repo_root: Path) -> tuple[str, str]:
+    """Parse origin remote into (owner, repo). Raises CreatePRError if URL is not GitHub."""
+    remote_url = _git_output(repo_root, "remote", "get-url", "origin")
+    try:
+        return _parse_owner_repo(remote_url)
+    except ValueError as e:
+        raise CreatePRError(str(e))
+
+
+def _get_github_token(secret_name: str) -> str:
     """
     Obtain GitHub token from AWS Secrets Manager (GitHub App credentials).
-    Fetches secret github-desk (app_id, installation_id, private_key), obtains
+    Fetches the named secret (app_id, installation_id, private_key), obtains
     an installation access token with pull_requests write.
     """
     aws_args = [
         "aws", "secretsmanager", "get-secret-value",
-        "--secret-id", GITHUB_APP_SECRET_NAME,
+        "--secret-id", secret_name,
     ]
     if os.environ.get("AWS_REGION"):
         aws_args.extend(["--region", os.environ["AWS_REGION"]])
@@ -219,7 +274,7 @@ def _get_github_token() -> str:
     proc = subprocess.run(aws_args, capture_output=True, text=True, timeout=30)
     if proc.returncode != 0:
         raise CreatePRError(
-            f"Failed to get secret {GITHUB_APP_SECRET_NAME!r}: {proc.stderr or proc.stdout}"
+            f"Failed to get secret {secret_name!r}: {proc.stderr or proc.stdout}"
         )
 
     try:
@@ -334,8 +389,9 @@ def create_pull_request(task_root: Path, *, allow_dirty: bool = False) -> str:
 
     Validates task root (has comms/), finds the single git repo under it, ensures
     branch is not main and tree is clean (unless allow_dirty), pushes if needed,
-    gets GitHub token via AWS Secrets Manager (github-desk), creates PR with
-    title = task_root.name and body from commit messages.
+    resolves the AWS secret name for the repo's GitHub owner via
+    ~/.config/git-auth/bots.json, gets a GitHub token from AWS Secrets Manager,
+    and creates a PR with title = task_root.name and body from commit messages.
 
     Returns the PR HTML URL (e.g. https://github.com/owner/repo/pull/123).
     Raises CreatePRError on validation or API failure.
@@ -349,12 +405,9 @@ def create_pull_request(task_root: Path, *, allow_dirty: bool = False) -> str:
         _ensure_clean_tree(repo_root)
     _ensure_branch_pushed_and_tracking(repo_root)
 
-    token = _get_github_token()
-    remote_url = _git_output(repo_root, "remote", "get-url", "origin")
-    try:
-        owner, repo = _parse_owner_repo(remote_url)
-    except ValueError as e:
-        raise CreatePRError(str(e))
+    owner, repo = _owner_repo_from_repo_root(repo_root)
+    secret_name = _secret_name_for_github_owner(owner)
+    token = _get_github_token(secret_name)
 
     head = _current_branch(repo_root)
     title = task_root.name
@@ -432,12 +485,9 @@ def find_existing_pull_request(task_root: Path) -> str | None:
     if head_branch == "main":
         return None
 
-    token = _get_github_token()
-    remote_url = _git_output(repo_root, "remote", "get-url", "origin")
-    try:
-        owner, repo = _parse_owner_repo(remote_url)
-    except ValueError as e:
-        raise CreatePRError(str(e))
+    owner, repo = _owner_repo_from_repo_root(repo_root)
+    secret_name = _secret_name_for_github_owner(owner)
+    token = _get_github_token(secret_name)
 
     head = f"{owner}:{head_branch}"
     status, resp_body = _list_pull_requests_api(token, owner, repo, head=head, base="main")
@@ -564,12 +614,9 @@ def pull_pr_comments(task_root: Path) -> tuple[str, int, str | None]:
         raise CreatePRError("No existing PR found for this task.")
     pr_number = _parse_pr_number(pr_url)
 
-    token = _get_github_token()
-    remote_url = _git_output(repo_root, "remote", "get-url", "origin")
-    try:
-        owner, repo = _parse_owner_repo(remote_url)
-    except ValueError as e:
-        raise CreatePRError(str(e))
+    owner, repo = _owner_repo_from_repo_root(repo_root)
+    secret_name = _secret_name_for_github_owner(owner)
+    token = _get_github_token(secret_name)
 
     review_comments_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/comments"
     issue_comments_url = f"https://api.github.com/repos/{owner}/{repo}/issues/{pr_number}/comments"

@@ -1,4 +1,4 @@
-"""Tests for PR discovery (find_existing_pull_request)."""
+"""Tests for PR discovery (find_existing_pull_request) and bot secret resolution."""
 
 import json
 import os
@@ -8,7 +8,12 @@ from unittest.mock import patch
 
 import pytest
 
-from dev_sdk.create_pr import _list_pull_requests_api, find_existing_pull_request
+from dev_sdk.create_pr import (
+    CreatePRError,
+    _list_pull_requests_api,
+    _secret_name_for_github_owner,
+    find_existing_pull_request,
+)
 
 
 @pytest.fixture
@@ -46,8 +51,9 @@ def task_with_git_repo(tmp_path: Path) -> Path:
 
 @patch("dev_sdk.create_pr._list_pull_requests_api")
 @patch("dev_sdk.create_pr._get_github_token")
+@patch("dev_sdk.create_pr._secret_name_for_github_owner", return_value="dummy-secret")
 def test_find_existing_returns_none_when_only_closed_pr(
-    mock_token: object, mock_list: object, task_with_git_repo: Path
+    _mock_secret: object, mock_token: object, mock_list: object, task_with_git_repo: Path
 ) -> None:
     mock_token.return_value = "tok"  # type: ignore[method-assign]
     mock_list.return_value = (  # type: ignore[method-assign]
@@ -67,8 +73,9 @@ def test_find_existing_returns_none_when_only_closed_pr(
 
 @patch("dev_sdk.create_pr._list_pull_requests_api")
 @patch("dev_sdk.create_pr._get_github_token")
+@patch("dev_sdk.create_pr._secret_name_for_github_owner", return_value="dummy-secret")
 def test_find_existing_returns_url_for_open_pr(
-    mock_token: object, mock_list: object, task_with_git_repo: Path
+    _mock_secret: object, mock_token: object, mock_list: object, task_with_git_repo: Path
 ) -> None:
     mock_token.return_value = "tok"  # type: ignore[method-assign]
     url = "https://github.com/acme/test/pull/2"
@@ -77,6 +84,44 @@ def test_find_existing_returns_url_for_open_pr(
         json.dumps([{"title": "my-task", "state": "open", "html_url": url}]),
     )
     assert find_existing_pull_request(task_with_git_repo) == url
+
+
+def test_secret_name_case_insensitive(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg = tmp_path / ".config" / "git-auth"
+    cfg.mkdir(parents=True)
+    (cfg / "bots.json").write_text(
+        json.dumps({"bots": [{"org": "ACME", "secret": "  my-secret  "}]}),
+        encoding="utf-8",
+    )
+    assert _secret_name_for_github_owner("acme") == "my-secret"
+
+
+def test_secret_name_missing_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    with pytest.raises(CreatePRError, match="GitHub bot config not found"):
+        _secret_name_for_github_owner("acme")
+
+
+def test_secret_name_unknown_owner(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg = tmp_path / ".config" / "git-auth"
+    cfg.mkdir(parents=True)
+    (cfg / "bots.json").write_text(
+        json.dumps({"bots": [{"org": "other", "secret": "x"}]}),
+        encoding="utf-8",
+    )
+    with pytest.raises(CreatePRError, match="No GitHub bot secret configured"):
+        _secret_name_for_github_owner("acme")
+
+
+def test_secret_name_invalid_json(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("HOME", str(tmp_path))
+    cfg = tmp_path / ".config" / "git-auth"
+    cfg.mkdir(parents=True)
+    (cfg / "bots.json").write_text("{", encoding="utf-8")
+    with pytest.raises(CreatePRError, match="Invalid JSON"):
+        _secret_name_for_github_owner("acme")
 
 
 @patch("dev_sdk.create_pr._github_request")
