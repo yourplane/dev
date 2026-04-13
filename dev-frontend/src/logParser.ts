@@ -144,13 +144,18 @@ export function parseLogToSegments(raw: string): LogSegment[] {
   function getOutputFromResult(result: unknown): string {
     if (result == null) return ''
     const r = result as Record<string, unknown>
-    const inner = (r.success != null ? (r.success as Record<string, unknown>) : r) as Record<string, unknown>
-    if (typeof inner.output === 'string') return inner.output
-    if (typeof inner.combinedOutput === 'string') return inner.combinedOutput
-    if (typeof inner.interleavedOutput === 'string') return inner.interleavedOutput
-    const stdout = typeof inner.stdout === 'string' ? inner.stdout : ''
-    const stderr = typeof inner.stderr === 'string' ? inner.stderr : ''
-    return stderr ? stdout + (stdout ? '\n' : '') + stderr : stdout
+    const inner = (r.success != null && r.success !== false ? (r.success as Record<string, unknown>) : r) as Record<string, unknown>
+    function fromObj(obj: Record<string, unknown>): string {
+      if (typeof obj.output === 'string') return obj.output
+      if (typeof obj.combinedOutput === 'string') return obj.combinedOutput
+      if (typeof obj.interleavedOutput === 'string') return obj.interleavedOutput
+      const stdout = typeof obj.stdout === 'string' ? obj.stdout : ''
+      const stderr = typeof obj.stderr === 'string' ? obj.stderr : ''
+      return stderr ? stdout + (stdout ? '\n' : '') + stderr : stdout
+    }
+    const fromInner = fromObj(inner)
+    if (fromInner) return fromInner
+    return fromObj(r)
   }
 
   function flushToolCalls(): void {
