@@ -14,10 +14,8 @@ from dev.commands import (
     launch_interact,
     list_tasks,
     plan_implement_group,
-    plan_test_cmd,
     repos_group,
     start_task,
-    test_cmd,
 )
 
 DEFAULT_SDK_LOG = Path.home() / ".local" / "share" / "dev" / "sdk-debug.log"
@@ -48,9 +46,7 @@ main.add_command(launch_interact)
 main.add_command(list_tasks)
 main.add_command(archive_task)
 main.add_command(plan_implement_group)
-main.add_command(plan_test_cmd)
 main.add_command(implement_cmd)
-main.add_command(test_cmd)
 main.add_command(create_pr)
 main.add_command(comms_group)
 main.add_command(repos_group)
