@@ -142,6 +142,8 @@ class ArchivedTaskEntryModel(BaseModel):
     archived_name: str
     task_name: str
     archived_date: str
+    archived_at: str
+    last_modified_at: str
 
 
 class ListArchiveResponse(BaseModel):
@@ -433,6 +435,8 @@ def list_archive() -> ListArchiveResponse:
                 archived_name=e.archived_name,
                 task_name=e.task_name,
                 archived_date=e.archived_date,
+                archived_at=e.archived_at,
+                last_modified_at=e.last_modified_at,
             )
             for e in entries
         ]

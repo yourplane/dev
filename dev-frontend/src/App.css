@@ -209,6 +209,19 @@
   flex: 1;
 }
 
+.archive-task-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.archive-task-subtext {
+  font-size: 0.8rem;
+  color: #666;
+}
+
 .unarchive-btn {
   padding: 0.35rem 0.65rem;
   border: 1px solid #2a2;

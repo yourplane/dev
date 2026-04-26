@@ -196,8 +196,21 @@ function formatArchiveDateLabel(dateStr: string): string {
   return `${day} ${months[month] ?? month}`
 }
 
+function formatTimestampLabel(timestamp: string): string {
+  if (!timestamp) return 'Unknown'
+  const parsed = new Date(timestamp)
+  if (Number.isNaN(parsed.getTime())) return 'Unknown'
+  return parsed.toLocaleString()
+}
+
 function ArchivePage() {
-  const [entries, setEntries] = useState<Array<{ archived_name: string; task_name: string; archived_date: string }>>([])
+  const [entries, setEntries] = useState<Array<{
+    archived_name: string
+    task_name: string
+    archived_date: string
+    archived_at: string
+    last_modified_at: string
+  }>>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [unarchiving, setUnarchiving] = useState<string | null>(null)
@@ -266,7 +279,7 @@ function ArchivePage() {
     acc[d].push(e)
     return acc
   }, {})
-  const dateOrder = [...new Set(entries.map((e) => e.archived_date || 'unknown'))].sort().reverse()
+  const dateOrder = Object.keys(byDate)
 
   if (loading) return <p className="status">Loading archive…</p>
   if (error) {
@@ -305,7 +318,10 @@ function ArchivePage() {
               <ul>
                 {byDate[dateKey].map((e) => (
                   <li key={e.archived_name} className="task-row">
-                    <span className="task-name">{e.task_name}</span>
+                    <div className="archive-task-meta">
+                      <span className="task-name">{e.task_name}</span>
+                      <span className="archive-task-subtext">Last modified {formatTimestampLabel(e.last_modified_at)}</span>
+                    </div>
                     <button
                       type="button"
                       className="copy-from-archive-btn"

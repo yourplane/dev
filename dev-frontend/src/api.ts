@@ -53,6 +53,8 @@ export interface ArchivedTaskEntry {
   archived_name: string;
   task_name: string;
   archived_date: string;
+  archived_at: string;
+  last_modified_at: string;
 }
 
 export interface ListArchiveResponse {
