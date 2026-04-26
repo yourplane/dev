@@ -43,6 +43,7 @@ SUPPORTED_COMMANDS = ("plan-implement", "implement", "do")
 # In-memory registry: task_name -> { "command_id", "thread" }
 _command_registry: dict[str, dict] = {}
 _command_registry_lock = threading.Lock()
+_last_command_error: dict[str, str] = {}
 
 
 def _run_command_in_thread(
@@ -70,8 +71,12 @@ def _run_command_in_thread(
                 # Defensive: request validation should prevent this.
                 raise AgentRunError("Missing prompt for do command.")
             run_do(task_dir, prompt=prompt, on_start=on_start, cancel_event=cancel_requested)
-    except AgentRunError:
-        pass
+    except AgentRunError as e:
+        with _command_registry_lock:
+            _last_command_error[task_name] = str(e)
+    else:
+        with _command_registry_lock:
+            _last_command_error.pop(task_name, None)
     finally:
         with _command_registry_lock:
             _command_registry.pop(task_name, None)
@@ -185,6 +190,7 @@ class CommandStatusResponse(BaseModel):
     active: bool
     command: str | None = None
     active_log_filename: str | None = None
+    command_error: str | None = None
 
 
 class CreatePRResponse(BaseModel):
@@ -655,6 +661,7 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
             "thread": thread,
             "cancel_requested": cancel_requested,
         }
+        _last_command_error.pop(task_name, None)
         thread.start()
     return StartCommandResponse(command=body.command)
 
@@ -665,12 +672,14 @@ def get_task_command_status(task_name: str) -> CommandStatusResponse:
     _task_dir(task_name)
     with _command_registry_lock:
         entry = _command_registry.get(task_name)
+        last_error = _last_command_error.get(task_name)
     if entry is None:
-        return CommandStatusResponse(active=False, command=None, active_log_filename=None)
+        return CommandStatusResponse(active=False, command=None, active_log_filename=None, command_error=last_error)
     return CommandStatusResponse(
         active=True,
         command=entry["command_id"],
         active_log_filename=entry.get("active_log_filename"),
+        command_error=None,
     )
 
 

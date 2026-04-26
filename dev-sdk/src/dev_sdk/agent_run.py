@@ -52,6 +52,16 @@ PROC_WAIT_TIMEOUT_SEC = 5
 CANCEL_TERMINATE_TIMEOUT_SEC = 5
 
 
+def _remove_empty_log_file(path: Path) -> None:
+    """Delete the stream log when it is empty."""
+    try:
+        if path.exists() and path.stat().st_size == 0:
+            path.unlink()
+    except OSError:
+        # Best-effort cleanup only.
+        pass
+
+
 def _agent_cmd() -> str:
     """Resolve agent command (SDK internal; no CLI parameter)."""
     return os.environ.get(DEV_AGENT_CMD_ENV, AGENT_CMD_DEFAULT).strip() or AGENT_CMD_DEFAULT
@@ -244,6 +254,8 @@ def _run_agent_ask_stream_json(
         raise AgentRunError(str(read_error[0])) from read_error[0]
 
     streamed_output = "".join(buffer)
+    _remove_empty_log_file(stream_log_path)
+
     if proc.returncode != 0:
         msg = stderr_output if stderr_output else f"Agent exited with code {proc.returncode} (no output)."
         raise AgentRunError(msg)
@@ -390,7 +402,7 @@ def run_implement(
     stream_log_path = logs_dir / stream_log_name
     if on_start:
         on_start(stream_log_path)
-    # Implement mode: no --mode ask, add --force and --sandbox disabled
+    # Implement mode: explicitly use non-ask mode, add --force and --sandbox disabled
     argv = [
         agent_cmd,
         "agent",
@@ -469,6 +481,8 @@ def run_implement(
 
     if read_error[0] is not None:
         raise AgentRunError(str(read_error[0])) from read_error[0]
+
+    _remove_empty_log_file(stream_log_path)
 
     if proc.returncode != 0:
         msg = stderr_output if stderr_output else f"Agent exited with code {proc.returncode} (no output)."
@@ -573,6 +587,8 @@ def run_do(
 
     if read_error[0] is not None:
         raise AgentRunError(str(read_error[0])) from read_error[0]
+
+    _remove_empty_log_file(stream_log_path)
 
     if proc.returncode != 0:
         msg = stderr_output if stderr_output else f"Agent exited with code {proc.returncode} (no output)."
