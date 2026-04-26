@@ -123,7 +123,6 @@ def test_interact_launches_with_chat_id(runner: CliRunner, tmp_path: Path) -> No
 def test_plan_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) -> None:
     with runner.isolated_filesystem(tmp_path):
         cwd = Path.cwd()
-        (cwd / "agent-chat-id").write_text("chat-456")
         (cwd / "comms").mkdir()
         (cwd / "comms" / "index.txt").write_text("")
         # Simulate stream-json output: one NDJSON line with content field
@@ -146,8 +145,7 @@ def test_plan_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) 
     assert "stream-json" in argv
     assert "--stream-partial-output" in argv
     assert "--mode" in argv and "ask" in argv
-    assert "--resume" in argv
-    assert "chat-456" in argv
+    assert "--resume" not in argv
     assert "--workspace" in argv
     assert "--trust" in argv
     draft = cwd / "task-plan-draft.md"

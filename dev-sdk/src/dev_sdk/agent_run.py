@@ -133,10 +133,10 @@ StreamLineCallback = Callable[[str], None]
 
 def _run_agent_ask_stream_json(
     task_dir: Path,
-    chat_id: str,
     prompt: str,
     stream_log_prefix: str,
     *,
+    chat_id: str | None = None,
     extra_argv: list[str] | None = None,
     on_stream_line: StreamLineCallback | None = None,
     on_start: Callable[[Path], None] | None = None,
@@ -157,13 +157,13 @@ def _run_agent_ask_stream_json(
         "--stream-partial-output",
         "--mode",
         "ask",
-        "--resume",
-        chat_id,
         "--workspace",
         str(task_dir),
         "--trust",
         prompt,
     ]
+    if chat_id:
+        base_argv[10:10] = ["--resume", chat_id]
     argv = base_argv + extra_argv
 
     buffer: list[str] = []
@@ -320,10 +320,8 @@ def run_plan_implement(
     cancel_event: threading.Event | None = None,
 ) -> RunPlanImplementResult:
     """Run agent with plan prompt; write stream to log, extract plan, write task-plan-draft.md and add comms (plan)."""
-    chat_id = _read_chat_id(task_dir)
     stream_log_path, streamed_output = _run_agent_ask_stream_json(
         task_dir,
-        chat_id,
         PLAN_MODE_PROMPT,
         PLAN_IMPLEMENT_STREAM_LOG_PREFIX,
         on_stream_line=on_stream_line,
@@ -347,9 +345,9 @@ def run_plan_test(
     chat_id = _read_chat_id(task_dir)
     stream_log_path, streamed_output = _run_agent_ask_stream_json(
         task_dir,
-        chat_id,
         PLAN_TEST_MODE_PROMPT,
         PLAN_TEST_STREAM_LOG_PREFIX,
+        chat_id=chat_id,
         on_stream_line=on_stream_line,
         on_start=on_start,
     )
@@ -663,9 +661,9 @@ def run_test(
     chat_id = _read_chat_id(task_dir)
     stream_log_path, streamed_output = _run_agent_ask_stream_json(
         task_dir,
-        chat_id,
         prompt,
         DEV_TEST_STREAM_LOG_PREFIX,
+        chat_id=chat_id,
         on_stream_line=on_stream_line,
         on_start=on_start,
     )
