@@ -7,6 +7,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, NamedTuple
@@ -240,6 +241,7 @@ class TaskManager:
 
     def list_archived_tasks(self) -> list[ArchivedTaskEntry]:
         """List directories in .archive sorted by most recently archived first."""
+        started = time.perf_counter()
         archive_root = self.tasks_root / ".archive"
         if not archive_root.is_dir():
             return []
@@ -265,6 +267,13 @@ class TaskManager:
             ),
             reverse=True,
         )
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        logger.debug(
+            "list_archived_tasks: entries=%d elapsed_ms=%.2f archive_root=%s",
+            len(entries),
+            elapsed_ms,
+            archive_root,
+        )
         return entries
 
     @staticmethod
@@ -277,7 +286,9 @@ class TaskManager:
         dir_stat = archive_dir.stat()
         archived_at_ts = dir_stat.st_mtime
         newest_modified_ts = archived_at_ts
-        for child in archive_dir.rglob("*"):
+        # Avoid deep recursive scans on large archived repos; shallow metadata
+        # still captures practical last-modified recency and keeps /archive fast.
+        for child in archive_dir.iterdir():
             try:
                 child_mtime = child.stat().st_mtime
             except OSError:

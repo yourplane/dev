@@ -3,10 +3,12 @@
 import asyncio
 import io
 import json
+import logging
 import os
 import queue
 import re
 import threading
+import time
 import zipfile
 from pathlib import Path
 
@@ -39,6 +41,7 @@ from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repo
 from dev_sdk.task_manager import ArchivedTaskEntry, TaskManager
 
 SUPPORTED_COMMANDS = ("plan-implement", "implement", "do")
+logger = logging.getLogger("dev_server")
 
 # In-memory registry: task_name -> { "command_id", "thread" }
 _command_registry: dict[str, dict] = {}
@@ -429,6 +432,7 @@ def archive_task(task_name: str) -> ArchiveTaskResponse:
 @app.get("/archive", response_model=ListArchiveResponse)
 def list_archive(limit: int = 50, offset: int = 0) -> ListArchiveResponse:
     """List archived tasks in newest-first order, with optional pagination."""
+    started = time.perf_counter()
     if limit <= 0:
         raise HTTPException(status_code=400, detail="limit must be greater than 0")
     if offset < 0:
@@ -438,7 +442,7 @@ def list_archive(limit: int = 50, offset: int = 0) -> ListArchiveResponse:
     total = len(all_entries)
     page_entries = all_entries[offset : offset + limit]
     next_offset = offset + limit if (offset + limit) < total else None
-    return ListArchiveResponse(
+    response = ListArchiveResponse(
         entries=[
             ArchivedTaskEntryModel(
                 archived_name=e.archived_name,
@@ -452,6 +456,16 @@ def list_archive(limit: int = 50, offset: int = 0) -> ListArchiveResponse:
         total=total,
         next_offset=next_offset,
     )
+    elapsed_ms = (time.perf_counter() - started) * 1000
+    logger.info(
+        "archive_list limit=%d offset=%d returned=%d total=%d elapsed_ms=%.2f",
+        limit,
+        offset,
+        len(response.entries),
+        total,
+        elapsed_ms,
+    )
+    return response
 
 
 @app.post("/archive/{archived_name}/unarchive", response_model=UnarchiveTaskResponse)
