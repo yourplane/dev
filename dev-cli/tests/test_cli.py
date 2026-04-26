@@ -357,7 +357,7 @@ def test_implement_help() -> None:
 
 
 def test_implement_runs_headless_stream_json(runner: CliRunner, tmp_path: Path) -> None:
-    """Implement runs agent with stream-json in explicit non-ask mode and writes stream log to .logs."""
+    """Implement runs agent with stream-json, no --mode ask, writes stream log to .logs."""
     with runner.isolated_filesystem(tmp_path):
         cwd = Path.cwd()
         (cwd / "agent-chat-id").write_text("chat-789")
@@ -386,10 +386,8 @@ def test_implement_runs_headless_stream_json(runner: CliRunner, tmp_path: Path) 
     # Implement must allow shell commands (pytest, git) so agent can run and commit
     assert "--force" in argv
     assert "--sandbox" in argv and "disabled" in argv
-    # Implement must use explicit non-ask mode so it does not fall back to ask behavior
-    assert "--mode" in argv
-    mode_idx = argv.index("--mode")
-    assert argv[mode_idx + 1] == "code"
+    # Implement must NOT use --mode ask so agent can edit and commit
+    assert "--mode" not in argv
     assert "Starting implement" in result.output
     assert "Stream log:" in result.output
     assert (cwd / ".logs").is_dir()

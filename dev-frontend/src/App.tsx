@@ -1448,7 +1448,8 @@ export function TaskCommsPageContent({
   const prevActiveCommandRef = useRef<string | null>(null)
   useEffect(() => {
     if (prevActiveCommandRef.current !== null && activeCommand === null) {
-      loadFeed({ incremental: true, prefetchNew: true })
+      // Command completion may remove empty logs, so reload full feed to drop stale entries.
+      loadFeed()
     }
     prevActiveCommandRef.current = activeCommand
   }, [activeCommand, loadFeed])
