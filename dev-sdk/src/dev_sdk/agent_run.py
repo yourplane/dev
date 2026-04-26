@@ -397,7 +397,7 @@ def run_implement(
     on_start: Callable[[Path], None] | None = None,
     cancel_event: threading.Event | None = None,
 ) -> RunImplementResult:
-    """Run agent with implement prompt (--force, --sandbox disabled); write stream to log only."""
+    """Run agent with implement prompt (--yolo, --sandbox disabled); write stream to log only."""
     chat_id = _read_chat_id(task_dir)
     agent_cmd = _agent_cmd()
     logs_dir = task_dir / PLAN_LOGS_DIR
@@ -406,12 +406,12 @@ def run_implement(
     stream_log_path = logs_dir / stream_log_name
     if on_start:
         on_start(stream_log_path)
-    # Implement mode: non-ask behavior via prompt and --force + --sandbox disabled
+    # Implement mode: non-ask behavior via prompt and --yolo + --sandbox disabled
     argv = [
         agent_cmd,
         "agent",
         "--print",
-        "--force",
+        "--yolo",
         "--sandbox",
         "disabled",
         "--output-format",
@@ -517,7 +517,7 @@ def run_do(
         agent_cmd,
         "agent",
         "--print",
-        "--force",
+        "--yolo",
         "--sandbox",
         "disabled",
         "--output-format",
