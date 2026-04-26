@@ -5,6 +5,7 @@ from dev.commands.repos import repos_group
 from dev.commands.task import (
     archive_task,
     comms_group,
+    copy_from_archive_cmd,
     implement_cmd,
     launch_interact,
     list_tasks,
@@ -15,6 +16,7 @@ from dev.commands.task import (
 __all__ = [
     "archive_task",
     "comms_group",
+    "copy_from_archive_cmd",
     "create_pr",
     "implement_cmd",
     "launch_interact",

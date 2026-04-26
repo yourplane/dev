@@ -9,6 +9,7 @@ import click
 from dev.commands import (
     archive_task,
     comms_group,
+    copy_from_archive_cmd,
     create_pr,
     implement_cmd,
     launch_interact,
@@ -45,6 +46,7 @@ main.add_command(start_task)
 main.add_command(launch_interact)
 main.add_command(list_tasks)
 main.add_command(archive_task)
+main.add_command(copy_from_archive_cmd)
 main.add_command(plan_implement_group)
 main.add_command(implement_cmd)
 main.add_command(create_pr)
