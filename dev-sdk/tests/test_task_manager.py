@@ -1,5 +1,6 @@
 """Tests for TaskManager."""
 
+import os
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -230,13 +231,21 @@ def test_list_archived_tasks_no_archive_dir(manager: TaskManager, tmp_tasks_root
 def test_list_archived_tasks_returns_sorted(manager: TaskManager, tmp_tasks_root: Path) -> None:
     archive_root = tmp_tasks_root / ".archive"
     archive_root.mkdir(parents=True)
-    (archive_root / "z-task-mar-14-aaaaaa").mkdir()
-    (archive_root / "a-task-mar-15-bbbbbb").mkdir()
-    (archive_root / "m-task-mar-14-cccccc").mkdir()
+    older = archive_root / "z-task-mar-14-aaaaaa"
+    newest = archive_root / "a-task-mar-15-bbbbbb"
+    middle = archive_root / "m-task-mar-14-cccccc"
+    older.mkdir()
+    newest.mkdir()
+    middle.mkdir()
+    os.utime(older, (1000, 1000))
+    os.utime(middle, (2000, 2000))
+    os.utime(newest, (3000, 3000))
     entries = manager.list_archived_tasks()
     assert len(entries) == 3
     assert entries[0].archived_date == "mar-15"
     assert entries[0].task_name == "a-task"
+    assert entries[0].archived_at
+    assert entries[0].last_modified_at
     assert entries[1].archived_date == "mar-14"
     assert entries[1].task_name == "m-task"
     assert entries[2].archived_date == "mar-14"

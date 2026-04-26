@@ -6,6 +6,7 @@ import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logPar
 import './App.css'
 
 const FEED_POLL_INTERVAL_MS = 15000
+const ARCHIVE_PAGE_SIZE = 50
 
 export function Layout() {
   return (
@@ -196,8 +197,21 @@ function formatArchiveDateLabel(dateStr: string): string {
   return `${day} ${months[month] ?? month}`
 }
 
+function formatTimestampLabel(timestamp: string): string {
+  if (!timestamp) return 'Unknown'
+  const parsed = new Date(timestamp)
+  if (Number.isNaN(parsed.getTime())) return 'Unknown'
+  return parsed.toLocaleString()
+}
+
 function ArchivePage() {
-  const [entries, setEntries] = useState<Array<{ archived_name: string; task_name: string; archived_date: string }>>([])
+  const [entries, setEntries] = useState<Array<{
+    archived_name: string
+    task_name: string
+    archived_date: string
+    archived_at: string
+    last_modified_at: string
+  }>>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [unarchiving, setUnarchiving] = useState<string | null>(null)
@@ -206,19 +220,40 @@ function ArchivePage() {
   const [copyFromArchiveLoading, setCopyFromArchiveLoading] = useState<string | null>(null)
   const [copyFromArchiveError, setCopyFromArchiveError] = useState<string | null>(null)
   const [copiedTask, setCopiedTask] = useState<string | null>(null)
+  const [archiveTotal, setArchiveTotal] = useState(0)
+  const [nextOffset, setNextOffset] = useState<number | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
 
   const loadArchive = useCallback(async () => {
     setError(null)
     setLoading(true)
     try {
-      const res = await api.getArchive()
+      const res = await api.getArchive({ limit: ARCHIVE_PAGE_SIZE, offset: 0 })
       setEntries(res.entries)
+      setArchiveTotal(res.total)
+      setNextOffset(res.next_offset)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }
   }, [])
+
+  const loadMoreArchive = useCallback(async () => {
+    if (nextOffset == null) return
+    setError(null)
+    setLoadingMore(true)
+    try {
+      const res = await api.getArchive({ limit: ARCHIVE_PAGE_SIZE, offset: nextOffset })
+      setEntries((prev) => [...prev, ...res.entries])
+      setArchiveTotal(res.total)
+      setNextOffset(res.next_offset)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [nextOffset])
 
   useEffect(() => {
     document.title = 'Dev – Archive'
@@ -266,7 +301,7 @@ function ArchivePage() {
     acc[d].push(e)
     return acc
   }, {})
-  const dateOrder = [...new Set(entries.map((e) => e.archived_date || 'unknown'))].sort().reverse()
+  const dateOrder = Object.keys(byDate)
 
   if (loading) return <p className="status">Loading archive…</p>
   if (error) {
@@ -305,7 +340,10 @@ function ArchivePage() {
               <ul>
                 {byDate[dateKey].map((e) => (
                   <li key={e.archived_name} className="task-row">
-                    <span className="task-name">{e.task_name}</span>
+                    <div className="archive-task-meta">
+                      <span className="task-name">{e.task_name}</span>
+                      <span className="archive-task-subtext">Last modified {formatTimestampLabel(e.last_modified_at)}</span>
+                    </div>
                     <button
                       type="button"
                       className="copy-from-archive-btn"
@@ -328,6 +366,18 @@ function ArchivePage() {
               </ul>
             </div>
           ))}
+          {nextOffset != null && (
+            <div className="archive-pagination">
+              <button
+                type="button"
+                className="archive-load-more-btn"
+                onClick={loadMoreArchive}
+                disabled={loadingMore}
+              >
+                {loadingMore ? 'Loading…' : `Load more (${entries.length}/${archiveTotal})`}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </section>

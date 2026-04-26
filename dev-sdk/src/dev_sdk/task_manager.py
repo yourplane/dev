@@ -7,6 +7,7 @@ import re
 import secrets
 import shutil
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, NamedTuple
@@ -20,6 +21,8 @@ class ArchivedTaskEntry(NamedTuple):
     archived_name: str
     task_name: str
     archived_date: str
+    archived_at: str
+    last_modified_at: str
 
 logger = logging.getLogger("dev_sdk")
 
@@ -237,7 +240,8 @@ class TaskManager:
         return (task_name, archived_date)
 
     def list_archived_tasks(self) -> list[ArchivedTaskEntry]:
-        """List directories in .archive, parsed into task name and date. Sorted by date (newest first) then name."""
+        """List directories in .archive sorted by most recently archived first."""
+        started = time.perf_counter()
         archive_root = self.tasks_root / ".archive"
         if not archive_root.is_dir():
             return []
@@ -245,16 +249,56 @@ class TaskManager:
         for p in archive_root.iterdir():
             if p.is_dir() and not p.name.startswith("."):
                 task_name, archived_date = self.parse_archive_name(p.name)
+                archived_at, last_modified_at = self._archive_timestamps(p)
                 entries.append(
                     ArchivedTaskEntry(
                         archived_name=p.name,
                         task_name=task_name,
                         archived_date=archived_date,
+                        archived_at=archived_at,
+                        last_modified_at=last_modified_at,
                     )
                 )
-        entries.sort(key=lambda e: e.task_name)
-        entries.sort(key=lambda e: e.archived_date, reverse=True)
+        entries.sort(
+            key=lambda e: (
+                e.archived_at,
+                e.last_modified_at,
+                e.archived_name,
+            ),
+            reverse=True,
+        )
+        elapsed_ms = (time.perf_counter() - started) * 1000
+        logger.debug(
+            "list_archived_tasks: entries=%d elapsed_ms=%.2f archive_root=%s",
+            len(entries),
+            elapsed_ms,
+            archive_root,
+        )
         return entries
+
+    @staticmethod
+    def _format_timestamp(ts: float) -> str:
+        """Format a filesystem timestamp as local ISO-8601."""
+        return datetime.fromtimestamp(ts).astimezone().isoformat(timespec="seconds")
+
+    def _archive_timestamps(self, archive_dir: Path) -> tuple[str, str]:
+        """Return (archived_at, last_modified_at) for an archive directory."""
+        dir_stat = archive_dir.stat()
+        archived_at_ts = dir_stat.st_mtime
+        newest_modified_ts = archived_at_ts
+        # Avoid deep recursive scans on large archived repos; shallow metadata
+        # still captures practical last-modified recency and keeps /archive fast.
+        for child in archive_dir.iterdir():
+            try:
+                child_mtime = child.stat().st_mtime
+            except OSError:
+                continue
+            if child_mtime > newest_modified_ts:
+                newest_modified_ts = child_mtime
+        return (
+            self._format_timestamp(archived_at_ts),
+            self._format_timestamp(newest_modified_ts),
+        )
 
     def unarchive_task(self, archived_name: str) -> Path:
         """Move .archive/<archived_name> back to tasks_root/<task_name>, stripping -date-random suffix."""

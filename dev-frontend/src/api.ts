@@ -53,10 +53,14 @@ export interface ArchivedTaskEntry {
   archived_name: string;
   task_name: string;
   archived_date: string;
+  archived_at: string;
+  last_modified_at: string;
 }
 
 export interface ListArchiveResponse {
   entries: ArchivedTaskEntry[];
+  total: number;
+  next_offset: number | null;
 }
 
 export interface UnarchiveTaskResponse {
@@ -225,8 +229,12 @@ export const api = {
     });
   },
 
-  getArchive(): Promise<ListArchiveResponse> {
-    return request('/archive');
+  getArchive(opts?: { limit?: number; offset?: number }): Promise<ListArchiveResponse> {
+    const params = new URLSearchParams();
+    if (opts?.limit != null) params.set('limit', String(opts.limit));
+    if (opts?.offset != null) params.set('offset', String(opts.offset));
+    const suffix = params.size > 0 ? `?${params.toString()}` : '';
+    return request(`/archive${suffix}`);
   },
 
   unarchiveTask(archivedName: string): Promise<UnarchiveTaskResponse> {
