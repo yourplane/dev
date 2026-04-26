@@ -1294,6 +1294,11 @@ export function TaskCommsPageContent({
       setActiveCommand(nextActive)
       if (!nextActive) setCancelling(false)
       setActiveLogFilename(res.active && res.active_log_filename ? res.active_log_filename : null)
+      if (nextActive) {
+        setCommandError(null)
+      } else if (res.command_error) {
+        setCommandError(res.command_error)
+      }
     } catch {
       // ignore; task might not exist yet
     }

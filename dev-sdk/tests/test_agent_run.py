@@ -4,6 +4,7 @@ import pytest
 
 from dev_sdk.agent_run import (
     AgentRunError,
+    _remove_empty_log_file,
     extract_plan_from_stream_json,
     _latest_run_plan_script,
     _test_results_prompt,
@@ -77,3 +78,19 @@ def test_read_chat_id_raises_when_missing(tmp_path) -> None:
     with pytest.raises(AgentRunError) as exc_info:
         _read_chat_id(tmp_path)
     assert "not found" in str(exc_info.value).lower() or "chat" in str(exc_info.value).lower()
+
+
+def test_remove_empty_log_file_deletes_zero_byte_file(tmp_path) -> None:
+    """Empty stream log files are removed."""
+    log_path = tmp_path / "empty.log"
+    log_path.write_text("")
+    _remove_empty_log_file(log_path)
+    assert not log_path.exists()
+
+
+def test_remove_empty_log_file_keeps_nonempty_file(tmp_path) -> None:
+    """Non-empty stream logs are kept."""
+    log_path = tmp_path / "non-empty.log"
+    log_path.write_text("line\n")
+    _remove_empty_log_file(log_path)
+    assert log_path.exists()

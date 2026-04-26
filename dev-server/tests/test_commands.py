@@ -9,6 +9,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
+from dev_sdk.agent_run import AgentRunError
 from dev_server.main import app
 
 
@@ -85,6 +86,20 @@ def test_status_inactive_after_process_exits(client_with_tasks: TestClient, task
     assert resp.status_code == 200
     assert resp.json()["active"] is False
     assert resp.json()["command"] is None
+
+
+def test_status_includes_last_command_error_when_run_fails(
+    client_with_tasks: TestClient, task_dir: Path
+) -> None:
+    """After a command fails, GET status includes the command error for UI display."""
+    with patch("dev_server.main.run_implement", side_effect=AgentRunError("agent boom")):
+        resp = client_with_tasks.post("/tasks/mytask/commands", json={"command": "implement"})
+    assert resp.status_code == 201
+    time.sleep(0.3)
+    resp2 = client_with_tasks.get("/tasks/mytask/commands")
+    assert resp2.status_code == 200
+    assert resp2.json()["active"] is False
+    assert resp2.json()["command_error"] == "agent boom"
 
 
 def test_start_unsupported_command_returns_400(client_with_tasks: TestClient) -> None:
