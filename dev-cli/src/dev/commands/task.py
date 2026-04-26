@@ -11,11 +11,8 @@ import click
 from dev_sdk.agent_run import (
     AGENT_CHAT_ID_FILE,
     AgentRunError,
-    AgentTestSkipped,
     run_implement,
     run_plan_implement,
-    run_plan_test,
-    run_test,
 )
 from dev_sdk.comms import add_comms, comms_dir, read_index
 from dev_sdk.repo_config import resolve_repo
@@ -122,25 +119,6 @@ def _run_plan_implement_mode(task_path: Path | None) -> None:
         raise SystemExit(1)
 
 
-def _run_plan_test_mode(task_path: Path | None) -> None:
-    """Run agent plan-test via SDK; echo progress and result."""
-    task_dir = _resolve_task_dir(task_path)
-    click.echo("Starting plan-test (stream-json mode)...")
-    try:
-        result = run_plan_test(
-            task_dir,
-            on_stream_line=_make_stream_format_callback(),
-            on_start=lambda p: click.echo(f"Stream log: {p}"),
-        )
-        click.echo()
-        click.echo(click.style(f"Testing plan written to {result.comms_path.relative_to(task_dir)}", dim=True))
-        if result.script_path:
-            click.echo(click.style(f"Executable script written to {result.script_path.relative_to(task_dir)}", dim=True))
-    except AgentRunError as e:
-        click.echo(str(e), err=True)
-        raise SystemExit(1)
-
-
 def _run_implement_mode(task_path: Path | None) -> None:
     """Run agent implement via SDK; echo progress."""
     task_dir = _resolve_task_dir(task_path)
@@ -152,45 +130,6 @@ def _run_implement_mode(task_path: Path | None) -> None:
             on_start=lambda p: click.echo(f"Stream log: {p}"),
         )
         click.echo()
-    except AgentRunError as e:
-        click.echo(str(e), err=True)
-        raise SystemExit(1)
-
-
-def _run_test_mode(task_path: Path | None) -> None:
-    """Run test flow via SDK (script + agent); echo progress and result."""
-    task_dir = _resolve_task_dir(task_path)
-
-    def on_script_line(line: str) -> None:
-        click.echo(line, nl=False)
-
-    def on_before_agent() -> None:
-        click.echo("Starting test analysis (stream-json mode)...")
-
-    def on_start(path: Path) -> None:
-        click.echo(f"Stream log: {path}")
-
-    try:
-        result = run_test(
-            task_dir,
-            on_stream_line=_make_stream_format_callback(),
-            on_script_line=on_script_line,
-            on_before_agent=on_before_agent,
-            on_start=on_start,
-        )
-        click.echo(f"Stream log: {result.stream_log_path}")
-        if result.script_exit_code != 0:
-            click.echo(
-                f"Test script exited with code {result.script_exit_code}. Run log: {result.run_log_path}",
-                err=True,
-            )
-        else:
-            click.echo(f"Run log: {result.run_log_path}")
-        click.echo()
-        click.echo(click.style(f"Test results written to {result.comms_path.relative_to(task_dir)}", dim=True))
-    except AgentTestSkipped as e:
-        click.echo(str(e))
-        raise SystemExit(0)
     except AgentRunError as e:
         click.echo(str(e), err=True)
         raise SystemExit(1)
@@ -435,20 +374,6 @@ def plan_implement_group(
         _run_plan_implement_mode(task_path=task_path)
 
 
-@click.command("plan-test")
-@click.option(
-    "--task",
-    "-t",
-    "task_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Path to task directory. If not set, use current working directory.",
-)
-def plan_test_cmd(task_path: Path | None) -> None:
-    """Generate a manual E2E testing plan from task context and save it to comms."""
-    _run_plan_test_mode(task_path=task_path)
-
-
 @click.command("implement")
 @click.option(
     "--task",
@@ -463,15 +388,3 @@ def implement_cmd(task_path: Path | None) -> None:
     _run_implement_mode(task_path=task_path)
 
 
-@click.command("test")
-@click.option(
-    "--task",
-    "-t",
-    "task_path",
-    type=click.Path(path_type=Path),
-    default=None,
-    help="Path to task directory. If not set, use current working directory.",
-)
-def test_cmd(task_path: Path | None) -> None:
-    """Run the latest comms test script, save output to .logs, then run an agent to analyze results and add a markdown report to comms."""
-    _run_test_mode(task_path=task_path)
