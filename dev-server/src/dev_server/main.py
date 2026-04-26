@@ -148,6 +148,8 @@ class ArchivedTaskEntryModel(BaseModel):
 
 class ListArchiveResponse(BaseModel):
     entries: list[ArchivedTaskEntryModel]
+    total: int
+    next_offset: int | None = None
 
 
 class UnarchiveTaskResponse(BaseModel):
@@ -425,10 +427,17 @@ def archive_task(task_name: str) -> ArchiveTaskResponse:
 
 
 @app.get("/archive", response_model=ListArchiveResponse)
-def list_archive() -> ListArchiveResponse:
-    """List archived tasks (grouped by date on the client)."""
+def list_archive(limit: int = 50, offset: int = 0) -> ListArchiveResponse:
+    """List archived tasks in newest-first order, with optional pagination."""
+    if limit <= 0:
+        raise HTTPException(status_code=400, detail="limit must be greater than 0")
+    if offset < 0:
+        raise HTTPException(status_code=400, detail="offset must be >= 0")
     manager = _get_manager()
-    entries = manager.list_archived_tasks()
+    all_entries = manager.list_archived_tasks()
+    total = len(all_entries)
+    page_entries = all_entries[offset : offset + limit]
+    next_offset = offset + limit if (offset + limit) < total else None
     return ListArchiveResponse(
         entries=[
             ArchivedTaskEntryModel(
@@ -438,8 +447,10 @@ def list_archive() -> ListArchiveResponse:
                 archived_at=e.archived_at,
                 last_modified_at=e.last_modified_at,
             )
-            for e in entries
-        ]
+            for e in page_entries
+        ],
+        total=total,
+        next_offset=next_offset,
     )
 
 

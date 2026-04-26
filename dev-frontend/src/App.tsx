@@ -6,6 +6,7 @@ import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logPar
 import './App.css'
 
 const FEED_POLL_INTERVAL_MS = 15000
+const ARCHIVE_PAGE_SIZE = 50
 
 export function Layout() {
   return (
@@ -219,19 +220,40 @@ function ArchivePage() {
   const [copyFromArchiveLoading, setCopyFromArchiveLoading] = useState<string | null>(null)
   const [copyFromArchiveError, setCopyFromArchiveError] = useState<string | null>(null)
   const [copiedTask, setCopiedTask] = useState<string | null>(null)
+  const [archiveTotal, setArchiveTotal] = useState(0)
+  const [nextOffset, setNextOffset] = useState<number | null>(null)
+  const [loadingMore, setLoadingMore] = useState(false)
 
   const loadArchive = useCallback(async () => {
     setError(null)
     setLoading(true)
     try {
-      const res = await api.getArchive()
+      const res = await api.getArchive({ limit: ARCHIVE_PAGE_SIZE, offset: 0 })
       setEntries(res.entries)
+      setArchiveTotal(res.total)
+      setNextOffset(res.next_offset)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }
   }, [])
+
+  const loadMoreArchive = useCallback(async () => {
+    if (nextOffset == null) return
+    setError(null)
+    setLoadingMore(true)
+    try {
+      const res = await api.getArchive({ limit: ARCHIVE_PAGE_SIZE, offset: nextOffset })
+      setEntries((prev) => [...prev, ...res.entries])
+      setArchiveTotal(res.total)
+      setNextOffset(res.next_offset)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [nextOffset])
 
   useEffect(() => {
     document.title = 'Dev – Archive'
@@ -344,6 +366,18 @@ function ArchivePage() {
               </ul>
             </div>
           ))}
+          {nextOffset != null && (
+            <div className="archive-pagination">
+              <button
+                type="button"
+                className="archive-load-more-btn"
+                onClick={loadMoreArchive}
+                disabled={loadingMore}
+              >
+                {loadingMore ? 'Loading…' : `Load more (${entries.length}/${archiveTotal})`}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </section>

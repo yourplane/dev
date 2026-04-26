@@ -39,7 +39,7 @@ describe('App', () => {
     vi.mocked(api.getRepos).mockResolvedValue({})
     vi.mocked(api.getNewTaskDraft).mockResolvedValue({})
     vi.mocked(api.setNewTaskDraft).mockResolvedValue(undefined)
-    vi.mocked(api.getArchive).mockResolvedValue({ entries: [] })
+    vi.mocked(api.getArchive).mockResolvedValue({ entries: [], total: 0, next_offset: null })
     vi.mocked(api.unarchiveTask).mockResolvedValue({ restored_task_name: 'restored-task' })
     vi.mocked(api.copyFromArchive).mockResolvedValue({ task_name: 'copied-task', task_dir: '/tmp/copied-task' })
     vi.mocked(api.getTaskCommsList).mockResolvedValue({ files: [] })
@@ -177,6 +177,8 @@ describe('App', () => {
           last_modified_at: '2026-03-14T12:00:10+00:00',
         },
       ],
+      total: 2,
+      next_offset: null,
     })
 
     render(
@@ -193,5 +195,50 @@ describe('App', () => {
     expect(rows[0]?.textContent).toContain(firstModified)
     expect(rows[1]?.textContent).toContain(secondModified)
     expect(screen.getAllByText(/Last modified/i)).toHaveLength(2)
+  })
+
+  it('loads additional archive entries when clicking Load more', async () => {
+    const { api } = await import('./api')
+    vi.mocked(api.getArchive)
+      .mockResolvedValueOnce({
+        entries: [
+          {
+            archived_name: 'task-one-mar-14-aaaaaa',
+            task_name: 'task-one',
+            archived_date: 'mar-14',
+            archived_at: '2026-03-14T12:01:00+00:00',
+            last_modified_at: '2026-03-14T12:01:30+00:00',
+          },
+        ],
+        total: 2,
+        next_offset: 1,
+      })
+      .mockResolvedValueOnce({
+        entries: [
+          {
+            archived_name: 'task-two-mar-13-bbbbbb',
+            task_name: 'task-two',
+            archived_date: 'mar-13',
+            archived_at: '2026-03-13T12:00:00+00:00',
+            last_modified_at: '2026-03-13T12:00:10+00:00',
+          },
+        ],
+        total: 2,
+        next_offset: null,
+      })
+
+    render(
+      <MemoryRouter initialEntries={['/archive']}>
+        <Layout />
+      </MemoryRouter>
+    )
+
+    await expect(screen.findByText('task-one')).resolves.toBeInTheDocument()
+    const loadMore = await screen.findByRole('button', { name: /Load more/i })
+    fireEvent.click(loadMore)
+
+    await expect(screen.findByText('task-two')).resolves.toBeInTheDocument()
+    expect(vi.mocked(api.getArchive)).toHaveBeenCalledWith({ limit: 50, offset: 0 })
+    expect(vi.mocked(api.getArchive)).toHaveBeenCalledWith({ limit: 50, offset: 1 })
   })
 })
