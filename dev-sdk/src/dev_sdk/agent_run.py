@@ -398,7 +398,6 @@ def run_implement(
     cancel_event: threading.Event | None = None,
 ) -> RunImplementResult:
     """Run agent with implement prompt (--yolo, --sandbox disabled); write stream to log only."""
-    chat_id = _read_chat_id(task_dir)
     agent_cmd = _agent_cmd()
     logs_dir = task_dir / PLAN_LOGS_DIR
     logs_dir.mkdir(exist_ok=True)
@@ -417,8 +416,6 @@ def run_implement(
         "--output-format",
         "stream-json",
         "--stream-partial-output",
-        "--resume",
-        chat_id,
         "--workspace",
         str(task_dir),
         "--trust",
@@ -504,7 +501,6 @@ def run_do(
     cancel_event: threading.Event | None = None,
 ) -> RunImplementResult:
     """Run agent in implement style with a custom --trust prompt; logs-only (no comms)."""
-    chat_id = _read_chat_id(task_dir)
     agent_cmd = _agent_cmd()
     logs_dir = task_dir / PLAN_LOGS_DIR
     logs_dir.mkdir(exist_ok=True)
@@ -523,8 +519,6 @@ def run_do(
         "--output-format",
         "stream-json",
         "--stream-partial-output",
-        "--resume",
-        chat_id,
         "--workspace",
         str(task_dir),
         "--trust",
