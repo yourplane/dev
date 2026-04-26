@@ -19,6 +19,7 @@ AGENT_CMD_DEFAULT = "cursor"
 DEV_AGENT_CMD_ENV = "DEV_AGENT_CMD"
 
 AGENT_CHAT_ID_FILE = "agent-chat-id"
+AGENT_IMPLEMENT_CHAT_ID_FILE = "agent-chat-id-implement"
 PLAN_LOGS_DIR = ".logs"
 TASK_PLAN_DRAFT = "task-plan-draft.md"
 
@@ -278,6 +279,38 @@ def _read_chat_id(task_dir: Path) -> str:
     return chat_id
 
 
+def _read_or_create_implement_chat_id(task_dir: Path) -> str:
+    """Read implement chat ID; create one if missing to isolate implement runs from ask/plan sessions."""
+    implement_chat_id_path = task_dir / AGENT_IMPLEMENT_CHAT_ID_FILE
+    if implement_chat_id_path.exists():
+        chat_id = implement_chat_id_path.read_text(encoding="utf-8").strip()
+        if chat_id:
+            return chat_id
+        raise AgentRunError("Implement chat ID file is empty.")
+
+    agent_cmd = _agent_cmd()
+    try:
+        proc = subprocess.run(
+            [agent_cmd, "agent", "create-chat"],
+            cwd=str(task_dir),
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except FileNotFoundError as e:
+        raise AgentRunError(f"Agent command not found: {agent_cmd}") from e
+
+    if proc.returncode == 0:
+        output = (proc.stdout or "").strip()
+        chat_id = output.splitlines()[-1].strip() if output else ""
+        if chat_id:
+            implement_chat_id_path.write_text(chat_id + "\n", encoding="utf-8")
+            return chat_id
+
+    # Fallback for existing tasks if create-chat fails for any reason.
+    return _read_chat_id(task_dir)
+
+
 class AgentRunError(Exception):
     """Raised when agent run fails (missing chat ID, timeout, non-zero exit, etc.)."""
 
@@ -398,6 +431,7 @@ def run_implement(
     cancel_event: threading.Event | None = None,
 ) -> RunImplementResult:
     """Run agent with implement prompt (--yolo, --sandbox disabled); write stream to log only."""
+    chat_id = _read_or_create_implement_chat_id(task_dir)
     agent_cmd = _agent_cmd()
     logs_dir = task_dir / PLAN_LOGS_DIR
     logs_dir.mkdir(exist_ok=True)
@@ -416,6 +450,8 @@ def run_implement(
         "--output-format",
         "stream-json",
         "--stream-partial-output",
+        "--resume",
+        chat_id,
         "--workspace",
         str(task_dir),
         "--trust",
@@ -501,6 +537,7 @@ def run_do(
     cancel_event: threading.Event | None = None,
 ) -> RunImplementResult:
     """Run agent in implement style with a custom --trust prompt; logs-only (no comms)."""
+    chat_id = _read_or_create_implement_chat_id(task_dir)
     agent_cmd = _agent_cmd()
     logs_dir = task_dir / PLAN_LOGS_DIR
     logs_dir.mkdir(exist_ok=True)
@@ -519,6 +556,8 @@ def run_do(
         "--output-format",
         "stream-json",
         "--stream-partial-output",
+        "--resume",
+        chat_id,
         "--workspace",
         str(task_dir),
         "--trust",

@@ -361,6 +361,7 @@ def test_implement_runs_headless_stream_json(runner: CliRunner, tmp_path: Path) 
     with runner.isolated_filesystem(tmp_path):
         cwd = Path.cwd()
         (cwd / "agent-chat-id").write_text("chat-789")
+        (cwd / "agent-chat-id-implement").write_text("chat-impl-789")
         (cwd / "comms").mkdir()
         (cwd / "comms" / "index.txt").write_text("")
         streamed_line = '{"content": "Implementation done."}\n'
@@ -379,8 +380,8 @@ def test_implement_runs_headless_stream_json(runner: CliRunner, tmp_path: Path) 
     assert "--output-format" in argv
     assert "stream-json" in argv
     assert "--stream-partial-output" in argv
-    assert "--resume" not in argv
-    assert "chat-789" not in argv
+    assert "--resume" in argv
+    assert "chat-impl-789" in argv
     assert "--workspace" in argv
     assert "--trust" in argv
     # Implement must allow shell commands (pytest, git) so agent can run and commit

@@ -5,6 +5,7 @@ import pytest
 from dev_sdk.agent_run import (
     AgentRunError,
     _remove_empty_log_file,
+    _read_or_create_implement_chat_id,
     extract_plan_from_stream_json,
     _latest_run_plan_script,
     _test_results_prompt,
@@ -94,3 +95,10 @@ def test_remove_empty_log_file_keeps_nonempty_file(tmp_path) -> None:
     log_path.write_text("line\n")
     _remove_empty_log_file(log_path)
     assert log_path.exists()
+
+
+def test_read_or_create_implement_chat_id_reads_existing(tmp_path) -> None:
+    """Existing implement chat id file is reused."""
+    p = tmp_path / "agent-chat-id-implement"
+    p.write_text("impl-123\n")
+    assert _read_or_create_implement_chat_id(tmp_path) == "impl-123"
