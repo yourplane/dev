@@ -286,6 +286,40 @@ def archive_task(task_name: str, tasks_dir: Path) -> None:
         raise SystemExit(1)
 
 
+@click.command("copy-from-archive")
+@click.argument("archived_name", type=str)
+@click.option(
+    "--task-name",
+    "task_name_override",
+    type=str,
+    default=None,
+    help="Optional destination task name (default: derived from archived name).",
+)
+@click.option(
+    "--tasks-dir",
+    type=click.Path(path_type=Path),
+    default=TASKS_ROOT,
+    envvar="DEV_TASKS_DIR",
+    help="Root directory for tasks (default: ~/tasks).",
+)
+def copy_from_archive_cmd(
+    archived_name: str,
+    task_name_override: str | None,
+    tasks_dir: Path,
+) -> None:
+    """Copy an archived task into active tasks with a fresh agent chat."""
+    manager = TaskManager(tasks_root=tasks_dir)
+    try:
+        dest = manager.copy_task_from_archive(
+            archived_name=archived_name,
+            task_name_override=task_name_override,
+        )
+        click.echo(f"Task copied to {dest}")
+    except (FileNotFoundError, FileExistsError) as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
+
+
 @click.group("comms", invoke_without_command=True)
 @click.option(
     "--task",

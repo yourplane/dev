@@ -22,6 +22,7 @@ def test_main_help() -> None:
     assert "Dev CLI" in result.output
     assert "create" in result.output
     assert "interact" in result.output
+    assert "copy-from-archive" in result.output
 
 
 def test_create_help() -> None:
@@ -84,6 +85,80 @@ def test_archive_not_found_exits_nonzero(runner: CliRunner, tmp_path: Path) -> N
     result = runner.invoke(main, ["archive", "nonexistent", "--tasks-dir", str(root)])
     assert result.exit_code != 0
     assert "not found" in result.output
+
+
+def test_copy_from_archive_success(runner: CliRunner, tmp_path: Path) -> None:
+    root = tmp_path / "tasks"
+    root.mkdir()
+    archived_task = root / ".archive" / "foo-mar-14-a1b2c3"
+    archived_task.mkdir(parents=True)
+    (archived_task / "comms").mkdir()
+    (archived_task / "comms" / "001-user.md").write_text("hello")
+    repo_dir = archived_task / "repo"
+    (repo_dir / ".git").mkdir(parents=True)
+    with patch("dev_sdk.task_manager.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="chat-id\n")
+        result = runner.invoke(
+            main,
+            ["copy-from-archive", "foo-mar-14-a1b2c3", "--tasks-dir", str(root)],
+        )
+    assert result.exit_code == 0
+    assert "Task copied to" in result.output
+    dest = root / "foo"
+    assert dest.is_dir()
+    assert (dest / "comms" / "001-user.md").read_text() == "hello"
+    assert (dest / "repo" / ".git").is_dir()
+    assert (dest / "agent-chat-id").read_text() == "chat-id"
+
+
+def test_copy_from_archive_destination_exists(runner: CliRunner, tmp_path: Path) -> None:
+    root = tmp_path / "tasks"
+    root.mkdir()
+    (root / ".archive" / "foo-mar-14-a1b2c3").mkdir(parents=True)
+    (root / "foo").mkdir()
+    result = runner.invoke(
+        main,
+        ["copy-from-archive", "foo-mar-14-a1b2c3", "--tasks-dir", str(root)],
+    )
+    assert result.exit_code != 0
+    assert "already exists" in result.output
+
+
+def test_copy_from_archive_missing_source(runner: CliRunner, tmp_path: Path) -> None:
+    root = tmp_path / "tasks"
+    root.mkdir()
+    result = runner.invoke(
+        main,
+        ["copy-from-archive", "missing-mar-14-a1b2c3", "--tasks-dir", str(root)],
+    )
+    assert result.exit_code != 0
+    assert "not found" in result.output
+
+
+def test_copy_from_archive_with_override_name(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    root = tmp_path / "tasks"
+    root.mkdir()
+    archived_task = root / ".archive" / "foo-mar-14-a1b2c3"
+    archived_task.mkdir(parents=True)
+    with patch("dev_sdk.task_manager.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="chat-id\n")
+        result = runner.invoke(
+            main,
+            [
+                "copy-from-archive",
+                "foo-mar-14-a1b2c3",
+                "--task-name",
+                "foo-v2",
+                "--tasks-dir",
+                str(root),
+            ],
+        )
+    assert result.exit_code == 0
+    assert "foo-v2" in result.output
+    assert (root / "foo-v2").is_dir()
+    assert not (root / "foo").exists()
 
 
 def test_interact_help() -> None:
