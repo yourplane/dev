@@ -31,7 +31,11 @@ DEV_TEST_STREAM_LOG_PREFIX = "dev-test-stream-"
 
 PLAN_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). There may be new entries in the comms directory since you last read it—double-check comms/index.txt and read any new files before proceeding. Produce a more detailed description and a step-by-step plan for the task. Ask any follow-up questions you need. Output only the detailed description and plan as markdown (no preamble or meta-commentary)."""
 
-IMPLEMENT_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). There may be new entries in the comms directory since you last read it—double-check comms/index.txt and read any new files before proceeding. Implement the task and commit when done. When done, in the git project directory (the repo subdirectory under the task root, not the task root itself): fetch from origin, merge origin/main into the current branch, then push the current branch to origin."""
+IMPLEMENT_MODE_PROMPT = """You are running in implement mode, not ask/read-only mode. You can edit files, run commands, and commit.
+
+Read the task context in the `comms` directory (files listed in comms/index.txt, in order). There may be new entries in the comms directory since you last read it—double-check comms/index.txt and read any new files before proceeding. Implement the task and commit when done. When done, in the git project directory (the repo subdirectory under the task root, not the task root itself): fetch from origin, merge origin/main into the current branch, then push the current branch to origin."""
+
+DO_MODE_PROMPT_PREFIX = "You are running in implement mode, not ask/read-only mode. You can edit files, run commands, and commit.\n\n"
 
 PLAN_TEST_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). Produce two artifacts in this exact order, with no other text before or after:
 
@@ -393,8 +397,7 @@ def run_implement(
     on_start: Callable[[Path], None] | None = None,
     cancel_event: threading.Event | None = None,
 ) -> RunImplementResult:
-    """Run agent with implement prompt (--force, --sandbox disabled); write stream to log only."""
-    chat_id = _read_chat_id(task_dir)
+    """Run agent with implement prompt (--yolo, --sandbox disabled); write stream to log only."""
     agent_cmd = _agent_cmd()
     logs_dir = task_dir / PLAN_LOGS_DIR
     logs_dir.mkdir(exist_ok=True)
@@ -402,19 +405,17 @@ def run_implement(
     stream_log_path = logs_dir / stream_log_name
     if on_start:
         on_start(stream_log_path)
-    # Implement mode: explicitly use non-ask mode, add --force and --sandbox disabled
+    # Implement mode: non-ask behavior via prompt and --yolo + --sandbox disabled
     argv = [
         agent_cmd,
         "agent",
         "--print",
-        "--force",
+        "--yolo",
         "--sandbox",
         "disabled",
         "--output-format",
         "stream-json",
         "--stream-partial-output",
-        "--resume",
-        chat_id,
         "--workspace",
         str(task_dir),
         "--trust",
@@ -500,7 +501,6 @@ def run_do(
     cancel_event: threading.Event | None = None,
 ) -> RunImplementResult:
     """Run agent in implement style with a custom --trust prompt; logs-only (no comms)."""
-    chat_id = _read_chat_id(task_dir)
     agent_cmd = _agent_cmd()
     logs_dir = task_dir / PLAN_LOGS_DIR
     logs_dir.mkdir(exist_ok=True)
@@ -508,22 +508,21 @@ def run_do(
     stream_log_path = logs_dir / stream_log_name
     if on_start:
         on_start(stream_log_path)
+    full_prompt = f"{DO_MODE_PROMPT_PREFIX}{prompt}"
     argv = [
         agent_cmd,
         "agent",
         "--print",
-        "--force",
+        "--yolo",
         "--sandbox",
         "disabled",
         "--output-format",
         "stream-json",
         "--stream-partial-output",
-        "--resume",
-        chat_id,
         "--workspace",
         str(task_dir),
         "--trust",
-        prompt,
+        full_prompt,
     ]
 
     buffer: list[str] = []

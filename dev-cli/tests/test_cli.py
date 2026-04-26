@@ -379,12 +379,12 @@ def test_implement_runs_headless_stream_json(runner: CliRunner, tmp_path: Path) 
     assert "--output-format" in argv
     assert "stream-json" in argv
     assert "--stream-partial-output" in argv
-    assert "--resume" in argv
-    assert "chat-789" in argv
+    assert "--resume" not in argv
+    assert "chat-789" not in argv
     assert "--workspace" in argv
     assert "--trust" in argv
     # Implement must allow shell commands (pytest, git) so agent can run and commit
-    assert "--force" in argv
+    assert "--yolo" in argv
     assert "--sandbox" in argv and "disabled" in argv
     # Implement must NOT use --mode ask so agent can edit and commit
     assert "--mode" not in argv
