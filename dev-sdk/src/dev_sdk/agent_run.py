@@ -390,12 +390,14 @@ def run_implement(
     stream_log_path = logs_dir / stream_log_name
     if on_start:
         on_start(stream_log_path)
-    # Implement mode: no --mode ask, add --force and --sandbox disabled
+    # Implement mode: explicitly use non-ask mode, add --force and --sandbox disabled
     argv = [
         agent_cmd,
         "agent",
         "--print",
         "--force",
+        "--mode",
+        "code",
         "--sandbox",
         "disabled",
         "--output-format",
@@ -499,6 +501,8 @@ def run_do(
         "agent",
         "--print",
         "--force",
+        "--mode",
+        "code",
         "--sandbox",
         "disabled",
         "--output-format",
