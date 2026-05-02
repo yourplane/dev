@@ -26,9 +26,17 @@ PLAN_IMPLEMENT_STREAM_LOG_PREFIX = "dev-plan-stream-"
 IMPLEMENT_STREAM_LOG_PREFIX = "dev-implement-stream-"
 DO_STREAM_LOG_PREFIX = "dev-do-stream-"
 
-PLAN_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). There may be new entries in the comms directory since you last read it—double-check comms/index.txt and read any new files before proceeding. Produce a more detailed description and a step-by-step plan for the task. Before asking the user any follow-up question, search the source code for the answer; only ask if the answer cannot be found in the source. Ask any follow-up questions you need. Output only the detailed description and plan as markdown (no preamble or meta-commentary)."""
+_PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
-IMPLEMENT_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). There may be new entries in the comms directory since you last read it—double-check comms/index.txt and read any new files before proceeding. Implement the task and commit when done. When done, in the git project directory (the repo subdirectory under the task root, not the task root itself): fetch from origin, merge origin/main into the current branch, then push the current branch to origin."""
+
+def _load_agent_prompt(name: str) -> str:
+    """Load prompt text from dev_sdk/prompts (UTF-8)."""
+    path = _PROMPTS_DIR / name
+    return path.read_text(encoding="utf-8").strip()
+
+
+PLAN_MODE_PROMPT = _load_agent_prompt("plan_mode.md")
+IMPLEMENT_MODE_PROMPT = _load_agent_prompt("implement_mode.md")
 
 STREAM_READER_TIMEOUT_SEC = 300
 PROC_WAIT_TIMEOUT_SEC = 5
@@ -261,7 +269,7 @@ def run_plan_implement(
     on_start: Callable[[Path], None] | None = None,
     cancel_event: threading.Event | None = None,
 ) -> RunPlanImplementResult:
-    """Run agent with plan prompt; write stream to log, extract plan, write task-plan-draft.md and add comms (plan)."""
+    """Run agent with plan-mode prompt; write stream to log, extract plan, write task-plan-draft.md and add comms (plan)."""
     stream_log_path, streamed_output = _run_agent_ask_stream_json(
         task_dir,
         PLAN_MODE_PROMPT,

@@ -1,10 +1,27 @@
 import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
-import ReactMarkdown from 'react-markdown'
+import ReactMarkdown, { type Components } from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { api, apiBaseUrl } from './api'
 import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import './App.css'
+
+const markdownComponents: Partial<Components> = {
+  table: ({ children, ...props }) => (
+    <div className="markdown-table-scroll">
+      <table {...props}>{children}</table>
+    </div>
+  ),
+}
+
+function MarkdownText({ children }: { children: string }) {
+  return (
+    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+      {children}
+    </ReactMarkdown>
+  )
+}
 
 const FEED_POLL_INTERVAL_MS = 15000
 const ARCHIVE_PAGE_SIZE = 50
@@ -769,7 +786,7 @@ const FeedEntryRow = memo(function FeedEntryRow({
           ) : isBashCommsEntry(entry.id) ? (
             <BashCommsFeedBody text={contents[entry.id] ?? '(loading…)'} />
           ) : (
-            <ReactMarkdown>{contents[entry.id] ?? '(loading…)'}</ReactMarkdown>
+            <MarkdownText>{contents[entry.id] ?? '(loading…)'}</MarkdownText>
           )}
         </div>
       )}
@@ -1247,7 +1264,7 @@ function LogSegmentBlock({ segment }: { segment: LogSegment }) {
       <div className="feed-log-segment feed-log-thinking">
         <span className="feed-log-segment-label">{label}</span>
         <div className="feed-log-segment-body">
-          <ReactMarkdown>{text.trim() || '\u00a0'}</ReactMarkdown>
+          <MarkdownText>{text.trim() || '\u00a0'}</MarkdownText>
         </div>
       </div>
     )
@@ -1267,7 +1284,7 @@ function LogSegmentBlock({ segment }: { segment: LogSegment }) {
     <div className="feed-log-segment feed-log-default">
       <span className="feed-log-segment-label">{label}</span>
       <div className="feed-log-segment-body">
-        <ReactMarkdown>{text.trim() || '\u00a0'}</ReactMarkdown>
+        <MarkdownText>{text.trim() || '\u00a0'}</MarkdownText>
       </div>
     </div>
   )
