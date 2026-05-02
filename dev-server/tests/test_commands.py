@@ -330,7 +330,8 @@ def test_bash_active_status_includes_active_bash_comms_filename(
     assert found.get("command") == "bash"
     bash_path = task_dir / "comms" / str(found["filename"])
     assert bash_path.is_file()
-    assert "$ sleep 60" in bash_path.read_text(encoding="utf-8")
+    raw = bash_path.read_text(encoding="utf-8")
+    assert "__DEV_BASH_INPUT__" in raw and "sleep 60" in raw
 
     client_with_tasks.post("/tasks/mytask/commands/cancel")
     time.sleep(0.5)
@@ -351,9 +352,29 @@ def test_start_bash_writes_comms_transcript(client_with_tasks: TestClient, task_
     bash_files = sorted((task_dir / "comms").glob("*-user-bash.md"))
     assert bash_files, "expected a bash comms file"
     text = bash_files[-1].read_text(encoding="utf-8")
-    assert "$ echo HI" in text
+    assert "__DEV_BASH_INPUT__" in text and "__DEV_BASH_INPUT_END__" in text
+    assert "echo HI" in text
     assert "HI" in text
     assert "Exit code: 0" in text
+
+
+def test_start_bash_preserves_multiline_prompt_in_transcript(
+    client_with_tasks: TestClient, task_dir: Path
+) -> None:
+    """Multi-line shell prompts stay intact inside delimiter block for history/UI parsing."""
+    ml = "echo 'a'\necho 'b'"
+    resp = client_with_tasks.post(
+        "/tasks/mytask/commands",
+        json={"command": "bash", "prompt": ml},
+    )
+    assert resp.status_code == 201
+    time.sleep(0.6)
+    bash_files = sorted((task_dir / "comms").glob("*-user-bash.md"))
+    assert bash_files
+    text = bash_files[-1].read_text(encoding="utf-8")
+    assert "__DEV_BASH_INPUT__" in text and "__DEV_BASH_INPUT_END__" in text
+    assert ml in text
+    assert "a" in text and "b" in text
 
 
 def test_start_bash_returns_409_when_agent_command_running(

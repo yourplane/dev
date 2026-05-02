@@ -41,9 +41,25 @@ def next_sequence(task_dir: Path) -> int:
     return _next_sequence(task_dir)
 
 
+BASH_COMMS_INPUT_START_LINE = "__DEV_BASH_INPUT__"
+BASH_COMMS_INPUT_END_LINE = "__DEV_BASH_INPUT_END__"
+
+
+def bash_comms_input_header(shell_command: str) -> str:
+    """
+    UTF-8 prefix for *-user-bash.md: wraps the shell command so multi-line input is
+    distinct from streamed stdout (history/UI parse everything between delimiters).
+    """
+    return (
+        f"{BASH_COMMS_INPUT_START_LINE}\n"
+        f"{shell_command}\n"
+        f"{BASH_COMMS_INPUT_END_LINE}\n"
+    )
+
+
 def begin_streaming_bash_comms(task_dir: Path, shell_command: str) -> Path:
     """
-    Create a new indexed comms file NNN-user-bash.md with only the command line.
+    Create a new indexed comms file NNN-user-bash.md with a delimiter-wrapped command header.
     Caller appends stdout (binary) then a UTF-8 footer with --- and exit metadata.
     """
     cdir = comms_dir(task_dir)
@@ -51,7 +67,7 @@ def begin_streaming_bash_comms(task_dir: Path, shell_command: str) -> Path:
     seq = _next_sequence(task_dir)
     filename = f"{seq:03d}-user-bash.md"
     path = cdir / filename
-    path.write_text(f"$ {shell_command}\n", encoding="utf-8")
+    path.write_text(bash_comms_input_header(shell_command), encoding="utf-8")
     idx = index_path(task_dir)
     with open(idx, "a", encoding="utf-8") as f:
         f.write(filename + "\n")

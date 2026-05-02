@@ -25,7 +25,15 @@ from dev_sdk.agent_run import (
     run_do,
     run_plan_implement,
 )
-from dev_sdk.comms import add_comms, begin_streaming_bash_comms, comms_dir, index_path, read_index, remove_comms
+from dev_sdk.comms import (
+    add_comms,
+    bash_comms_input_header,
+    begin_streaming_bash_comms,
+    comms_dir,
+    index_path,
+    read_index,
+    remove_comms,
+)
 from dev_sdk.drafts import (
     get_new_task_draft,
     get_task_bash_draft,
@@ -124,7 +132,7 @@ def _run_bash_in_thread(
             add_comms(
                 task_dir,
                 "user",
-                f"$ {shell_command}\n---\nFailed to start process: {exc}\n",
+                f"{bash_comms_input_header(shell_command)}\n---\nFailed to start process: {exc}\n",
                 kind="bash",
             )
         except OSError:

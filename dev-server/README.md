@@ -35,7 +35,7 @@ CORS is enabled for `http://localhost:5173` and `http://127.0.0.1:5173` so the d
 
 ### Task shell commands (`bash`)
 
-The UI can run arbitrary shell in the task directory. While the command runs, the server creates an indexed comms file (`*-user-bash.md`), streams stdout/stderr into it as bytes arrive, then appends a footer (`---`, exit code or cancellation). `GET .../commands` exposes `active_bash_comms_filename` so the UI can poll `GET .../comms/{filename}` for live output. Treat dev-server and task directories as a **trusted boundary**: anyone who can reach the API can run code as the server user in that tree.
+The UI can run arbitrary shell in the task directory. While the command runs, the server creates an indexed comms file (`*-user-bash.md`), writes a short delimiter-wrapped **input** block (`__DEV_BASH_INPUT__` / `__DEV_BASH_INPUT_END__`, full multi-line prompt inside), then streams stdout/stderr after it, then appends a footer (`---`, exit code or cancellation). Older transcripts used a single `$ command` first line only. `GET .../commands` exposes `active_bash_comms_filename` so the UI can poll `GET .../comms/{filename}` for live output. Treat dev-server and task directories as a **trusted boundary**: anyone who can reach the API can run code as the server user in that tree.
 
 ## Run
 

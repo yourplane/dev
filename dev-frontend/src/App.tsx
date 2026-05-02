@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { api, apiBaseUrl } from './api'
+import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import './App.css'
 
@@ -672,31 +673,20 @@ function isBashCommsEntry(entryId: string): boolean {
   return entryId.endsWith('-user-bash.md')
 }
 
-function extractBashCommandFromTranscript(transcript: string): string | null {
-  const line = transcript.split('\n')[0] ?? ''
-  if (!line.startsWith('$ ')) return null
-  const cmd = line.slice(2).trimEnd()
-  return cmd === '' ? null : cmd
-}
-
 /** Bash transcript: dark shell block for command+output; footer after `---` shown separately (016-user). */
 function BashCommsFeedBody({ text }: { text: string }) {
-  const sep = '\n---\n'
-  const idx = text.lastIndexOf(sep)
-  const loading = text === '(loading…)'
-  if (loading || idx === -1) {
+  const { loading, shellBody, metaPart } = bashTranscriptShellDisplayBlocks(text)
+  if (loading) {
     return (
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
         <pre className="feed-log-shell-block">{text}</pre>
       </div>
     )
   }
-  const shellPart = text.slice(0, idx)
-  const metaPart = text.slice(idx + sep.length).trimEnd()
   return (
     <>
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
-        <pre className="feed-log-shell-block">{shellPart}</pre>
+        <pre className="feed-log-shell-block">{shellBody}</pre>
       </div>
       {metaPart !== '' ? (
         <div className="feed-comms-bash-meta-outside">
