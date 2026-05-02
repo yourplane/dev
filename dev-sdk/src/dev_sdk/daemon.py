@@ -21,8 +21,9 @@ from urllib.request import urlopen
 # Ranges chosen to avoid typical dev ports (3000, 5173, 8000, 8080, etc.).
 BACKEND_PORT_MIN = 28430
 BACKEND_PORT_MAX = 28529
-FRONTEND_PORT_MIN = 39430
-FRONTEND_PORT_MAX = 39529
+# Four-digit frontend ports (easier to type/remember than 39xxx).
+FRONTEND_PORT_MIN = 4180
+FRONTEND_PORT_MAX = 4279
 
 READY_TIMEOUT_S = 60.0
 READY_POLL_S = 0.25
