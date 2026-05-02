@@ -1264,6 +1264,43 @@
 .comms-content a:hover { text-decoration: underline; }
 .comms-content blockquote { margin: 0.5em 0; padding-left: 1em; border-left: 3px solid #ddd; color: #555; }
 
+/* GFM tables (remark-gfm) */
+.markdown-table-scroll {
+  margin: 0.75em 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 6px;
+  border: 1px solid #e0e0e0;
+  background: #fafafa;
+}
+.comms-content table,
+.feed-log-segment-body table {
+  width: 100%;
+  min-width: min(100%, 16rem);
+  border-collapse: collapse;
+  font-size: 0.92em;
+  background: #fff;
+}
+.comms-content th,
+.comms-content td,
+.feed-log-segment-body th,
+.feed-log-segment-body td {
+  border: 1px solid #ddd;
+  padding: 0.4em 0.65em;
+  text-align: left;
+  vertical-align: top;
+}
+.comms-content th,
+.feed-log-segment-body th {
+  background: #f0f4f0;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.comms-content tr:nth-child(even) td,
+.feed-log-segment-body tr:nth-child(even) td {
+  background: #fafafa;
+}
+
 /* Post comment form at bottom of feed; same width as comms entries */
 .comms-post-form {
   margin-top: 1.25rem;
