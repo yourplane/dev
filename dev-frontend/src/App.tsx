@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef, memo } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { api, apiBaseUrl } from './api'
+import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import './App.css'
 
@@ -665,6 +666,35 @@ const COMMAND_LABEL: Record<string, string> = {
   'plan-implement': 'Plan',
   implement: 'Implement',
   do: 'Do',
+  bash: 'Bash',
+}
+
+function isBashCommsEntry(entryId: string): boolean {
+  return entryId.endsWith('-user-bash.md')
+}
+
+/** Bash transcript: dark shell block for command+output; footer after `---` shown separately (016-user). */
+function BashCommsFeedBody({ text }: { text: string }) {
+  const { loading, shellBody, metaPart } = bashTranscriptShellDisplayBlocks(text)
+  if (loading) {
+    return (
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
+        <pre className="feed-log-shell-block">{text}</pre>
+      </div>
+    )
+  }
+  return (
+    <>
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
+        <pre className="feed-log-shell-block">{shellBody}</pre>
+      </div>
+      {metaPart !== '' ? (
+        <div className="feed-comms-bash-meta-outside">
+          <pre className="feed-comms-bash-meta-outside-pre">{metaPart}</pre>
+        </div>
+      ) : null}
+    </>
+  )
 }
 
 const FeedEntryRow = memo(function FeedEntryRow({
@@ -736,6 +766,8 @@ const FeedEntryRow = memo(function FeedEntryRow({
         <div className="comms-content">
           {entry.type === 'log' ? (
             <ParsedLogView raw={contents[entry.id] ?? ''} />
+          ) : isBashCommsEntry(entry.id) ? (
+            <BashCommsFeedBody text={contents[entry.id] ?? '(loading…)'} />
           ) : (
             <ReactMarkdown>{contents[entry.id] ?? '(loading…)'}</ReactMarkdown>
           )}
@@ -1264,7 +1296,9 @@ export function TaskCommsPageContent({
   const [contents, setContents] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [entryMode, setEntryMode] = useState<'prompt' | 'bash'>('prompt')
   const [commentText, setCommentText] = useState('')
+  const [shellInput, setShellInput] = useState('')
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
@@ -1299,6 +1333,29 @@ export function TaskCommsPageContent({
   const [commentDraftStatus, setCommentDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
   const commentDraftLoadedRef = useRef(false)
   const lastSavedCommentRef = useRef<string | null>(null)
+  const [bashDraftStatus, setBashDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
+  const bashDraftLoadedRef = useRef(false)
+  const lastSavedBashRef = useRef<string | null>(null)
+  const [bashHistoryBrowseIdx, setBashHistoryBrowseIdx] = useState<number | null>(null)
+  const [bashHistoryPicker, setBashHistoryPicker] = useState('')
+  const [activeBashCommsFilename, setActiveBashCommsFilename] = useState<string | null>(null)
+
+  const bashHistory = useMemo(() => {
+    const cmds: string[] = []
+    for (const e of feedEntries) {
+      if (e.type !== 'comms' || !isBashCommsEntry(e.id)) continue
+      const text = contents[e.id]
+      if (text === undefined || text === '(loading…)') continue
+      const cmd = extractBashCommandFromTranscript(text)
+      if (cmd !== null) cmds.push(cmd)
+    }
+    return cmds
+  }, [feedEntries, contents])
+
+  const bashHistoryRef = useRef<string[]>([])
+  bashHistoryRef.current = bashHistory
+  const activeBashCommsFilenameRef = useRef<string | null>(null)
+  activeBashCommsFilenameRef.current = activeBashCommsFilename
 
   const toggleCollapsed = useCallback((key: string) => {
     setCollapsedKeys((prev) => {
@@ -1344,6 +1401,9 @@ export function TaskCommsPageContent({
       setActiveCommand(nextActive)
       if (!nextActive) setCancelling(false)
       setActiveLogFilename(res.active && res.active_log_filename ? res.active_log_filename : null)
+      setActiveBashCommsFilename(
+        res.active && res.active_bash_comms_filename ? res.active_bash_comms_filename : null,
+      )
       if (nextActive) {
         setCommandError(null)
       } else if (res.command_error) {
@@ -1357,6 +1417,10 @@ export function TaskCommsPageContent({
   const loadEntryContent = useCallback(
     async (entryId: string, type: string) => {
       if (type === 'log' && entryId === activeLogFilename) {
+        setContents((prev) => ({ ...prev, [entryId]: prev[entryId] ?? '' }))
+        return
+      }
+      if (type === 'comms' && entryId === activeBashCommsFilenameRef.current) {
         setContents((prev) => ({ ...prev, [entryId]: prev[entryId] ?? '' }))
         return
       }
@@ -1519,6 +1583,12 @@ export function TaskCommsPageContent({
     }
   }, [activeCommand, activeLogFilename, loadFeed])
 
+  useEffect(() => {
+    if (activeCommand === 'bash' && activeBashCommsFilename) {
+      loadFeed({ incremental: true, prefetchNew: true })
+    }
+  }, [activeCommand, activeBashCommsFilename, loadFeed])
+
   // Stream the active log via SSE while command is running
   useEffect(() => {
     if (!activeCommand || !activeLogFilename) return
@@ -1537,6 +1607,26 @@ export function TaskCommsPageContent({
       es.close()
     }
   }, [taskName, activeCommand, activeLogFilename])
+
+  useEffect(() => {
+    if (!activeCommand || activeCommand !== 'bash' || !activeBashCommsFilename) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const text = await api.getTaskCommsFile(taskName, activeBashCommsFilename)
+        if (cancelled) return
+        setContents((prev) => ({ ...prev, [activeBashCommsFilename]: text }))
+      } catch {
+        // ignore while the file is still being created
+      }
+    }
+    void poll()
+    const id = setInterval(poll, 550)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [taskName, activeCommand, activeBashCommsFilename])
 
   const handleStartCommand = async (command: string) => {
     setCommandError(null)
@@ -1633,11 +1723,18 @@ export function TaskCommsPageContent({
   useEffect(() => {
     if (loading || error) return
     commentDraftLoadedRef.current = false
+    bashDraftLoadedRef.current = false
     api.getTaskCommentDraft(taskName).then((text) => {
       setCommentText(text)
       lastSavedCommentRef.current = text
       commentDraftLoadedRef.current = true
       setCommentDraftStatus('saved')
+    }).catch(() => { /* ignore */ })
+    api.getTaskBashDraft(taskName).then((text) => {
+      setShellInput(text)
+      lastSavedBashRef.current = text
+      bashDraftLoadedRef.current = true
+      setBashDraftStatus('saved')
     }).catch(() => { /* ignore */ })
   }, [taskName, loading, error])
 
@@ -1661,12 +1758,85 @@ export function TaskCommsPageContent({
   }, [taskName, commentText])
 
   useEffect(() => {
+    if (!bashDraftLoadedRef.current) return
+    if (lastSavedBashRef.current !== null && shellInput === lastSavedBashRef.current) {
+      setBashDraftStatus('saved')
+      return
+    }
+    setBashDraftStatus('unsaved')
+    const t = setTimeout(() => {
+      setBashDraftStatus('saving')
+      api.setTaskBashDraft(taskName, shellInput).then(() => {
+        lastSavedBashRef.current = shellInput
+        setBashDraftStatus('saved')
+      }).catch(() => {
+        setBashDraftStatus('unsaved')
+      })
+    }, DRAFT_DEBOUNCE_MS)
+    return () => clearTimeout(t)
+  }, [taskName, shellInput])
+
+  useEffect(() => {
     document.title = `Dev – ${taskName}`
     return () => { document.title = DEFAULT_TAB_TITLE }
   }, [taskName])
 
+  useEffect(() => {
+    setBashHistoryBrowseIdx(null)
+  }, [taskName])
+
+  const bashHistoryOlder = useCallback(() => {
+    const hist = bashHistoryRef.current
+    if (hist.length === 0) return
+    setBashHistoryBrowseIdx((prevIdx) => {
+      const nextIdx = prevIdx === null ? hist.length - 1 : Math.max(0, prevIdx - 1)
+      setShellInput(hist[nextIdx])
+      return nextIdx
+    })
+  }, [])
+
+  const bashHistoryNewer = useCallback(() => {
+    const hist = bashHistoryRef.current
+    setBashHistoryBrowseIdx((prevIdx) => {
+      if (prevIdx === null) return null
+      if (prevIdx >= hist.length - 1) {
+        setShellInput('')
+        return null
+      }
+      const nextIdx = prevIdx + 1
+      setShellInput(hist[nextIdx])
+      return nextIdx
+    })
+  }, [])
+
+  const runShellCommand = useCallback(async () => {
+    const cmd = shellInput.trim()
+    if (!cmd) return
+    setPostError(null)
+    setCommandError(null)
+    setStartingCommand('bash')
+    try {
+      await api.startTaskCommand(taskName, 'bash', cmd)
+      await loadCommandStatus()
+      setShellInput('')
+      lastSavedBashRef.current = ''
+      setBashDraftStatus('saved')
+      setBashHistoryBrowseIdx(null)
+      api.setTaskBashDraft(taskName, '').catch(() => {})
+      setScrollToBottomAfterLoad(true)
+    } catch (err) {
+      setCommandError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setStartingCommand(null)
+    }
+  }, [taskName, shellInput, loadCommandStatus])
+
   const handlePostComment = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (entryMode === 'bash') {
+      await runShellCommand()
+      return
+    }
     const content = commentText.trim()
     if (!content) return
     setPostError(null)
@@ -1677,8 +1847,8 @@ export function TaskCommsPageContent({
       lastSavedCommentRef.current = ''
       await loadFeed({ incremental: true, prefetchNew: true })
       setScrollToBottomAfterLoad(true)
-    } catch (e) {
-      setPostError(e instanceof Error ? e.message : String(e))
+    } catch (err) {
+      setPostError(err instanceof Error ? err.message : String(err))
     } finally {
       setPosting(false)
     }
@@ -1792,6 +1962,27 @@ export function TaskCommsPageContent({
       }
     }
   }, [activeLogFilename, activeLogContent, feedEntries.length, lockedToBottom])
+
+  const activeBashCommsContent = activeBashCommsFilename ? (contents[activeBashCommsFilename] ?? '') : ''
+  useEffect(() => {
+    if (!activeBashCommsFilename || feedEntries.length === 0) return
+    const scrollHeight = document.documentElement.scrollHeight
+    const nearBottom =
+      window.scrollY + window.innerHeight >= scrollHeight - SCROLL_NEAR_BOTTOM_PX
+    const behind = window.scrollY + window.innerHeight < scrollHeight - SCROLL_BEHIND_THRESHOLD_PX
+    const now = Date.now()
+    const throttled = now - lastLockedScrollTimeRef.current < LOCKED_SCROLL_THROTTLE_MS
+    if (lockedToBottom || nearBottom) {
+      if (behind && !throttled) {
+        lastLockedScrollTimeRef.current = now
+        programmaticScrollRef.current = true
+        window.scrollTo({ top: scrollHeight, behavior: 'instant' })
+        setTimeout(() => {
+          programmaticScrollRef.current = false
+        }, PROGRAMMATIC_SCROLL_MS)
+      }
+    }
+  }, [activeBashCommsFilename, activeBashCommsContent, feedEntries.length, lockedToBottom])
 
   const scrollToTop = () => {
     setLockedToBottom(false)
@@ -1945,33 +2136,147 @@ export function TaskCommsPageContent({
         )}
       </div>
       <form className="comms-post-form" onSubmit={handlePostComment}>
-        <label className="comms-post-form-label">Add comment</label>
-        <div className={`draft-status draft-status-${commentDraftStatus}`} role="status" aria-live="polite">
-          {commentDraftStatus === 'saved' && 'All changes saved to draft'}
-          {commentDraftStatus === 'unsaved' && 'Unsaved changes'}
-          {commentDraftStatus === 'saving' && 'Saving draft…'}
+        <div className="comms-entry-mode-row">
+          <span className="comms-entry-mode-label" id="entry-mode-label">Input mode</span>
+          <div className="comms-entry-mode-toggle" role="group" aria-labelledby="entry-mode-label">
+            <button
+              type="button"
+              className={`comms-entry-mode-btn${entryMode === 'prompt' ? ' comms-entry-mode-btn-active' : ''}`}
+              onClick={() => setEntryMode('prompt')}
+              disabled={!!activeCommand}
+            >
+              Prompt
+            </button>
+            <button
+              type="button"
+              className={`comms-entry-mode-btn${entryMode === 'bash' ? ' comms-entry-mode-btn-active' : ''}`}
+              onClick={() => setEntryMode('bash')}
+              disabled={!!activeCommand}
+            >
+              Bash
+            </button>
+          </div>
         </div>
-        <textarea
-          className="comms-post-form-textarea"
-          value={commentText}
-          onChange={(e) => setCommentText(e.target.value)}
-          placeholder="Write a comment…"
-          rows={3}
-          disabled={posting}
-        />
+        <label className="comms-post-form-label">
+          {entryMode === 'prompt' ? 'Add comment' : 'Bash (task directory)'}
+        </label>
+        {entryMode === 'prompt' ? (
+          <div className={`draft-status draft-status-${commentDraftStatus}`} role="status" aria-live="polite">
+            {commentDraftStatus === 'saved' && 'All changes saved to draft'}
+            {commentDraftStatus === 'unsaved' && 'Unsaved changes'}
+            {commentDraftStatus === 'saving' && 'Saving draft…'}
+          </div>
+        ) : (
+          <div className={`draft-status draft-status-${bashDraftStatus}`} role="status" aria-live="polite">
+            {bashDraftStatus === 'saved' && 'Bash draft saved'}
+            {bashDraftStatus === 'unsaved' && 'Unsaved bash draft'}
+            {bashDraftStatus === 'saving' && 'Saving bash draft…'}
+          </div>
+        )}
+        {entryMode === 'prompt' ? (
+          <textarea
+            className="comms-post-form-textarea"
+            value={commentText}
+            onChange={(e) => setCommentText(e.target.value)}
+            placeholder="Write a comment…"
+            rows={3}
+            disabled={posting || !!activeCommand}
+          />
+        ) : (
+          <>
+            <p className="comms-shell-hint hint">Runs as <code>bash -c</code> with cwd set to the task folder. Use “Run bash” to execute; Enter inserts a newline.</p>
+            <div className="comms-bash-history-row">
+              <label htmlFor="bash-history-select" className="comms-bash-history-label">Recent</label>
+              <select
+                id="bash-history-select"
+                className="comms-bash-history-select"
+                aria-label="Insert a recent bash command"
+                value={bashHistoryPicker}
+                disabled={bashHistory.length === 0 || !!activeCommand || !!startingCommand}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setBashHistoryPicker('')
+                  if (v === '') return
+                  const origIdx = parseInt(v, 10)
+                  if (Number.isNaN(origIdx) || origIdx < 0 || origIdx >= bashHistory.length) return
+                  const cmd = bashHistory[origIdx]
+                  setShellInput(cmd)
+                  setBashHistoryBrowseIdx(origIdx)
+                }}
+              >
+                <option value="">Select…</option>
+                {[...bashHistory].reverse().map((cmd, revIdx) => {
+                  const origIdx = bashHistory.length - 1 - revIdx
+                  const label = cmd.length > 96 ? `${cmd.slice(0, 96)}…` : cmd
+                  return (
+                    <option key={origIdx} value={String(origIdx)}>
+                      {label}
+                    </option>
+                  )
+                })}
+              </select>
+              <button
+                type="button"
+                className="comms-bash-history-arrow"
+                aria-label="Older bash command"
+                title="Older command"
+                disabled={bashHistory.length === 0 || !!activeCommand || !!startingCommand}
+                onClick={bashHistoryOlder}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className="comms-bash-history-arrow"
+                aria-label="Newer bash command"
+                title="Newer command"
+                disabled={bashHistoryBrowseIdx === null || !!activeCommand || !!startingCommand}
+                onClick={bashHistoryNewer}
+              >
+                ↓
+              </button>
+            </div>
+            <textarea
+              className="comms-post-form-textarea comms-post-form-textarea-terminal"
+              value={shellInput}
+              onChange={(e) => {
+                setBashHistoryBrowseIdx(null)
+                setShellInput(e.target.value)
+              }}
+              placeholder="$ "
+              rows={4}
+              disabled={!!activeCommand || !!startingCommand}
+              spellCheck={false}
+              autoCapitalize="none"
+              autoCorrect="off"
+              autoComplete="off"
+            />
+          </>
+        )}
         {postError && <p className="inline-error">{postError}</p>}
         <div className="form-actions">
-          <button type="submit" disabled={posting || !commentText.trim()}>
-            {posting ? 'Posting…' : 'Post comment'}
-          </button>
           <button
-            type="button"
-            className="do-btn command-btn"
-            disabled={posting || !commentText.trim() || !!startingCommand || !!activeCommand}
-            onClick={handleDoFromComment}
+            type="submit"
+            disabled={
+              entryMode === 'prompt'
+                ? posting || !commentText.trim() || !!activeCommand
+                : !shellInput.trim() || !!startingCommand || !!activeCommand
+            }
           >
-            {startingCommand === 'do' ? 'Starting…' : 'Do'}
+            {entryMode === 'prompt'
+              ? (posting ? 'Posting…' : 'Post comment')
+              : (startingCommand === 'bash' ? 'Running…' : 'Run bash')}
           </button>
+          {entryMode === 'prompt' && (
+            <button
+              type="button"
+              className="do-btn command-btn"
+              disabled={posting || !commentText.trim() || !!startingCommand || !!activeCommand}
+              onClick={handleDoFromComment}
+            >
+              {startingCommand === 'do' ? 'Starting…' : 'Do'}
+            </button>
+          )}
         </div>
       </form>
       <div className="task-comms-scroll-buttons" aria-label="Scroll">

@@ -19,12 +19,15 @@ vi.mock('./api', () => ({
     getTaskFeed: vi.fn(),
     getTaskCommentDraft: vi.fn(),
     setTaskCommentDraft: vi.fn(),
+    getTaskBashDraft: vi.fn(),
+    setTaskBashDraft: vi.fn(),
     getTaskCommsFile: vi.fn(),
     getTaskLogFile: vi.fn(),
     postTaskComms: vi.fn(),
     getTaskCommandStatus: vi.fn(),
     openTaskLogStream: vi.fn(),
     startTaskCommand: vi.fn(),
+    cancelTaskCommand: vi.fn(),
     createTaskPr: vi.fn(),
     getTaskPr: vi.fn(),
     pullTaskPrComments: vi.fn(),
@@ -47,10 +50,14 @@ describe('App', () => {
     vi.mocked(api.getTaskPr).mockResolvedValue({ pr_url: null })
     vi.mocked(api.getTaskCommentDraft).mockResolvedValue('')
     vi.mocked(api.setTaskCommentDraft).mockResolvedValue(undefined)
+    vi.mocked(api.getTaskBashDraft).mockResolvedValue('')
+    vi.mocked(api.setTaskBashDraft).mockResolvedValue(undefined)
     vi.mocked(api.getTaskCommandStatus).mockResolvedValue({
       active: false,
       command: null,
       active_log_filename: null,
+      active_bash_comms_filename: null,
+      command_error: null,
     })
   })
 
@@ -106,6 +113,35 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(vi.mocked(api.setTaskCommentDraft)).toHaveBeenCalledWith('test-task', '')
+    })
+  })
+
+  it('bash mode submits shell input and clears bash draft', async () => {
+    const noop = () => {}
+    const { api } = await import('./api')
+    vi.mocked(api.startTaskCommand).mockResolvedValue({ command: 'bash', status: 'running' })
+
+    render(
+      <MemoryRouter>
+        <TaskCommsPageContent taskName="test-task" navigate={noop} />
+      </MemoryRouter>
+    )
+
+    await screen.findByPlaceholderText('Write a comment…')
+    fireEvent.click(screen.getByRole('button', { name: 'Bash' }))
+
+    const terminal = await screen.findByRole('textbox')
+    fireEvent.change(terminal, { target: { value: 'echo OK' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Run bash' }))
+
+    await waitFor(() => {
+      expect(vi.mocked(api.startTaskCommand)).toHaveBeenCalledWith('test-task', 'bash', 'echo OK')
+    })
+    await waitFor(() => {
+      expect((terminal as HTMLTextAreaElement).value).toBe('')
+    })
+    await waitFor(() => {
+      expect(vi.mocked(api.setTaskBashDraft).mock.calls.some((c) => c[0] === 'test-task' && c[1] === '')).toBe(true)
     })
   })
 
