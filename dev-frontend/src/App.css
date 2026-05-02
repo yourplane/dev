@@ -1371,6 +1371,69 @@
   font-size: 0.82rem;
 }
 
+.comms-bash-history-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0 0 0.5rem;
+}
+
+.comms-bash-history-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #444;
+}
+
+.comms-bash-history-select {
+  flex: 1;
+  min-width: 8rem;
+  max-width: 100%;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.82rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #fff;
+}
+
+.comms-bash-history-arrow {
+  padding: 0.35rem 0.55rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: #f5f5f5;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+  color: #333;
+}
+
+.comms-bash-history-arrow:hover:not(:disabled) {
+  background: #ebebeb;
+}
+
+.comms-bash-history-arrow:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Bash comms: exit status / cancel line outside shell block */
+.feed-comms-bash-meta-outside {
+  margin-top: 0.35rem;
+  padding: 0.45rem 0.55rem;
+  font-size: 0.78rem;
+  color: #555;
+  border-left: 3px solid #ccc;
+  background: #f7f7f7;
+  border-radius: 0 4px 4px 0;
+}
+
+.feed-comms-bash-meta-outside-pre {
+  margin: 0;
+  font-family: ui-monospace, monospace;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
 .comms-post-form-textarea-terminal {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.85rem;

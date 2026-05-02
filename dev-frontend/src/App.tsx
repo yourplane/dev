@@ -672,6 +672,38 @@ function isBashCommsEntry(entryId: string): boolean {
   return entryId.endsWith('-user-bash.md')
 }
 
+function bashHistoryStorageKey(taskName: string): string {
+  return `dev-bash-history-v1:${taskName}`
+}
+
+/** Bash transcript: dark shell block for command+output; footer after `---` shown separately (016-user). */
+function BashCommsFeedBody({ text }: { text: string }) {
+  const sep = '\n---\n'
+  const idx = text.lastIndexOf(sep)
+  const loading = text === '(loading…)'
+  if (loading || idx === -1) {
+    return (
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
+        <pre className="feed-log-shell-block">{text}</pre>
+      </div>
+    )
+  }
+  const shellPart = text.slice(0, idx)
+  const metaPart = text.slice(idx + sep.length).trimEnd()
+  return (
+    <>
+      <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
+        <pre className="feed-log-shell-block">{shellPart}</pre>
+      </div>
+      {metaPart !== '' ? (
+        <div className="feed-comms-bash-meta-outside">
+          <pre className="feed-comms-bash-meta-outside-pre">{metaPart}</pre>
+        </div>
+      ) : null}
+    </>
+  )
+}
+
 const FeedEntryRow = memo(function FeedEntryRow({
   entry,
   contents,
@@ -742,9 +774,7 @@ const FeedEntryRow = memo(function FeedEntryRow({
           {entry.type === 'log' ? (
             <ParsedLogView raw={contents[entry.id] ?? ''} />
           ) : isBashCommsEntry(entry.id) ? (
-            <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
-              <pre className="feed-log-shell-block">{contents[entry.id] ?? '(loading…)'}</pre>
-            </div>
+            <BashCommsFeedBody text={contents[entry.id] ?? '(loading…)'} />
           ) : (
             <ReactMarkdown>{contents[entry.id] ?? '(loading…)'}</ReactMarkdown>
           )}
@@ -1313,6 +1343,11 @@ export function TaskCommsPageContent({
   const [bashDraftStatus, setBashDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
   const bashDraftLoadedRef = useRef(false)
   const lastSavedBashRef = useRef<string | null>(null)
+  const [bashHistory, setBashHistory] = useState<string[]>([])
+  const bashHistoryRef = useRef<string[]>([])
+  bashHistoryRef.current = bashHistory
+  const [bashHistoryBrowseIdx, setBashHistoryBrowseIdx] = useState<number | null>(null)
+  const [bashHistoryPicker, setBashHistoryPicker] = useState('')
 
   const toggleCollapsed = useCallback((key: string) => {
     setCollapsedKeys((prev) => {
@@ -1705,6 +1740,60 @@ export function TaskCommsPageContent({
     return () => { document.title = DEFAULT_TAB_TITLE }
   }, [taskName])
 
+  useEffect(() => {
+    setBashHistoryBrowseIdx(null)
+    try {
+      const raw = sessionStorage.getItem(bashHistoryStorageKey(taskName))
+      if (!raw) {
+        setBashHistory([])
+        return
+      }
+      const parsed = JSON.parse(raw) as unknown
+      if (!Array.isArray(parsed) || !parsed.every((x): x is string => typeof x === 'string')) {
+        setBashHistory([])
+        return
+      }
+      setBashHistory(parsed.slice(-80))
+    } catch {
+      setBashHistory([])
+    }
+  }, [taskName])
+
+  const persistBashHistory = useCallback(
+    (next: string[]) => {
+      try {
+        sessionStorage.setItem(bashHistoryStorageKey(taskName), JSON.stringify(next))
+      } catch {
+        // ignore quota / private mode
+      }
+    },
+    [taskName],
+  )
+
+  const bashHistoryOlder = useCallback(() => {
+    const hist = bashHistoryRef.current
+    if (hist.length === 0) return
+    setBashHistoryBrowseIdx((prevIdx) => {
+      const nextIdx = prevIdx === null ? hist.length - 1 : Math.max(0, prevIdx - 1)
+      setShellInput(hist[nextIdx])
+      return nextIdx
+    })
+  }, [])
+
+  const bashHistoryNewer = useCallback(() => {
+    const hist = bashHistoryRef.current
+    setBashHistoryBrowseIdx((prevIdx) => {
+      if (prevIdx === null) return null
+      if (prevIdx >= hist.length - 1) {
+        setShellInput('')
+        return null
+      }
+      const nextIdx = prevIdx + 1
+      setShellInput(hist[nextIdx])
+      return nextIdx
+    })
+  }, [])
+
   const runShellCommand = useCallback(async () => {
     const cmd = shellInput.trim()
     if (!cmd) return
@@ -1717,6 +1806,16 @@ export function TaskCommsPageContent({
       setShellInput('')
       lastSavedBashRef.current = ''
       setBashDraftStatus('saved')
+      setBashHistoryBrowseIdx(null)
+      setBashHistory((prev) => {
+        let next = prev
+        if (prev.length === 0 || prev[prev.length - 1] !== cmd) {
+          next = [...prev, cmd]
+          if (next.length > 80) next = next.slice(-80)
+        }
+        persistBashHistory(next)
+        return next
+      })
       api.setTaskBashDraft(taskName, '').catch(() => {})
       setScrollToBottomAfterLoad(true)
     } catch (err) {
@@ -1724,7 +1823,7 @@ export function TaskCommsPageContent({
     } finally {
       setStartingCommand(null)
     }
-  }, [taskName, shellInput, loadCommandStatus])
+  }, [taskName, shellInput, loadCommandStatus, persistBashHistory])
 
   const handlePostComment = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -2059,10 +2158,64 @@ export function TaskCommsPageContent({
         ) : (
           <>
             <p className="comms-shell-hint hint">Runs as <code>bash -c</code> with cwd set to the task folder. Use “Run bash” to execute; Enter inserts a newline.</p>
+            <div className="comms-bash-history-row">
+              <label htmlFor="bash-history-select" className="comms-bash-history-label">Recent</label>
+              <select
+                id="bash-history-select"
+                className="comms-bash-history-select"
+                aria-label="Insert a recent bash command"
+                value={bashHistoryPicker}
+                disabled={bashHistory.length === 0 || !!activeCommand || !!startingCommand}
+                onChange={(e) => {
+                  const v = e.target.value
+                  setBashHistoryPicker('')
+                  if (v === '') return
+                  const origIdx = parseInt(v, 10)
+                  if (Number.isNaN(origIdx) || origIdx < 0 || origIdx >= bashHistory.length) return
+                  const cmd = bashHistory[origIdx]
+                  setShellInput(cmd)
+                  setBashHistoryBrowseIdx(origIdx)
+                }}
+              >
+                <option value="">Select…</option>
+                {[...bashHistory].reverse().map((cmd, revIdx) => {
+                  const origIdx = bashHistory.length - 1 - revIdx
+                  const label = cmd.length > 96 ? `${cmd.slice(0, 96)}…` : cmd
+                  return (
+                    <option key={origIdx} value={String(origIdx)}>
+                      {label}
+                    </option>
+                  )
+                })}
+              </select>
+              <button
+                type="button"
+                className="comms-bash-history-arrow"
+                aria-label="Older bash command"
+                title="Older command"
+                disabled={bashHistory.length === 0 || !!activeCommand || !!startingCommand}
+                onClick={bashHistoryOlder}
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className="comms-bash-history-arrow"
+                aria-label="Newer bash command"
+                title="Newer command"
+                disabled={bashHistoryBrowseIdx === null || !!activeCommand || !!startingCommand}
+                onClick={bashHistoryNewer}
+              >
+                ↓
+              </button>
+            </div>
             <textarea
               className="comms-post-form-textarea comms-post-form-textarea-terminal"
               value={shellInput}
-              onChange={(e) => setShellInput(e.target.value)}
+              onChange={(e) => {
+                setBashHistoryBrowseIdx(null)
+                setShellInput(e.target.value)
+              }}
               placeholder="$ "
               rows={4}
               disabled={!!activeCommand || !!startingCommand}
