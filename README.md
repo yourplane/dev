@@ -105,7 +105,7 @@ uv sync
 
 Use `--backend-port` / `--frontend-port` to pin ports. Auto-selected ports avoid common dev ranges (see `dev_sdk.daemon`). `dev daemon list` shows the `dev` CLI path, `uv`, `npm`, and URLs.
 
-See `dev-daemon/README.md` for systemd-style **`ExecStart`** notes (replacing the removed shell scripts).
+For **systemd**, use a user unit with **`WorkingDirectory`** set to this repo root and **`ExecStart`** pointing at your `dev` binary with **`daemon start`** (same **`PATH`** as an interactive shell so **`uv`** and **`npm`** resolve). Logs: **`journalctl --user -u <unit-name> -f`**.
 
 ## Logs (troubleshooting)
 
