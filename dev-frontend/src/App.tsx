@@ -2100,7 +2100,7 @@ export function TaskCommsPageContent({
           />
         ) : (
           <>
-            <p className="comms-shell-hint hint">Runs as <code>bash -c</code> with cwd set to the task folder. Enter runs bash; Shift+Enter adds a newline.</p>
+            <p className="comms-shell-hint hint">Runs as <code>bash -c</code> with cwd set to the task folder. Use “Run bash” to execute; Enter inserts a newline.</p>
             <textarea
               className="comms-post-form-textarea comms-post-form-textarea-terminal"
               value={shellInput}
@@ -2112,13 +2112,6 @@ export function TaskCommsPageContent({
               autoCapitalize="none"
               autoCorrect="off"
               autoComplete="off"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  if (!shellInput.trim() || activeCommand || startingCommand) return
-                  void runShellCommand()
-                }
-              }}
             />
           </>
         )}
