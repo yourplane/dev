@@ -665,6 +665,11 @@ const COMMAND_LABEL: Record<string, string> = {
   'plan-implement': 'Plan',
   implement: 'Implement',
   do: 'Do',
+  bash: 'Shell',
+}
+
+function isBashCommsEntry(entryId: string): boolean {
+  return entryId.endsWith('-user-bash.md')
 }
 
 const FeedEntryRow = memo(function FeedEntryRow({
@@ -736,6 +741,8 @@ const FeedEntryRow = memo(function FeedEntryRow({
         <div className="comms-content">
           {entry.type === 'log' ? (
             <ParsedLogView raw={contents[entry.id] ?? ''} />
+          ) : isBashCommsEntry(entry.id) ? (
+            <pre className="feed-comms-bash-block">{contents[entry.id] ?? '(loading…)'}</pre>
           ) : (
             <ReactMarkdown>{contents[entry.id] ?? '(loading…)'}</ReactMarkdown>
           )}
@@ -1264,7 +1271,9 @@ export function TaskCommsPageContent({
   const [contents, setContents] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [entryMode, setEntryMode] = useState<'prompt' | 'command'>('prompt')
   const [commentText, setCommentText] = useState('')
+  const [shellInput, setShellInput] = useState('')
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
@@ -1665,8 +1674,30 @@ export function TaskCommsPageContent({
     return () => { document.title = DEFAULT_TAB_TITLE }
   }, [taskName])
 
+  const runShellCommand = useCallback(async () => {
+    const cmd = shellInput.trim()
+    if (!cmd) return
+    setPostError(null)
+    setCommandError(null)
+    setStartingCommand('bash')
+    try {
+      await api.startTaskCommand(taskName, 'bash', cmd)
+      await loadCommandStatus()
+      setShellInput('')
+      setScrollToBottomAfterLoad(true)
+    } catch (err) {
+      setCommandError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setStartingCommand(null)
+    }
+  }, [taskName, shellInput, loadCommandStatus])
+
   const handlePostComment = async (e: React.FormEvent) => {
     e.preventDefault()
+    if (entryMode === 'command') {
+      await runShellCommand()
+      return
+    }
     const content = commentText.trim()
     if (!content) return
     setPostError(null)
@@ -1677,8 +1708,8 @@ export function TaskCommsPageContent({
       lastSavedCommentRef.current = ''
       await loadFeed({ incremental: true, prefetchNew: true })
       setScrollToBottomAfterLoad(true)
-    } catch (e) {
-      setPostError(e instanceof Error ? e.message : String(e))
+    } catch (err) {
+      setPostError(err instanceof Error ? err.message : String(err))
     } finally {
       setPosting(false)
     }
@@ -1945,33 +1976,91 @@ export function TaskCommsPageContent({
         )}
       </div>
       <form className="comms-post-form" onSubmit={handlePostComment}>
-        <label className="comms-post-form-label">Add comment</label>
-        <div className={`draft-status draft-status-${commentDraftStatus}`} role="status" aria-live="polite">
-          {commentDraftStatus === 'saved' && 'All changes saved to draft'}
-          {commentDraftStatus === 'unsaved' && 'Unsaved changes'}
-          {commentDraftStatus === 'saving' && 'Saving draft…'}
+        <div className="comms-entry-mode-row">
+          <span className="comms-entry-mode-label" id="entry-mode-label">Input mode</span>
+          <div className="comms-entry-mode-toggle" role="group" aria-labelledby="entry-mode-label">
+            <button
+              type="button"
+              className={`comms-entry-mode-btn${entryMode === 'prompt' ? ' comms-entry-mode-btn-active' : ''}`}
+              onClick={() => setEntryMode('prompt')}
+              disabled={!!activeCommand}
+            >
+              Prompt
+            </button>
+            <button
+              type="button"
+              className={`comms-entry-mode-btn${entryMode === 'command' ? ' comms-entry-mode-btn-active' : ''}`}
+              onClick={() => setEntryMode('command')}
+              disabled={!!activeCommand}
+            >
+              Command
+            </button>
+          </div>
         </div>
-        <textarea
-          className="comms-post-form-textarea"
-          value={commentText}
-          onChange={(e) => setCommentText(e.target.value)}
-          placeholder="Write a comment…"
-          rows={3}
-          disabled={posting}
-        />
+        <label className="comms-post-form-label">
+          {entryMode === 'prompt' ? 'Add comment' : 'Shell (task directory)'}
+        </label>
+        {entryMode === 'prompt' && (
+          <div className={`draft-status draft-status-${commentDraftStatus}`} role="status" aria-live="polite">
+            {commentDraftStatus === 'saved' && 'All changes saved to draft'}
+            {commentDraftStatus === 'unsaved' && 'Unsaved changes'}
+            {commentDraftStatus === 'saving' && 'Saving draft…'}
+          </div>
+        )}
+        {entryMode === 'prompt' ? (
+          <textarea
+            className="comms-post-form-textarea"
+            value={commentText}
+            onChange={(e) => setCommentText(e.target.value)}
+            placeholder="Write a comment…"
+            rows={3}
+            disabled={posting || !!activeCommand}
+          />
+        ) : (
+          <>
+            <p className="comms-shell-hint hint">Runs as <code>bash -c</code> with cwd set to the task folder. Enter runs the command; Shift+Enter adds a newline.</p>
+            <textarea
+              className="comms-post-form-textarea comms-post-form-textarea-terminal"
+              value={shellInput}
+              onChange={(e) => setShellInput(e.target.value)}
+              placeholder="$ "
+              rows={4}
+              disabled={!!activeCommand || !!startingCommand}
+              spellCheck={false}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  if (!shellInput.trim() || activeCommand || startingCommand) return
+                  void runShellCommand()
+                }
+              }}
+            />
+          </>
+        )}
         {postError && <p className="inline-error">{postError}</p>}
         <div className="form-actions">
-          <button type="submit" disabled={posting || !commentText.trim()}>
-            {posting ? 'Posting…' : 'Post comment'}
-          </button>
           <button
-            type="button"
-            className="do-btn command-btn"
-            disabled={posting || !commentText.trim() || !!startingCommand || !!activeCommand}
-            onClick={handleDoFromComment}
+            type="submit"
+            disabled={
+              entryMode === 'prompt'
+                ? posting || !commentText.trim() || !!activeCommand
+                : !shellInput.trim() || !!startingCommand || !!activeCommand
+            }
           >
-            {startingCommand === 'do' ? 'Starting…' : 'Do'}
+            {entryMode === 'prompt'
+              ? (posting ? 'Posting…' : 'Post comment')
+              : (startingCommand === 'bash' ? 'Running…' : 'Run')}
           </button>
+          {entryMode === 'prompt' && (
+            <button
+              type="button"
+              className="do-btn command-btn"
+              disabled={posting || !commentText.trim() || !!startingCommand || !!activeCommand}
+              onClick={handleDoFromComment}
+            >
+              {startingCommand === 'do' ? 'Starting…' : 'Do'}
+            </button>
+          )}
         </div>
       </form>
       <div className="task-comms-scroll-buttons" aria-label="Scroll">

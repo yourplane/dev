@@ -25,6 +25,7 @@ vi.mock('./api', () => ({
     getTaskCommandStatus: vi.fn(),
     openTaskLogStream: vi.fn(),
     startTaskCommand: vi.fn(),
+    cancelTaskCommand: vi.fn(),
     createTaskPr: vi.fn(),
     getTaskPr: vi.fn(),
     pullTaskPrComments: vi.fn(),
@@ -51,6 +52,7 @@ describe('App', () => {
       active: false,
       command: null,
       active_log_filename: null,
+      command_error: null,
     })
   })
 
@@ -106,6 +108,32 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(vi.mocked(api.setTaskCommentDraft)).toHaveBeenCalledWith('test-task', '')
+    })
+  })
+
+  it('command mode Run starts bash with shell input', async () => {
+    const noop = () => {}
+    const { api } = await import('./api')
+    vi.mocked(api.startTaskCommand).mockResolvedValue({ command: 'bash', status: 'running' })
+
+    render(
+      <MemoryRouter>
+        <TaskCommsPageContent taskName="test-task" navigate={noop} />
+      </MemoryRouter>
+    )
+
+    await screen.findByPlaceholderText('Write a comment…')
+    fireEvent.click(screen.getByRole('button', { name: 'Command' }))
+
+    const terminal = await screen.findByRole('textbox')
+    fireEvent.change(terminal, { target: { value: 'echo OK' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Run' }))
+
+    await waitFor(() => {
+      expect(vi.mocked(api.startTaskCommand)).toHaveBeenCalledWith('test-task', 'bash', 'echo OK')
+    })
+    await waitFor(() => {
+      expect((terminal as HTMLTextAreaElement).value).toBe('')
     })
   })
 

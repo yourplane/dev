@@ -1317,3 +1317,90 @@
   opacity: 0.7;
   cursor: not-allowed;
 }
+
+.comms-entry-mode-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+
+.comms-entry-mode-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #444;
+}
+
+.comms-entry-mode-toggle {
+  display: inline-flex;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.comms-entry-mode-btn {
+  padding: 0.35rem 0.85rem;
+  border: none;
+  background: #f5f5f5;
+  font-size: 0.85rem;
+  cursor: pointer;
+  color: #333;
+}
+
+.comms-entry-mode-btn:hover:not(:disabled) {
+  background: #ebebeb;
+}
+
+.comms-entry-mode-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.comms-entry-mode-btn-active {
+  background: #1a1a1a;
+  color: #f5f5f5;
+}
+
+.comms-entry-mode-btn-active:hover:not(:disabled) {
+  background: #333;
+}
+
+.comms-shell-hint {
+  margin: 0 0 0.5rem;
+  font-size: 0.82rem;
+}
+
+.comms-post-form-textarea-terminal {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.85rem;
+  line-height: 1.45;
+  background: #0d0d0d;
+  color: #e8e8e8;
+  border-color: #333;
+}
+
+.comms-post-form-textarea-terminal::placeholder {
+  color: #6b6b6b;
+}
+
+.comms-post-form-textarea-terminal:focus {
+  outline: 2px solid #4a9eff;
+  outline-offset: 1px;
+}
+
+/* Bash comms in feed: match agent shell blocks */
+.feed-comms-bash-block {
+  margin: 0;
+  padding: 0.6rem 0.75rem;
+  font-family: ui-monospace, monospace;
+  font-size: 0.82rem;
+  white-space: pre-wrap;
+  word-break: break-all;
+  background: #1a1a1a;
+  color: #e0e0e0;
+  border-radius: 6px;
+  border: 1px solid #333;
+  max-height: 24rem;
+  overflow: auto;
+}
