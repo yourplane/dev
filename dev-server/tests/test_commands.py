@@ -1,6 +1,7 @@
 """Tests for async task commands API."""
 
 import os
+import subprocess
 import threading
 import time
 from pathlib import Path
@@ -10,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dev_sdk.agent_run import AgentRunError
-from dev_server.main import app
+from dev_server.main import _popen_bash_for_streaming, app
 
 
 @pytest.fixture
@@ -20,6 +21,21 @@ def task_dir(tmp_path: Path) -> Path:
     t.mkdir()
     (t / "agent-chat-id").write_text("fake-chat-id")
     return t
+
+
+def test_bash_popen_for_streaming_uses_unbuffered_pipe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default subprocess PIPE buffers ~8KiB in Python; bufsize=0 yields incremental reads for live comms."""
+    kwargs_seen: dict[str, object] = {}
+    orig_popen = subprocess.Popen
+
+    def capture_popen(*args: object, **kwargs: object) -> subprocess.Popen:
+        kwargs_seen.update(kwargs)
+        return orig_popen(*args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "Popen", capture_popen)
+    proc = _popen_bash_for_streaming("exit 0", cwd="/tmp")
+    proc.wait(timeout=5)
+    assert kwargs_seen.get("bufsize") == 0
 
 
 @pytest.fixture

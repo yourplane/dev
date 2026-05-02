@@ -105,10 +105,12 @@ def _popen_bash_for_streaming(shell_command: str, *, cwd: str) -> subprocess.Pop
     """
     Spawn `bash -c` with stdout/stderr merged to a PIPE.
 
-    Without a TTY, libc stdio defaults to fully buffered stdout, so the reader thread
-    sees nothing until the buffer fills or the process exits. Prefer coreutils `stdbuf`
-    line buffering when available so comms files and UI polling update incrementally.
-    Set DEV_BASH_NO_STDBUF=1 to skip stdbuf (e.g. minimal images without coreutils).
+    Uses ``bufsize=0`` so Python does not wrap the pipe in a large BufferedReader
+    (default ``bufsize`` blocks ``read()`` until ~8KiB accumulates or the pipe closes).
+
+    Without a TTY, libc stdio defaults to fully buffered stdout on the child; prefer
+    coreutils ``stdbuf`` line buffering when available so programs flush often enough.
+    Set DEV_BASH_NO_STDBUF=1 to skip ``stdbuf`` (e.g. minimal images without coreutils).
     """
     use_stdbuf = os.environ.get("DEV_BASH_NO_STDBUF", "").strip().lower() not in ("1", "true", "yes")
     argv_candidates: list[list[str]] = []
@@ -125,6 +127,7 @@ def _popen_bash_for_streaming(shell_command: str, *, cwd: str) -> subprocess.Pop
                 stderr=subprocess.STDOUT,
                 stdin=subprocess.DEVNULL,
                 start_new_session=True,
+                bufsize=0,
             )
         except FileNotFoundError as e:
             last_fe = e
