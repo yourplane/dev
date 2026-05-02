@@ -1,6 +1,7 @@
 """CLI commands."""
 
 from dev.commands.create_pr import create_pr
+from dev.commands.daemon import daemon_group
 from dev.commands.repos import repos_group
 from dev.commands.task import (
     archive_task,
@@ -18,6 +19,7 @@ __all__ = [
     "comms_group",
     "copy_from_archive_cmd",
     "create_pr",
+    "daemon_group",
     "implement_cmd",
     "launch_interact",
     "list_tasks",

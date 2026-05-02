@@ -86,24 +86,31 @@ To use the web UI for listing, creating, and archiving tasks:
 
 1. Start dev-server: `uv run --project dev-server uvicorn dev_server.main:app --reload --host 127.0.0.1`
 2. From `dev-frontend/`: `npm install && npm run dev`
-3. Open http://localhost:5173
+3. Open http://localhost:5173 (or the URL printed by Vite).
 
 See `dev-frontend/README.md` for details.
 
-### Daemon (one command)
+### Daemon (background stacks)
 
-To start both backend and frontend in one terminal (foreground; Ctrl+C stops both):
+Start backend + frontend in the **background** (multiple instances supported; each gets unique backend and frontend ports):
 
 ```bash
-./dev-daemon/start.sh
+cd /path/to/dev   # workspace root with dev-server and dev-frontend
+
+uv sync
+.venv/bin/dev daemon start
+.venv/bin/dev daemon list
+.venv/bin/dev daemon stop --repo-root .
 ```
 
-Then open http://localhost:5173. See `dev-daemon/README.md` for run options and on-startup (e.g. systemd user service).
+Use `--backend-port` / `--frontend-port` to pin ports. Auto-selected ports avoid common dev ranges (see `dev_sdk.daemon`). `dev daemon list` shows the `dev` CLI path, `uv`, `npm`, and URLs.
+
+See `dev-daemon/README.md` for systemd-style **`ExecStart`** notes (replacing the removed shell scripts).
 
 ## Logs (troubleshooting)
 
 - **dev-sdk:** Debug logs from the `dev_sdk` logger go to `~/.local/share/dev/sdk-debug.log` by default. Set `DEV_SDK_LOG` to use a different path. See [dev-sdk/README.md](dev-sdk/README.md#debugging).
-- **dev-server:** Uvicorn/FastAPI write to **stdout/stderr** of the process (the terminal where you start the server; see [Web UI (dev-frontend)](#web-ui-dev-frontend)). There is no default on-disk server log file. If you run the stack via **systemd** (`dev-daemon`), stream logs with `journalctl --user -u dev-daemon.service -f` (see [dev-daemon/README.md](dev-daemon/README.md)).
+- **dev-server:** Uvicorn/FastAPI write to **stdout/stderr** of the process (the terminal where you start the server; see [Web UI (dev-frontend)](#web-ui-dev-frontend)). With **`dev daemon start`**, logs are under `~/.local/share/dev/daemon/logs/<instance-id>/` (override via `XDG_DATA_HOME`). For a custom systemd unit, use `journalctl --user -u <unit> -f`.
 
 ## Development
 
