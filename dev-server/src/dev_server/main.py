@@ -7,6 +7,8 @@ import logging
 import os
 import queue
 import re
+import signal
+import subprocess
 import threading
 import time
 import zipfile
@@ -26,8 +28,10 @@ from dev_sdk.agent_run import (
 from dev_sdk.comms import add_comms, comms_dir, index_path, read_index, remove_comms
 from dev_sdk.drafts import (
     get_new_task_draft,
+    get_task_bash_draft,
     get_task_comment_draft,
     set_new_task_draft,
+    set_task_bash_draft,
     set_task_comment_draft,
 )
 from dev_sdk.feed import LOGS_DIR, read_feed
@@ -40,8 +44,142 @@ from dev_sdk.create_pr import (
 from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repos
 from dev_sdk.task_manager import ArchivedTaskEntry, TaskManager
 
-SUPPORTED_COMMANDS = ("plan-implement", "implement", "do")
+SUPPORTED_COMMANDS = ("plan-implement", "implement", "do", "bash")
 logger = logging.getLogger("dev_server")
+
+_DEFAULT_BASH_MAX_OUTPUT_BYTES = 2_000_000
+_DEFAULT_BASH_TIMEOUT_SEC = 3600.0
+
+
+def _terminate_process_group(proc: subprocess.Popen, *, use_kill: bool = False) -> None:
+    """Send SIGTERM (or SIGKILL) to the child's process group."""
+    try:
+        sig = signal.SIGKILL if use_kill else signal.SIGTERM
+        os.killpg(proc.pid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def _run_bash_in_thread(
+    task_name: str,
+    task_dir: Path,
+    cancel_requested: threading.Event,
+    shell_command: str,
+) -> None:
+    """Run bash -c in task_dir; write transcript to comms (kind=bash); clear registry when done."""
+    try:
+        max_bytes = int(os.environ.get("DEV_BASH_MAX_OUTPUT_BYTES", str(_DEFAULT_BASH_MAX_OUTPUT_BYTES)))
+    except ValueError:
+        max_bytes = _DEFAULT_BASH_MAX_OUTPUT_BYTES
+    try:
+        timeout_sec = float(os.environ.get("DEV_BASH_TIMEOUT_SEC", str(_DEFAULT_BASH_TIMEOUT_SEC)))
+    except ValueError:
+        timeout_sec = _DEFAULT_BASH_TIMEOUT_SEC
+
+    try:
+        proc = subprocess.Popen(
+            ["bash", "-c", shell_command],
+            cwd=str(task_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as exc:
+        logger.warning("bash spawn failed for task %s: %s", task_name, exc)
+        try:
+            add_comms(
+                task_dir,
+                "user",
+                f"$ {shell_command}\n---\nFailed to start process: {exc}\n",
+                kind="bash",
+            )
+        except OSError:
+            logger.exception("failed to write bash error comms for task %s", task_name)
+        finally:
+            with _command_registry_lock:
+                _command_registry.pop(task_name, None)
+        return
+
+    collected = bytearray()
+    truncated = False
+    cancelled = False
+    timed_out = False
+    start = time.monotonic()
+    stdout = proc.stdout
+    assert stdout is not None
+    trunc_cell: list[bool] = [False]
+
+    def read_stdout() -> None:
+        while True:
+            chunk = stdout.read(4096)
+            if not chunk:
+                break
+            room = max_bytes - len(collected)
+            if room <= 0:
+                trunc_cell[0] = True
+                break
+            take = min(len(chunk), room)
+            collected.extend(chunk[:take])
+            if take < len(chunk):
+                trunc_cell[0] = True
+                break
+
+    reader = threading.Thread(target=read_stdout, daemon=True)
+    reader.start()
+
+    try:
+        while proc.poll() is None:
+            if cancel_requested.is_set():
+                cancelled = True
+                _terminate_process_group(proc, use_kill=False)
+                break
+            if timeout_sec > 0 and (time.monotonic() - start) > timeout_sec:
+                timed_out = True
+                _terminate_process_group(proc, use_kill=True)
+                break
+            if trunc_cell[0] or len(collected) >= max_bytes:
+                truncated = True
+                _terminate_process_group(proc, use_kill=True)
+                break
+            time.sleep(0.1)
+        reader.join(timeout=30.0)
+        if proc.poll() is None:
+            _terminate_process_group(proc, use_kill=True)
+            proc.wait(timeout=15)
+        else:
+            proc.wait(timeout=15)
+    finally:
+        try:
+            stdout.close()
+        except OSError:
+            pass
+
+    truncated = truncated or trunc_cell[0]
+    out_text = bytes(collected).decode("utf-8", errors="replace")
+    exit_code = proc.returncode
+
+    lines: list[str] = [f"$ {shell_command}"]
+    if out_text:
+        lines.append(out_text.rstrip("\n"))
+    if truncated:
+        lines.append("\n[… output truncated (DEV_BASH_MAX_OUTPUT_BYTES) …]")
+    lines.append("---")
+    if cancelled:
+        lines.append("Cancelled by user.")
+    elif timed_out:
+        lines.append(f"Timed out after {timeout_sec:g}s (DEV_BASH_TIMEOUT_SEC).")
+    else:
+        lines.append(f"Exit code: {exit_code if exit_code is not None else 'unknown'}")
+    transcript = "\n".join(lines).strip() + "\n"
+
+    try:
+        add_comms(task_dir, "user", transcript, kind="bash")
+    except OSError:
+        logger.exception("failed to write bash comms for task %s", task_name)
+    finally:
+        with _command_registry_lock:
+            _command_registry.pop(task_name, None)
 
 # In-memory registry: task_name -> { "command_id", "thread" }
 _command_registry: dict[str, dict] = {}
@@ -181,10 +319,10 @@ class PostCommsResponse(BaseModel):
 
 
 class StartCommandRequest(BaseModel):
-    command: str = Field(..., description="Command id: plan-implement, implement, or do")
+    command: str = Field(..., description="Command id: plan-implement, implement, do, or bash")
     prompt: str | None = Field(
         None,
-        description="Optional prompt for do command (used as the agent --trust prompt).",
+        description="For `do`: agent prompt. For `bash`: shell command string passed to `bash -c`.",
     )
 
 
@@ -349,6 +487,20 @@ def put_task_comment_draft_endpoint(task_name: str, body: TaskCommentDraftReques
     """Save or clear the comment draft for the task. Empty content clears it. Draft stored in server .drafts."""
     _task_dir(task_name)  # validate task exists
     set_task_comment_draft(_tasks_root(), task_name, body.content or "")
+
+
+@app.get("/tasks/{task_name}/drafts/bash", response_class=PlainTextResponse)
+def get_task_bash_draft_endpoint(task_name: str) -> str:
+    """Return the bash-input draft for the task (separate from comment draft). Stored in server .drafts."""
+    _task_dir(task_name)
+    return get_task_bash_draft(_tasks_root(), task_name)
+
+
+@app.put("/tasks/{task_name}/drafts/bash", status_code=204)
+def put_task_bash_draft_endpoint(task_name: str, body: TaskCommentDraftRequest) -> None:
+    """Save or clear the bash-input draft. Empty content clears it."""
+    _task_dir(task_name)
+    set_task_bash_draft(_tasks_root(), task_name, body.content or "")
 
 
 @app.get("/tasks", response_model=ListTasksResponse)
@@ -668,6 +820,12 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
     if body.command == "do":
         if body.prompt is None or not body.prompt.strip():
             raise HTTPException(status_code=400, detail="prompt is required for do command")
+    if body.command == "bash":
+        if body.prompt is None or not body.prompt.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="prompt is required for bash command (shell command text)",
+            )
     task_dir = _task_dir(task_name)
     if body.command == "do":
         set_task_comment_draft(_tasks_root(), task_name, "")
@@ -680,11 +838,18 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
                 detail="A command is already running for this task.",
             )
         cancel_requested = threading.Event()
-        thread = threading.Thread(
-            target=_run_command_in_thread,
-            args=(task_name, body.command, task_dir, cancel_requested, body.prompt),
-            daemon=True,
-        )
+        if body.command == "bash":
+            thread = threading.Thread(
+                target=_run_bash_in_thread,
+                args=(task_name, task_dir, cancel_requested, body.prompt.strip()),
+                daemon=True,
+            )
+        else:
+            thread = threading.Thread(
+                target=_run_command_in_thread,
+                args=(task_name, body.command, task_dir, cancel_requested, body.prompt),
+                daemon=True,
+            )
         _command_registry[task_name] = {
             "command_id": body.command,
             "thread": thread,

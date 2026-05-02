@@ -295,3 +295,64 @@ def test_pull_pr_comments_returns_422_on_error(client_with_tasks: TestClient, ta
         resp = client_with_tasks.post("/tasks/mytask/pull-pr-comments")
     assert resp.status_code == 422
     assert "No existing PR" in resp.json()["detail"]
+
+
+def test_start_bash_requires_prompt_returns_400(client_with_tasks: TestClient) -> None:
+    """Starting bash without prompt returns 400."""
+    resp = client_with_tasks.post("/tasks/mytask/commands", json={"command": "bash"})
+    assert resp.status_code == 400
+    assert "bash" in resp.json()["detail"].lower()
+
+
+def test_start_bash_writes_comms_transcript(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """Bash command finishes and appends a *-user-bash.md comms file with stdout and exit code."""
+    resp = client_with_tasks.post(
+        "/tasks/mytask/commands",
+        json={"command": "bash", "prompt": "echo HI"},
+    )
+    assert resp.status_code == 201
+    time.sleep(0.6)
+    bash_files = sorted((task_dir / "comms").glob("*-user-bash.md"))
+    assert bash_files, "expected a bash comms file"
+    text = bash_files[-1].read_text(encoding="utf-8")
+    assert "$ echo HI" in text
+    assert "HI" in text
+    assert "Exit code: 0" in text
+
+
+def test_start_bash_returns_409_when_agent_command_running(
+    client_with_tasks: TestClient, task_dir: Path
+) -> None:
+    """Bash cannot start while an agent command holds the registry."""
+    block = threading.Event()
+
+    def blocking_run_plan(*args: object, **kwargs: object) -> None:
+        block.wait()
+
+    with patch("dev_server.main.run_plan_implement", side_effect=blocking_run_plan):
+        client_with_tasks.post("/tasks/mytask/commands", json={"command": "plan-implement"})
+        resp = client_with_tasks.post(
+            "/tasks/mytask/commands",
+            json={"command": "bash", "prompt": "echo x"},
+        )
+    assert resp.status_code == 409
+    assert "already running" in resp.json()["detail"]
+    block.set()
+
+
+def test_cancel_bash_writes_partial_transcript(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """Cancel stops a long-running bash command and still records comms."""
+    resp = client_with_tasks.post(
+        "/tasks/mytask/commands",
+        json={"command": "bash", "prompt": "sleep 120"},
+    )
+    assert resp.status_code == 201
+    time.sleep(0.2)
+    resp_cancel = client_with_tasks.post("/tasks/mytask/commands/cancel")
+    assert resp_cancel.status_code == 204
+    time.sleep(0.8)
+    bash_files = sorted((task_dir / "comms").glob("*-user-bash.md"))
+    assert bash_files
+    text = bash_files[-1].read_text(encoding="utf-8")
+    assert "sleep 120" in text
+    assert "Cancelled by user" in text
