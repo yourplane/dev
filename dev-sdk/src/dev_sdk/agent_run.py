@@ -26,7 +26,7 @@ PLAN_IMPLEMENT_STREAM_LOG_PREFIX = "dev-plan-stream-"
 IMPLEMENT_STREAM_LOG_PREFIX = "dev-implement-stream-"
 DO_STREAM_LOG_PREFIX = "dev-do-stream-"
 
-PLAN_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). There may be new entries in the comms directory since you last read it—double-check comms/index.txt and read any new files before proceeding. Produce a more detailed description and a step-by-step plan for the task. Before asking the user any follow-up question, search the source code for the answer; only ask if the answer cannot be found in the source. Ask any follow-up questions you need. Output only the detailed description and plan as markdown (no preamble or meta-commentary)."""
+PLAN_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). There may be new entries in the comms directory since you last read it—double-check comms/index.txt and read any new files before proceeding. Produce a more detailed description and a step-by-step plan for the task. Before asking the user any follow-up question, search the source code for the answer; only ask if the answer cannot be found in the source. Ask any follow-up questions you need."""
 
 IMPLEMENT_MODE_PROMPT = """Read the task context in the `comms` directory (files listed in comms/index.txt, in order). There may be new entries in the comms directory since you last read it—double-check comms/index.txt and read any new files before proceeding. Implement the task and commit when done. When done, in the git project directory (the repo subdirectory under the task root, not the task root itself): fetch from origin, merge origin/main into the current branch, then push the current branch to origin."""
 
@@ -51,44 +51,71 @@ def _agent_cmd() -> str:
 
 
 def extract_plan_from_stream_json(streamed_output: str) -> str:
-    """Extract plan markdown from streamed JSON (Cursor agent stream-json format)."""
+    """Extract the last assistant section from Cursor stream-json output."""
     lines = [line.strip() for line in streamed_output.splitlines() if line.strip()]
     if not lines:
         return streamed_output
-    # Prefer final "result" event (full plan text)
-    for line in reversed(lines):
-        try:
-            obj = json.loads(line)
-            if isinstance(obj, dict) and obj.get("type") == "result" and "result" in obj:
-                result = obj["result"]
-                if isinstance(result, str) and result.strip():
-                    return result.strip()
-        except json.JSONDecodeError:
-            pass
-    # Fall back: accumulate assistant message text and content/text/delta fields
-    parts: list[str] = []
+
+    def _assistant_text_parts(obj: dict) -> list[str]:
+        if obj.get("type") != "assistant":
+            return []
+        message = obj.get("message")
+        if not isinstance(message, dict):
+            return []
+        content = message.get("content")
+        if not isinstance(content, list):
+            return []
+        parts: list[str] = []
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "text":
+                text = item.get("text")
+                if isinstance(text, str):
+                    parts.append(text)
+        return parts
+
+    # Group assistant text into model-call sections. Assistant chunks without a
+    # model_call_id are treated as prefixes for the next model_call_id section;
+    # trailing orphan chunks become their own final section.
+    sections: list[tuple[str | None, list[str]]] = []
+    orphan_parts: list[str] = []
     for line in lines:
         try:
             obj = json.loads(line)
-            if isinstance(obj, dict):
-                if obj.get("type") == "assistant" and "message" in obj:
-                    msg = obj["message"]
-                    if isinstance(msg, dict) and "content" in msg:
-                        for item in msg["content"] if isinstance(msg["content"], list) else []:
-                            if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
-                                parts.append(item["text"])
-                        continue
-                for key in ("content", "text", "delta", "result"):
-                    if key in obj and isinstance(obj[key], str):
-                        parts.append(obj[key])
-                        break
-            elif isinstance(obj, str):
-                parts.append(obj)
         except json.JSONDecodeError:
-            parts.append(line)
-    if parts:
-        return "".join(parts).strip() or "\n".join(parts)
-    return streamed_output
+            continue
+        if not isinstance(obj, dict):
+            continue
+
+        parts = _assistant_text_parts(obj)
+        if not parts:
+            continue
+
+        model_call_id = obj.get("model_call_id")
+        if isinstance(model_call_id, str) and model_call_id:
+            if sections and sections[-1][0] == model_call_id:
+                if orphan_parts:
+                    sections[-1][1].extend(orphan_parts)
+                    orphan_parts = []
+                sections[-1][1].extend(parts)
+            else:
+                section_parts: list[str] = []
+                if orphan_parts:
+                    section_parts.extend(orphan_parts)
+                    orphan_parts = []
+                section_parts.extend(parts)
+                sections.append((model_call_id, section_parts))
+        else:
+            orphan_parts.extend(parts)
+
+    if orphan_parts:
+        sections.append((None, orphan_parts))
+
+    for _, section_parts in reversed(sections):
+        section_text = "".join(section_parts).strip()
+        if section_text:
+            return section_text
+
+    return ""
 
 
 StreamLineCallback = Callable[[str], None]

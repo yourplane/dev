@@ -9,24 +9,46 @@ from dev_sdk.agent_run import (
 )
 
 
-def test_extract_plan_from_stream_json_prefers_result_type() -> None:
-    """Final 'result' event with result field is preferred."""
+def test_extract_plan_from_stream_json_returns_last_assistant_section() -> None:
+    """Only the final assistant model section is returned."""
     lines = [
-        '{"type": "assistant", "message": {"content": [{"type": "text", "text": "Partial"}]}}',
-        '{"type": "result", "result": "# Full Plan\\n\\nStep 1.\\nStep 2."}',
+        '{"type": "assistant", "message": {"content": [{"type": "text", "text": "Old section"}]}, "model_call_id": "call-1"}',
+        '{"type": "assistant", "message": {"content": [{"type": "text", "text": "Latest"}]}, "model_call_id": "call-2"}',
+        '{"type": "result", "result": "ignored"}',
     ]
     out = extract_plan_from_stream_json("\n".join(lines))
-    assert out == "# Full Plan\n\nStep 1.\nStep 2."
+    assert out == "Latest"
 
 
-def test_extract_plan_from_stream_json_fallback_content() -> None:
-    """Falls back to content/text/delta when no result event."""
+def test_extract_plan_from_stream_json_orphan_chunks_attach_to_next_model_call() -> None:
+    """Assistant chunks without model_call_id are grouped with the next model call."""
     lines = [
-        '{"content": "# Plan A"}',
-        '{"text": " Plan B"}',
+        '{"type": "assistant", "message": {"content": [{"type": "text", "text": "prefix "}]} }',
+        '{"type": "assistant", "message": {"content": [{"type": "text", "text": "body"}]}, "model_call_id": "call-2"}',
     ]
     out = extract_plan_from_stream_json("\n".join(lines))
-    assert "# Plan A" in out and "Plan B" in out
+    assert out == "prefix body"
+
+
+def test_extract_plan_from_stream_json_ignores_non_assistant_text_fields() -> None:
+    """Non-assistant objects with generic text fields are ignored."""
+    lines = [
+        '{"content": "not assistant"}',
+        '{"type": "tool_call", "text": "still not assistant"}',
+        '{"type": "assistant", "message": {"content": [{"type": "text", "text": "Plan"}]}, "model_call_id": "call-3"}',
+    ]
+    out = extract_plan_from_stream_json("\n".join(lines))
+    assert out == "Plan"
+
+
+def test_extract_plan_from_stream_json_returns_empty_without_assistant_text() -> None:
+    """No assistant content yields an empty string."""
+    lines = [
+        '{"type": "result", "result": "# Plan"}',
+        '{"type": "tool_call", "message": "run tests"}',
+    ]
+    out = extract_plan_from_stream_json("\n".join(lines))
+    assert out == ""
 
 
 def test_extract_plan_from_stream_json_empty_returns_original() -> None:
