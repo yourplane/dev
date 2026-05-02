@@ -32,10 +32,11 @@ CORS is enabled for `http://localhost:5173` and `http://127.0.0.1:5173` so the d
 - `DEV_TASKS_DIR` — root directory for tasks (default: `~/tasks`). Repo shorthand is resolved from `~/.config/dev/repos.json` (same as the dev CLI).
 - `DEV_BASH_MAX_OUTPUT_BYTES` — max captured stdout/stderr bytes for task shell commands (default: `2000000`). When exceeded, the process is killed and the comms transcript notes truncation.
 - `DEV_BASH_TIMEOUT_SEC` — max runtime in seconds for task shell commands (default: `3600`). Use `0` to disable the timeout.
+- `DEV_BASH_NO_STDBUF` — set to `1`/`true`/`yes` to skip wrapping shell commands with `stdbuf -oL -eL`. Default behavior uses `stdbuf` (GNU coreutils) so stdout/stderr are **line-buffered** when attached to a pipe; otherwise many programs only flush when the buffer fills, so live comms streaming appears frozen until the command ends.
 
 ### Task shell commands (`bash`)
 
-The UI can run arbitrary shell in the task directory. While the command runs, the server creates an indexed comms file (`*-user-bash.md`), writes a short delimiter-wrapped **input** block (`__DEV_BASH_INPUT__` / `__DEV_BASH_INPUT_END__`, full multi-line prompt inside), then streams stdout/stderr after it, then appends a footer (`---`, exit code or cancellation). Older transcripts used a single `$ command` first line only. `GET .../commands` exposes `active_bash_comms_filename` so the UI can poll `GET .../comms/{filename}` for live output. Treat dev-server and task directories as a **trusted boundary**: anyone who can reach the API can run code as the server user in that tree.
+The UI can run arbitrary shell in the task directory. While the command runs, the server creates an indexed comms file (`*-user-bash.md`), writes a short delimiter-wrapped **input** block (`__DEV_BASH_INPUT__` / `__DEV_BASH_INPUT_END__`, full multi-line prompt inside), then streams stdout/stderr after it, then appends a footer (`---`, exit code or cancellation). Older transcripts used a single `$ command` first line only. `GET .../commands` exposes `active_bash_comms_filename` so the UI can poll `GET .../comms/{filename}` for live output. Live updates depend on child processes flushing stdout (see `DEV_BASH_NO_STDBUF`). Treat dev-server and task directories as a **trusted boundary**: anyone who can reach the API can run code as the server user in that tree.
 
 ## Run
 

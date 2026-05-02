@@ -101,6 +101,38 @@ def _terminate_process_group(proc: subprocess.Popen, *, use_kill: bool = False) 
         pass
 
 
+def _popen_bash_for_streaming(shell_command: str, *, cwd: str) -> subprocess.Popen[str]:
+    """
+    Spawn `bash -c` with stdout/stderr merged to a PIPE.
+
+    Without a TTY, libc stdio defaults to fully buffered stdout, so the reader thread
+    sees nothing until the buffer fills or the process exits. Prefer coreutils `stdbuf`
+    line buffering when available so comms files and UI polling update incrementally.
+    Set DEV_BASH_NO_STDBUF=1 to skip stdbuf (e.g. minimal images without coreutils).
+    """
+    use_stdbuf = os.environ.get("DEV_BASH_NO_STDBUF", "").strip().lower() not in ("1", "true", "yes")
+    argv_candidates: list[list[str]] = []
+    if use_stdbuf:
+        argv_candidates.append(["stdbuf", "-oL", "-eL", "bash", "-c", shell_command])
+    argv_candidates.append(["bash", "-c", shell_command])
+    last_fe: FileNotFoundError | None = None
+    for argv in argv_candidates:
+        try:
+            return subprocess.Popen(
+                argv,
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+            )
+        except FileNotFoundError as e:
+            last_fe = e
+            continue
+    assert last_fe is not None
+    raise last_fe
+
+
 def _run_bash_in_thread(
     task_name: str,
     task_dir: Path,
@@ -118,14 +150,7 @@ def _run_bash_in_thread(
         timeout_sec = _DEFAULT_BASH_TIMEOUT_SEC
 
     try:
-        proc = subprocess.Popen(
-            ["bash", "-c", shell_command],
-            cwd=str(task_dir),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        proc = _popen_bash_for_streaming(shell_command, cwd=str(task_dir))
     except OSError as exc:
         logger.warning("bash spawn failed for task %s: %s", task_name, exc)
         try:
