@@ -9,6 +9,26 @@ from dev_sdk.agent_run import (
 )
 
 
+def test_extract_plan_from_stream_json_dedupes_cumulative_assistant_deltas() -> None:
+    """Cumulative assistant lines for one model_call_id must not concatenate duplicate text."""
+    lines = [
+        '{"type": "assistant", "message": {"content": [{"type": "text", "text": "He"}]}, "model_call_id": "1"}',
+        '{"type": "assistant", "message": {"content": [{"type": "text", "text": "Hello"}]}, "model_call_id": "1"}',
+    ]
+    out = extract_plan_from_stream_json("\n".join(lines))
+    assert out == "Hello"
+
+
+def test_extract_plan_from_stream_json_dedupes_adjacent_duplicate_content_blocks() -> None:
+    """Same text twice in one message content list is not doubled."""
+    line = (
+        '{"type": "assistant", "message": {"content": ['
+        '{"type": "text", "text": "x"}, {"type": "text", "text": "x"}'
+        ']}, "model_call_id": "1"}'
+    )
+    assert extract_plan_from_stream_json(line) == "x"
+
+
 def test_extract_plan_from_stream_json_returns_last_assistant_section() -> None:
     """Only the final assistant model section is returned."""
     lines = [

@@ -435,7 +435,10 @@ def test_implement_runs_headless_stream_json(runner: CliRunner, tmp_path: Path) 
         (cwd / "agent-chat-id").write_text("chat-789")
         (cwd / "comms").mkdir()
         (cwd / "comms" / "index.txt").write_text("")
-        streamed_line = '{"content": "Implementation done."}\n'
+        streamed_line = (
+            '{"type": "assistant", "message": {"content": [{"type": "text", "text": "Implementation done."}]}, '
+            '"model_call_id": "m1"}\n'
+        )
         mock_proc = MagicMock()
         mock_proc.stdout = iter([streamed_line])
         mock_proc.stderr.read.return_value = ""
@@ -462,11 +465,15 @@ def test_implement_runs_headless_stream_json(runner: CliRunner, tmp_path: Path) 
     assert "--mode" not in argv
     assert "Starting implement" in result.output
     assert "Stream log:" in result.output
+    assert "Summary written to" in result.output
     assert (cwd / ".logs").is_dir()
     assert list((cwd / ".logs").glob("dev-implement-stream-*.log"))
-    # Implement does not write to comms
     index = cwd / "comms" / "index.txt"
-    assert not index.exists() or index.read_text().strip() == ""
+    assert index.exists() and index.read_text().strip()
+    order = [n.strip() for n in index.read_text().splitlines() if n.strip()]
+    assert any("agent-implement" in name for name in order)
+    impl_name = next(n for n in order if "agent-implement" in n)
+    assert (cwd / "comms" / impl_name).read_text().strip() == "Implementation done."
 
 
 
