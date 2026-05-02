@@ -6,13 +6,14 @@ build-backend = "setuptools.build_meta"
 name = "dev-workspace"
 version = "0.0.0"
 requires-python = ">=3.9"
-dependencies = ["dev"]
+dependencies = ["dev", "dev-server"]
 
 [project.optional-dependencies]
 dev = ["tox", "pytest", "pytest-cov", "ruff"]
 
 [tool.uv.sources]
 dev = { workspace = true }
+dev-server = { workspace = true }
 
 [tool.uv.workspace]
 members = ["dev-sdk", "dev-cli", "dev-server"]
