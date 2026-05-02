@@ -22,6 +22,8 @@ FastAPI server for dev task management: create, list, archive.
 - `POST /tasks/{task_name}/commands` — start a command (body: `command`: `plan-implement`, `implement`, `do`, or `bash`; optional `prompt` — required for `do` and `bash`, where `bash` runs `prompt` as `bash -c` with cwd set to the task directory). Returns 409 if any command (including bash) is already running for the task.
 - `POST /tasks/{task_name}/commands/cancel` — cancel the active command (agent or bash)
 - `POST /tasks/{task_name}/create-pr` — create a pull request
+- `GET /tasks/{task_name}/drafts/comment` — comment textarea draft (plain text); `PUT` with body `{"content":"..."}` saves or clears (empty removes)
+- `GET /tasks/{task_name}/drafts/bash` — bash-input draft (plain text), separate from comment; `PUT` same shape
 
 CORS is enabled for `http://localhost:5173` and `http://127.0.0.1:5173` so the dev-frontend (Vite dev server) can call the API.
 

@@ -222,6 +222,31 @@ export const api = {
     });
   },
 
+  async getTaskBashDraft(taskName: string): Promise<string> {
+    const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/drafts/bash`;
+    const res = await fetch(url);
+    if (!res.ok) {
+      const text = await res.text();
+      let detail = text;
+      try {
+        const j = JSON.parse(text);
+        if (typeof j.detail === 'string') detail = j.detail;
+      } catch {
+        // use raw text
+      }
+      throw new Error(detail || `HTTP ${res.status}`);
+    }
+    return res.text();
+  },
+
+  setTaskBashDraft(taskName: string, content: string): Promise<void> {
+    return request(`/tasks/${encodeURIComponent(taskName)}/drafts/bash`, {
+      method: 'PUT',
+      body: JSON.stringify({ content }),
+      parseJson: false,
+    });
+  },
+
   archiveTask(taskName: string): Promise<ArchiveTaskResponse> {
     return request(`/tasks/${encodeURIComponent(taskName)}/archive`, {
       method: 'POST',

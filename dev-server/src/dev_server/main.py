@@ -28,8 +28,10 @@ from dev_sdk.agent_run import (
 from dev_sdk.comms import add_comms, comms_dir, index_path, read_index, remove_comms
 from dev_sdk.drafts import (
     get_new_task_draft,
+    get_task_bash_draft,
     get_task_comment_draft,
     set_new_task_draft,
+    set_task_bash_draft,
     set_task_comment_draft,
 )
 from dev_sdk.feed import LOGS_DIR, read_feed
@@ -485,6 +487,20 @@ def put_task_comment_draft_endpoint(task_name: str, body: TaskCommentDraftReques
     """Save or clear the comment draft for the task. Empty content clears it. Draft stored in server .drafts."""
     _task_dir(task_name)  # validate task exists
     set_task_comment_draft(_tasks_root(), task_name, body.content or "")
+
+
+@app.get("/tasks/{task_name}/drafts/bash", response_class=PlainTextResponse)
+def get_task_bash_draft_endpoint(task_name: str) -> str:
+    """Return the bash-input draft for the task (separate from comment draft). Stored in server .drafts."""
+    _task_dir(task_name)
+    return get_task_bash_draft(_tasks_root(), task_name)
+
+
+@app.put("/tasks/{task_name}/drafts/bash", status_code=204)
+def put_task_bash_draft_endpoint(task_name: str, body: TaskCommentDraftRequest) -> None:
+    """Save or clear the bash-input draft. Empty content clears it."""
+    _task_dir(task_name)
+    set_task_bash_draft(_tasks_root(), task_name, body.content or "")
 
 
 @app.get("/tasks", response_model=ListTasksResponse)

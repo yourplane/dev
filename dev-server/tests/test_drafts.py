@@ -111,3 +111,40 @@ def test_task_comment_draft_404_for_nonexistent_task(client: TestClient) -> None
     assert resp.status_code == 404
     resp2 = client.put("/tasks/nonexistent/drafts/comment", json={"content": "x"})
     assert resp2.status_code == 404
+
+
+def test_task_bash_draft_get_empty(client: TestClient, task_dir: Path) -> None:
+    """GET task bash draft returns empty when none."""
+    resp = client.get("/tasks/mytask/drafts/bash")
+    assert resp.status_code == 200
+    assert resp.text == ""
+
+
+def test_task_bash_draft_put_and_get(client: TestClient, task_dir: Path, tasks_root: Path) -> None:
+    """PUT bash draft saves separately from comment draft."""
+    client.put("/tasks/mytask/drafts/comment", json={"content": "comment only"})
+    resp = client.put("/tasks/mytask/drafts/bash", json={"content": "echo hi"})
+    assert resp.status_code == 204
+
+    assert client.get("/tasks/mytask/drafts/comment").text == "comment only"
+    assert client.get("/tasks/mytask/drafts/bash").text == "echo hi"
+
+    bash_file = tasks_root / ".drafts" / "bash-mytask"
+    assert bash_file.is_file()
+    assert bash_file.read_text() == "echo hi"
+
+
+def test_task_bash_draft_put_empty_clears(client: TestClient, task_dir: Path, tasks_root: Path) -> None:
+    """PUT empty bash draft clears the file."""
+    client.put("/tasks/mytask/drafts/bash", json={"content": "x"})
+    client.put("/tasks/mytask/drafts/bash", json={"content": ""})
+    assert client.get("/tasks/mytask/drafts/bash").text == ""
+    assert not (tasks_root / ".drafts" / "bash-mytask").exists()
+
+
+def test_task_bash_draft_404_for_nonexistent_task(client: TestClient) -> None:
+    """GET/PUT bash draft for nonexistent task returns 404."""
+    resp = client.get("/tasks/nonexistent/drafts/bash")
+    assert resp.status_code == 404
+    resp2 = client.put("/tasks/nonexistent/drafts/bash", json={"content": "x"})
+    assert resp2.status_code == 404

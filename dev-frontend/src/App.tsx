@@ -665,11 +665,55 @@ const COMMAND_LABEL: Record<string, string> = {
   'plan-implement': 'Plan',
   implement: 'Implement',
   do: 'Do',
-  bash: 'Shell',
+  bash: 'Bash',
 }
 
 function isBashCommsEntry(entryId: string): boolean {
   return entryId.endsWith('-user-bash.md')
+}
+
+function BashCommsBody({ text }: { text: string }) {
+  const loading = text === '(loading…)'
+  const sep = '\n---\n'
+  const idx = text.lastIndexOf(sep)
+  const body = loading || idx === -1 ? text : text.slice(0, idx)
+  const meta = loading || idx === -1 ? '' : text.slice(idx + sep.length).trimEnd()
+  const lines = body.split('\n')
+  const firstLine = lines[0] ?? ''
+  const stdout = lines.slice(1).join('\n')
+  const hasPrompt = firstLine.startsWith('$ ')
+  return (
+    <div className="feed-comms-bash-terminal" role="region" aria-label="Bash transcript">
+      <div className="feed-comms-bash-titlebar">
+        <span className="feed-comms-bash-titlebar-dots" aria-hidden>
+          <span className="feed-comms-bash-dot feed-comms-bash-dot-red" />
+          <span className="feed-comms-bash-dot feed-comms-bash-dot-yellow" />
+          <span className="feed-comms-bash-dot feed-comms-bash-dot-green" />
+        </span>
+        <span className="feed-comms-bash-titlebar-label">bash</span>
+      </div>
+      <div className="feed-comms-bash-body">
+        {loading ? (
+          <p className="feed-comms-bash-loading">{text}</p>
+        ) : hasPrompt ? (
+          <>
+            <div className="feed-comms-bash-cmd-line">
+              <span className="feed-comms-bash-prompt">$</span>
+              <span className="feed-comms-bash-cmd-text">{firstLine.slice(2)}</span>
+            </div>
+            {stdout !== '' ? <pre className="feed-comms-bash-stdout">{stdout}</pre> : null}
+          </>
+        ) : (
+          <pre className="feed-comms-bash-stdout">{body}</pre>
+        )}
+        {!loading && meta !== '' ? (
+          <div className="feed-comms-bash-meta">
+            <pre className="feed-comms-bash-meta-pre">{meta}</pre>
+          </div>
+        ) : null}
+      </div>
+    </div>
+  )
 }
 
 const FeedEntryRow = memo(function FeedEntryRow({
@@ -742,7 +786,7 @@ const FeedEntryRow = memo(function FeedEntryRow({
           {entry.type === 'log' ? (
             <ParsedLogView raw={contents[entry.id] ?? ''} />
           ) : isBashCommsEntry(entry.id) ? (
-            <pre className="feed-comms-bash-block">{contents[entry.id] ?? '(loading…)'}</pre>
+            <BashCommsBody text={contents[entry.id] ?? '(loading…)'} />
           ) : (
             <ReactMarkdown>{contents[entry.id] ?? '(loading…)'}</ReactMarkdown>
           )}
@@ -1271,7 +1315,7 @@ export function TaskCommsPageContent({
   const [contents, setContents] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [entryMode, setEntryMode] = useState<'prompt' | 'command'>('prompt')
+  const [entryMode, setEntryMode] = useState<'prompt' | 'bash'>('prompt')
   const [commentText, setCommentText] = useState('')
   const [shellInput, setShellInput] = useState('')
   const [posting, setPosting] = useState(false)
@@ -1308,6 +1352,9 @@ export function TaskCommsPageContent({
   const [commentDraftStatus, setCommentDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
   const commentDraftLoadedRef = useRef(false)
   const lastSavedCommentRef = useRef<string | null>(null)
+  const [bashDraftStatus, setBashDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
+  const bashDraftLoadedRef = useRef(false)
+  const lastSavedBashRef = useRef<string | null>(null)
 
   const toggleCollapsed = useCallback((key: string) => {
     setCollapsedKeys((prev) => {
@@ -1642,11 +1689,18 @@ export function TaskCommsPageContent({
   useEffect(() => {
     if (loading || error) return
     commentDraftLoadedRef.current = false
+    bashDraftLoadedRef.current = false
     api.getTaskCommentDraft(taskName).then((text) => {
       setCommentText(text)
       lastSavedCommentRef.current = text
       commentDraftLoadedRef.current = true
       setCommentDraftStatus('saved')
+    }).catch(() => { /* ignore */ })
+    api.getTaskBashDraft(taskName).then((text) => {
+      setShellInput(text)
+      lastSavedBashRef.current = text
+      bashDraftLoadedRef.current = true
+      setBashDraftStatus('saved')
     }).catch(() => { /* ignore */ })
   }, [taskName, loading, error])
 
@@ -1670,6 +1724,25 @@ export function TaskCommsPageContent({
   }, [taskName, commentText])
 
   useEffect(() => {
+    if (!bashDraftLoadedRef.current) return
+    if (lastSavedBashRef.current !== null && shellInput === lastSavedBashRef.current) {
+      setBashDraftStatus('saved')
+      return
+    }
+    setBashDraftStatus('unsaved')
+    const t = setTimeout(() => {
+      setBashDraftStatus('saving')
+      api.setTaskBashDraft(taskName, shellInput).then(() => {
+        lastSavedBashRef.current = shellInput
+        setBashDraftStatus('saved')
+      }).catch(() => {
+        setBashDraftStatus('unsaved')
+      })
+    }, DRAFT_DEBOUNCE_MS)
+    return () => clearTimeout(t)
+  }, [taskName, shellInput])
+
+  useEffect(() => {
     document.title = `Dev – ${taskName}`
     return () => { document.title = DEFAULT_TAB_TITLE }
   }, [taskName])
@@ -1684,6 +1757,9 @@ export function TaskCommsPageContent({
       await api.startTaskCommand(taskName, 'bash', cmd)
       await loadCommandStatus()
       setShellInput('')
+      lastSavedBashRef.current = ''
+      setBashDraftStatus('saved')
+      api.setTaskBashDraft(taskName, '').catch(() => {})
       setScrollToBottomAfterLoad(true)
     } catch (err) {
       setCommandError(err instanceof Error ? err.message : String(err))
@@ -1694,7 +1770,7 @@ export function TaskCommsPageContent({
 
   const handlePostComment = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (entryMode === 'command') {
+    if (entryMode === 'bash') {
       await runShellCommand()
       return
     }
@@ -1989,22 +2065,28 @@ export function TaskCommsPageContent({
             </button>
             <button
               type="button"
-              className={`comms-entry-mode-btn${entryMode === 'command' ? ' comms-entry-mode-btn-active' : ''}`}
-              onClick={() => setEntryMode('command')}
+              className={`comms-entry-mode-btn${entryMode === 'bash' ? ' comms-entry-mode-btn-active' : ''}`}
+              onClick={() => setEntryMode('bash')}
               disabled={!!activeCommand}
             >
-              Command
+              Bash
             </button>
           </div>
         </div>
         <label className="comms-post-form-label">
-          {entryMode === 'prompt' ? 'Add comment' : 'Shell (task directory)'}
+          {entryMode === 'prompt' ? 'Add comment' : 'Bash (task directory)'}
         </label>
-        {entryMode === 'prompt' && (
+        {entryMode === 'prompt' ? (
           <div className={`draft-status draft-status-${commentDraftStatus}`} role="status" aria-live="polite">
             {commentDraftStatus === 'saved' && 'All changes saved to draft'}
             {commentDraftStatus === 'unsaved' && 'Unsaved changes'}
             {commentDraftStatus === 'saving' && 'Saving draft…'}
+          </div>
+        ) : (
+          <div className={`draft-status draft-status-${bashDraftStatus}`} role="status" aria-live="polite">
+            {bashDraftStatus === 'saved' && 'Bash draft saved'}
+            {bashDraftStatus === 'unsaved' && 'Unsaved bash draft'}
+            {bashDraftStatus === 'saving' && 'Saving bash draft…'}
           </div>
         )}
         {entryMode === 'prompt' ? (
@@ -2018,7 +2100,7 @@ export function TaskCommsPageContent({
           />
         ) : (
           <>
-            <p className="comms-shell-hint hint">Runs as <code>bash -c</code> with cwd set to the task folder. Enter runs the command; Shift+Enter adds a newline.</p>
+            <p className="comms-shell-hint hint">Runs as <code>bash -c</code> with cwd set to the task folder. Enter runs bash; Shift+Enter adds a newline.</p>
             <textarea
               className="comms-post-form-textarea comms-post-form-textarea-terminal"
               value={shellInput}
@@ -2027,6 +2109,9 @@ export function TaskCommsPageContent({
               rows={4}
               disabled={!!activeCommand || !!startingCommand}
               spellCheck={false}
+              autoCapitalize="none"
+              autoCorrect="off"
+              autoComplete="off"
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
@@ -2049,7 +2134,7 @@ export function TaskCommsPageContent({
           >
             {entryMode === 'prompt'
               ? (posting ? 'Posting…' : 'Post comment')
-              : (startingCommand === 'bash' ? 'Running…' : 'Run')}
+              : (startingCommand === 'bash' ? 'Running…' : 'Run bash')}
           </button>
           {entryMode === 'prompt' && (
             <button
