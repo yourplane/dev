@@ -53,6 +53,7 @@ def test_start_command_returns_201_and_status_active(client_with_tasks: TestClie
     assert resp2.json()["command"] == "plan-implement"
     # active_log_filename is set only after on_start is called by the real run; with mock it stays None
     assert "active_log_filename" in resp2.json()
+    assert resp2.json().get("active_bash_comms_filename") is None
 
     block.set()
     time.sleep(0.3)
@@ -302,6 +303,41 @@ def test_start_bash_requires_prompt_returns_400(client_with_tasks: TestClient) -
     resp = client_with_tasks.post("/tasks/mytask/commands", json={"command": "bash"})
     assert resp.status_code == 400
     assert "bash" in resp.json()["detail"].lower()
+
+
+def test_bash_active_status_includes_active_bash_comms_filename(
+    client_with_tasks: TestClient, task_dir: Path
+) -> None:
+    """While bash is running, GET commands includes active_bash_comms_filename for UI polling."""
+    resp = client_with_tasks.post(
+        "/tasks/mytask/commands",
+        json={"command": "bash", "prompt": "sleep 60"},
+    )
+    assert resp.status_code == 201
+    deadline = time.monotonic() + 3.0
+    found: dict[str, object] = {}
+    while time.monotonic() < deadline:
+        st = client_with_tasks.get("/tasks/mytask/commands")
+        assert st.status_code == 200
+        body = st.json()
+        fn = body.get("active_bash_comms_filename")
+        if body.get("active") is True and isinstance(fn, str) and fn.endswith("-user-bash.md"):
+            found["filename"] = fn
+            found["command"] = body.get("command")
+            break
+        time.sleep(0.05)
+    assert found.get("filename"), "expected active_bash_comms_filename while bash runs"
+    assert found.get("command") == "bash"
+    bash_path = task_dir / "comms" / str(found["filename"])
+    assert bash_path.is_file()
+    assert "$ sleep 60" in bash_path.read_text(encoding="utf-8")
+
+    client_with_tasks.post("/tasks/mytask/commands/cancel")
+    time.sleep(0.5)
+    done = client_with_tasks.get("/tasks/mytask/commands")
+    assert done.status_code == 200
+    assert done.json()["active"] is False
+    assert done.json().get("active_bash_comms_filename") is None
 
 
 def test_start_bash_writes_comms_transcript(client_with_tasks: TestClient, task_dir: Path) -> None:

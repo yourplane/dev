@@ -18,7 +18,7 @@ FastAPI server for dev task management: create, list, archive.
 - `GET /tasks/{task_name}/feed` — list feed entries (comms + agent logs) sorted by creation date
 - `GET /tasks/{task_name}/logs/{filename}` — raw content of one agent log file (plain text)
 - `GET /tasks/{task_name}/logs/stream` — stream the **active** log file via Server-Sent Events (404 if no command is running)
-- `GET /tasks/{task_name}/commands` — command status: `active`, `command`, and when active, `active_log_filename` (log file being written; omitted while a shell command runs)
+- `GET /tasks/{task_name}/commands` — command status: `active`, `command`, and when active, `active_log_filename` (agent log file being written; null while a shell command runs) and `active_bash_comms_filename` (the `*-user-bash.md` file currently receiving streamed output; null for agent commands)
 - `POST /tasks/{task_name}/commands` — start a command (body: `command`: `plan-implement`, `implement`, `do`, or `bash`; optional `prompt` — required for `do` and `bash`, where `bash` runs `prompt` as `bash -c` with cwd set to the task directory). Returns 409 if any command (including bash) is already running for the task.
 - `POST /tasks/{task_name}/commands/cancel` — cancel the active command (agent or bash)
 - `POST /tasks/{task_name}/create-pr` — create a pull request
@@ -35,7 +35,7 @@ CORS is enabled for `http://localhost:5173` and `http://127.0.0.1:5173` so the d
 
 ### Task shell commands (`bash`)
 
-The UI can run arbitrary shell in the task directory. Output is appended as a comms file (`*-user-bash.md`). Treat dev-server and task directories as a **trusted boundary**: anyone who can reach the API can run code as the server user in that tree.
+The UI can run arbitrary shell in the task directory. While the command runs, the server creates an indexed comms file (`*-user-bash.md`), streams stdout/stderr into it as bytes arrive, then appends a footer (`---`, exit code or cancellation). `GET .../commands` exposes `active_bash_comms_filename` so the UI can poll `GET .../comms/{filename}` for live output. Treat dev-server and task directories as a **trusted boundary**: anyone who can reach the API can run code as the server user in that tree.
 
 ## Run
 

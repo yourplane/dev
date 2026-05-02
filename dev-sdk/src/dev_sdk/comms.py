@@ -41,6 +41,23 @@ def next_sequence(task_dir: Path) -> int:
     return _next_sequence(task_dir)
 
 
+def begin_streaming_bash_comms(task_dir: Path, shell_command: str) -> Path:
+    """
+    Create a new indexed comms file NNN-user-bash.md with only the command line.
+    Caller appends stdout (binary) then a UTF-8 footer with --- and exit metadata.
+    """
+    cdir = comms_dir(task_dir)
+    cdir.mkdir(parents=True, exist_ok=True)
+    seq = _next_sequence(task_dir)
+    filename = f"{seq:03d}-user-bash.md"
+    path = cdir / filename
+    path.write_text(f"$ {shell_command}\n", encoding="utf-8")
+    idx = index_path(task_dir)
+    with open(idx, "a", encoding="utf-8") as f:
+        f.write(filename + "\n")
+    return path
+
+
 def add_comms(
     task_dir: Path,
     role: str,
