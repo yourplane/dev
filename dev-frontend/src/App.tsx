@@ -672,50 +672,6 @@ function isBashCommsEntry(entryId: string): boolean {
   return entryId.endsWith('-user-bash.md')
 }
 
-function BashCommsBody({ text }: { text: string }) {
-  const loading = text === '(loading…)'
-  const sep = '\n---\n'
-  const idx = text.lastIndexOf(sep)
-  const body = loading || idx === -1 ? text : text.slice(0, idx)
-  const meta = loading || idx === -1 ? '' : text.slice(idx + sep.length).trimEnd()
-  const lines = body.split('\n')
-  const firstLine = lines[0] ?? ''
-  const stdout = lines.slice(1).join('\n')
-  const hasPrompt = firstLine.startsWith('$ ')
-  return (
-    <div className="feed-comms-bash-terminal" role="region" aria-label="Bash transcript">
-      <div className="feed-comms-bash-titlebar">
-        <span className="feed-comms-bash-titlebar-dots" aria-hidden>
-          <span className="feed-comms-bash-dot feed-comms-bash-dot-red" />
-          <span className="feed-comms-bash-dot feed-comms-bash-dot-yellow" />
-          <span className="feed-comms-bash-dot feed-comms-bash-dot-green" />
-        </span>
-        <span className="feed-comms-bash-titlebar-label">bash</span>
-      </div>
-      <div className="feed-comms-bash-body">
-        {loading ? (
-          <p className="feed-comms-bash-loading">{text}</p>
-        ) : hasPrompt ? (
-          <>
-            <div className="feed-comms-bash-cmd-line">
-              <span className="feed-comms-bash-prompt">$</span>
-              <span className="feed-comms-bash-cmd-text">{firstLine.slice(2)}</span>
-            </div>
-            {stdout !== '' ? <pre className="feed-comms-bash-stdout">{stdout}</pre> : null}
-          </>
-        ) : (
-          <pre className="feed-comms-bash-stdout">{body}</pre>
-        )}
-        {!loading && meta !== '' ? (
-          <div className="feed-comms-bash-meta">
-            <pre className="feed-comms-bash-meta-pre">{meta}</pre>
-          </div>
-        ) : null}
-      </div>
-    </div>
-  )
-}
-
 const FeedEntryRow = memo(function FeedEntryRow({
   entry,
   contents,
@@ -786,7 +742,9 @@ const FeedEntryRow = memo(function FeedEntryRow({
           {entry.type === 'log' ? (
             <ParsedLogView raw={contents[entry.id] ?? ''} />
           ) : isBashCommsEntry(entry.id) ? (
-            <BashCommsBody text={contents[entry.id] ?? '(loading…)'} />
+            <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
+              <pre className="feed-log-shell-block">{contents[entry.id] ?? '(loading…)'}</pre>
+            </div>
           ) : (
             <ReactMarkdown>{contents[entry.id] ?? '(loading…)'}</ReactMarkdown>
           )}
