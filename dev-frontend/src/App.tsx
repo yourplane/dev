@@ -732,7 +732,7 @@ const FeedEntryRow = memo(function FeedEntryRow({
   loadingContentKeys: Set<string>
   isCollapsed: boolean
   entryKey: string
-  toggleCollapsed: (key: string) => void
+  toggleCollapsed: (entry: { type: string; id: string; created_at: number; deletable?: boolean | null }, key: string) => void
   loadEntryContent: (entryId: string, type: string) => void
   activeLogFilename: string | null
   isLast: boolean
@@ -759,7 +759,7 @@ const FeedEntryRow = memo(function FeedEntryRow({
         <button
           type="button"
           className="feed-entry-header"
-          onClick={() => toggleCollapsed(entryKey)}
+          onClick={() => toggleCollapsed(entry, entryKey)}
           aria-expanded={!isCollapsed}
         >
           <span className="feed-entry-chevron" aria-hidden>
@@ -1300,6 +1300,18 @@ function TaskCommsPage() {
   return <TaskCommsPageContent taskName={taskName} navigate={navigate} />
 }
 
+type FeedCollapseState = {
+  collapsedKeys: Set<string>
+  logCollapseTouchedKeys: Set<string>
+}
+
+function createInitialFeedCollapseState(): FeedCollapseState {
+  return {
+    collapsedKeys: new Set(),
+    logCollapseTouchedKeys: new Set(),
+  }
+}
+
 export function TaskCommsPageContent({
   taskName,
   navigate,
@@ -1345,7 +1357,7 @@ export function TaskCommsPageContent({
   const [downloadingCommsZip, setDownloadingCommsZip] = useState(false)
   const [downloadCommsZipError, setDownloadCommsZipError] = useState<string | null>(null)
   const [deleteCommsError, setDeleteCommsError] = useState<string | null>(null)
-  const [collapsedKeys, setCollapsedKeys] = useState<Set<string>>(new Set())
+  const [feedCollapse, setFeedCollapse] = useState<FeedCollapseState>(createInitialFeedCollapseState)
   const [loadingContentKeys, setLoadingContentKeys] = useState<Set<string>>(new Set())
   const [commentDraftStatus, setCommentDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
   const commentDraftLoadedRef = useRef(false)
@@ -1374,14 +1386,50 @@ export function TaskCommsPageContent({
   const activeBashCommsFilenameRef = useRef<string | null>(null)
   activeBashCommsFilenameRef.current = activeBashCommsFilename
 
-  const toggleCollapsed = useCallback((key: string) => {
-    setCollapsedKeys((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key)
-      else next.add(key)
-      return next
-    })
-  }, [])
+  const getEntryCollapsed = useCallback(
+    (entry: { type: string; id: string }, entryKey: string) => {
+      if (entry.type === 'log') {
+        if (feedCollapse.logCollapseTouchedKeys.has(entryKey)) {
+          return feedCollapse.collapsedKeys.has(entryKey)
+        }
+        if (activeLogFilename === null) return true
+        return entry.id !== activeLogFilename
+      }
+      return feedCollapse.collapsedKeys.has(entryKey)
+    },
+    [feedCollapse, activeLogFilename],
+  )
+
+  const toggleCollapsed = useCallback(
+    (entry: { type: string; id: string }, entryKey: string) => {
+      if (entry.type !== 'log') {
+        setFeedCollapse((s) => {
+          const nextCollapsed = new Set(s.collapsedKeys)
+          if (nextCollapsed.has(entryKey)) nextCollapsed.delete(entryKey)
+          else nextCollapsed.add(entryKey)
+          return { ...s, collapsedKeys: nextCollapsed }
+        })
+        return
+      }
+      setFeedCollapse((s) => {
+        const nextTouched = new Set(s.logCollapseTouchedKeys)
+        const wasTouched = nextTouched.has(entryKey)
+        nextTouched.add(entryKey)
+        const nextCollapsed = new Set(s.collapsedKeys)
+        if (wasTouched) {
+          if (nextCollapsed.has(entryKey)) nextCollapsed.delete(entryKey)
+          else nextCollapsed.add(entryKey)
+        } else {
+          const defaultCollapsed = entry.id !== activeLogFilename
+          const newCollapsed = !defaultCollapsed
+          if (newCollapsed) nextCollapsed.add(entryKey)
+          else nextCollapsed.delete(entryKey)
+        }
+        return { collapsedKeys: nextCollapsed, logCollapseTouchedKeys: nextTouched }
+      })
+    },
+    [activeLogFilename],
+  )
 
   const handleArchive = async () => {
     if (!confirm(`Archive task "${taskName}"?`)) return
@@ -1800,6 +1848,7 @@ export function TaskCommsPageContent({
 
   useEffect(() => {
     setBashHistoryBrowseIdx(null)
+    setFeedCollapse(createInitialFeedCollapseState())
   }, [taskName])
 
   const bashHistoryOlder = useCallback(() => {
@@ -2078,7 +2127,7 @@ export function TaskCommsPageContent({
                 entry={entry}
                 contents={contents}
                 loadingContentKeys={loadingContentKeys}
-                isCollapsed={collapsedKeys.has(entryKey)}
+                isCollapsed={getEntryCollapsed(entry, entryKey)}
                 entryKey={entryKey}
                 toggleCollapsed={toggleCollapsed}
                 loadEntryContent={loadEntryContent}

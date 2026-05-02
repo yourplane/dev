@@ -36,6 +36,7 @@ vi.mock('./api', () => ({
 
 describe('App', () => {
   beforeEach(async () => {
+    Element.prototype.scrollIntoView = vi.fn()
     vi.resetModules()
     const { api } = await import('./api')
     vi.mocked(api.getTasks).mockResolvedValue({ tasks: [] })
@@ -276,5 +277,95 @@ describe('App', () => {
     await expect(screen.findByText('task-two')).resolves.toBeInTheDocument()
     expect(vi.mocked(api.getArchive)).toHaveBeenCalledWith({ limit: 50, offset: 0 })
     expect(vi.mocked(api.getArchive)).toHaveBeenCalledWith({ limit: 50, offset: 1 })
+  })
+
+  it('collapses non-live agent logs by default; expands only the active stream log', async () => {
+    const noop = () => {}
+    const { api } = await import('./api')
+    const fakeEs = {
+      close: vi.fn(),
+      onmessage: null as null | ((e: MessageEvent) => void),
+      onerror: null as null | (() => void),
+    }
+    vi.mocked(api.openTaskLogStream).mockReturnValue(fakeEs as unknown as EventSource)
+    vi.mocked(api.getTaskFeed).mockResolvedValue({
+      entries: [
+        { type: 'log', id: '001-old.jsonl', created_at: 1 },
+        { type: 'log', id: '002-live.jsonl', created_at: 2 },
+      ],
+    })
+    vi.mocked(api.getTaskCommandStatus).mockResolvedValue({
+      active: true,
+      command: 'implement',
+      active_log_filename: '002-live.jsonl',
+      active_bash_comms_filename: null,
+      command_error: null,
+    })
+
+    render(
+      <MemoryRouter>
+        <TaskCommsPageContent taskName="test-task" navigate={noop} />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Agent log: 001-old\.jsonl$/ })).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.getByRole('button', { name: /Agent log: 002-live\.jsonl \(live\)/ })).toHaveAttribute(
+        'aria-expanded',
+        'true',
+      )
+    })
+  })
+
+  it('collapses all agent logs when no command is active', async () => {
+    const noop = () => {}
+    const { api } = await import('./api')
+    vi.mocked(api.getTaskFeed).mockResolvedValue({
+      entries: [
+        { type: 'log', id: 'a.jsonl', created_at: 1 },
+        { type: 'log', id: 'b.jsonl', created_at: 2 },
+      ],
+    })
+    vi.mocked(api.getTaskCommandStatus).mockResolvedValue({
+      active: false,
+      command: null,
+      active_log_filename: null,
+      active_bash_comms_filename: null,
+      command_error: null,
+    })
+
+    render(
+      <MemoryRouter>
+        <TaskCommsPageContent taskName="test-task" navigate={noop} />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Agent log: a\.jsonl/ })).toHaveAttribute('aria-expanded', 'false')
+      expect(screen.getByRole('button', { name: /Agent log: b\.jsonl/ })).toHaveAttribute('aria-expanded', 'false')
+    })
+  })
+
+  it('leaves comms entries expanded by default while agent logs start collapsed', async () => {
+    const noop = () => {}
+    const { api } = await import('./api')
+    vi.mocked(api.getTaskCommsFile).mockResolvedValue('# hello')
+    vi.mocked(api.getTaskFeed).mockResolvedValue({
+      entries: [
+        { type: 'comms', id: '001-user.md', created_at: 1, deletable: false },
+        { type: 'log', id: 'agent.jsonl', created_at: 2 },
+      ],
+    })
+
+    render(
+      <MemoryRouter>
+        <TaskCommsPageContent taskName="test-task" navigate={noop} />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '001-user.md' })).toHaveAttribute('aria-expanded', 'true')
+      expect(screen.getByRole('button', { name: /Agent log: agent\.jsonl/ })).toHaveAttribute('aria-expanded', 'false')
+    })
   })
 })
