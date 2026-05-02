@@ -107,8 +107,8 @@ def _merge_assistant_cumulative(acc: str, chunk: str) -> str:
     return acc + chunk
 
 
-def extract_plan_from_stream_json(streamed_output: str) -> str:
-    """Extract the last assistant section from Cursor stream-json output."""
+def extract_last_assistant_section_from_stream_json(streamed_output: str) -> str:
+    """Extract the last assistant section from Cursor agent stream-json output (any mode)."""
     lines = [line.strip() for line in streamed_output.splitlines() if line.strip()]
     if not lines:
         return streamed_output
@@ -348,7 +348,7 @@ def run_plan_implement(
         on_start=on_start,
         cancel_event=cancel_event,
     )
-    plan_text = extract_plan_from_stream_json(streamed_output)
+    plan_text = extract_last_assistant_section_from_stream_json(streamed_output)
     draft_path = task_dir / TASK_PLAN_DRAFT
     draft_path.write_text(plan_text, encoding="utf-8")
     comms_path = add_comms(task_dir, "agent", plan_text, kind="plan")
@@ -458,7 +458,7 @@ def run_implement(
         raise AgentRunError(msg)
 
     streamed_output = "".join(buffer)
-    summary_text = extract_plan_from_stream_json(streamed_output)
+    summary_text = extract_last_assistant_section_from_stream_json(streamed_output)
     comms_path = add_comms(task_dir, "agent", summary_text, kind="implement")
     return RunImplementResult(stream_log_path=stream_log_path, comms_path=comms_path)
 
