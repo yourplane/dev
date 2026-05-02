@@ -130,6 +130,13 @@ def _run_implement_mode(task_path: Path | None) -> None:
             on_start=lambda p: click.echo(f"Stream log: {p}"),
         )
         click.echo()
+        if result.comms_path is not None:
+            click.echo(
+                click.style(
+                    f"Summary written to {result.comms_path.relative_to(task_dir)}",
+                    dim=True,
+                )
+            )
     except AgentRunError as e:
         click.echo(str(e), err=True)
         raise SystemExit(1)

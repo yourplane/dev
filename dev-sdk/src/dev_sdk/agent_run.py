@@ -58,45 +58,114 @@ def _agent_cmd() -> str:
     return os.environ.get(DEV_AGENT_CMD_ENV, AGENT_CMD_DEFAULT).strip() or AGENT_CMD_DEFAULT
 
 
-def extract_plan_from_stream_json(streamed_output: str) -> str:
-    """Extract plan markdown from streamed JSON (Cursor agent stream-json format)."""
+def _dedupe_adjacent_text_parts(parts: list[str]) -> str:
+    """Join text parts; skip consecutive duplicates (stream-json quirk)."""
+    out: list[str] = []
+    for p in parts:
+        if out and out[-1] == p:
+            continue
+        out.append(p)
+    return "".join(out)
+
+
+def _assistant_line_text(obj: dict) -> str | None:
+    """User-visible assistant text from one stream-json object, or None."""
+    if obj.get("type") != "assistant":
+        return None
+    message = obj.get("message")
+    if not isinstance(message, dict):
+        return None
+    content = message.get("content")
+    if not isinstance(content, list):
+        return None
+    raw: list[str] = []
+    for item in content:
+        if isinstance(item, dict) and item.get("type") == "text":
+            text = item.get("text")
+            if isinstance(text, str):
+                raw.append(text)
+    if not raw:
+        return None
+    return _dedupe_adjacent_text_parts(raw)
+
+
+def _merge_assistant_cumulative(acc: str, chunk: str) -> str:
+    """
+    Merge a new assistant chunk into accumulated text.
+
+    Stream-json often sends cumulative full text per line; concatenating would
+    duplicate output (see dev-frontend logParser.ts assistant branch).
+    """
+    if not chunk:
+        return acc
+    if acc == chunk:
+        return acc
+    if chunk.startswith(acc):
+        return chunk
+    if acc.startswith(chunk):
+        return acc
+    return acc + chunk
+
+
+def extract_last_assistant_section_from_stream_json(streamed_output: str) -> str:
+    """Extract the last assistant section from Cursor agent stream-json output (any mode)."""
     lines = [line.strip() for line in streamed_output.splitlines() if line.strip()]
     if not lines:
         return streamed_output
-    # Prefer final "result" event (full plan text)
-    for line in reversed(lines):
-        try:
-            obj = json.loads(line)
-            if isinstance(obj, dict) and obj.get("type") == "result" and "result" in obj:
-                result = obj["result"]
-                if isinstance(result, str) and result.strip():
-                    return result.strip()
-        except json.JSONDecodeError:
-            pass
-    # Fall back: accumulate assistant message text and content/text/delta fields
-    parts: list[str] = []
+
+    # Build ordered section strings: each model_call_id turn, then optional
+    # trailing orphan-only section. Within a section, merge cumulative deltas.
+    completed: list[str] = []
+    open_id: str | None = None
+    open_text = ""
+    orphan_acc = ""
+
+    def finalize_open() -> None:
+        nonlocal open_id, open_text
+        if open_id is not None:
+            s = open_text.strip()
+            if s:
+                completed.append(s)
+            open_id = None
+            open_text = ""
+
     for line in lines:
         try:
             obj = json.loads(line)
-            if isinstance(obj, dict):
-                if obj.get("type") == "assistant" and "message" in obj:
-                    msg = obj["message"]
-                    if isinstance(msg, dict) and "content" in msg:
-                        for item in msg["content"] if isinstance(msg["content"], list) else []:
-                            if isinstance(item, dict) and item.get("type") == "text" and "text" in item:
-                                parts.append(item["text"])
-                        continue
-                for key in ("content", "text", "delta", "result"):
-                    if key in obj and isinstance(obj[key], str):
-                        parts.append(obj[key])
-                        break
-            elif isinstance(obj, str):
-                parts.append(obj)
         except json.JSONDecodeError:
-            parts.append(line)
-    if parts:
-        return "".join(parts).strip() or "\n".join(parts)
-    return streamed_output
+            continue
+        if not isinstance(obj, dict):
+            continue
+        t = _assistant_line_text(obj)
+        if t is None:
+            continue
+        mid = obj.get("model_call_id")
+        if not isinstance(mid, str) or not mid:
+            orphan_acc = _merge_assistant_cumulative(orphan_acc, t)
+            continue
+
+        if open_id is None:
+            open_id = mid
+            open_text = _merge_assistant_cumulative(_merge_assistant_cumulative("", orphan_acc), t)
+            orphan_acc = ""
+        elif mid == open_id:
+            merged = _merge_assistant_cumulative(open_text, orphan_acc)
+            open_text = _merge_assistant_cumulative(merged, t)
+            orphan_acc = ""
+        else:
+            finalize_open()
+            open_id = mid
+            open_text = _merge_assistant_cumulative(_merge_assistant_cumulative("", orphan_acc), t)
+            orphan_acc = ""
+
+    finalize_open()
+    if orphan_acc.strip():
+        completed.append(orphan_acc.strip())
+
+    for s in reversed(completed):
+        if s:
+            return s
+    return ""
 
 
 StreamLineCallback = Callable[[str], None]
@@ -260,6 +329,7 @@ class RunPlanImplementResult:
 @dataclass(frozen=True)
 class RunImplementResult:
     stream_log_path: Path
+    comms_path: Path | None = None
 
 
 def run_plan_implement(
@@ -278,7 +348,7 @@ def run_plan_implement(
         on_start=on_start,
         cancel_event=cancel_event,
     )
-    plan_text = extract_plan_from_stream_json(streamed_output)
+    plan_text = extract_last_assistant_section_from_stream_json(streamed_output)
     draft_path = task_dir / TASK_PLAN_DRAFT
     draft_path.write_text(plan_text, encoding="utf-8")
     comms_path = add_comms(task_dir, "agent", plan_text, kind="plan")
@@ -292,7 +362,7 @@ def run_implement(
     on_start: Callable[[Path], None] | None = None,
     cancel_event: threading.Event | None = None,
 ) -> RunImplementResult:
-    """Run agent with implement prompt (--force, --sandbox disabled); write stream to log only."""
+    """Run agent with implement prompt (--force, --sandbox disabled); log stream; add comms from last assistant section."""
     chat_id = _read_chat_id(task_dir)
     agent_cmd = _agent_cmd()
     logs_dir = task_dir / PLAN_LOGS_DIR
@@ -387,7 +457,10 @@ def run_implement(
         msg = stderr_output if stderr_output else f"Agent exited with code {proc.returncode} (no output)."
         raise AgentRunError(msg)
 
-    return RunImplementResult(stream_log_path=stream_log_path)
+    streamed_output = "".join(buffer)
+    summary_text = extract_last_assistant_section_from_stream_json(streamed_output)
+    comms_path = add_comms(task_dir, "agent", summary_text, kind="implement")
+    return RunImplementResult(stream_log_path=stream_log_path, comms_path=comms_path)
 
 
 def run_do(

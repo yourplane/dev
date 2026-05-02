@@ -19,4 +19,4 @@ When **alternatives** exist, call them out explicitly: compare options, evaluate
 
 ## Output format
 
-Output **only** the design proposal as markdown (no preamble or meta-commentary).
+Output the design proposal as markdown.
