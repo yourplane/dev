@@ -1,7 +1,8 @@
-import { useState, useEffect, useCallback, useRef, memo } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import { api, apiBaseUrl } from './api'
+import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import './App.css'
 
@@ -672,28 +673,20 @@ function isBashCommsEntry(entryId: string): boolean {
   return entryId.endsWith('-user-bash.md')
 }
 
-function bashHistoryStorageKey(taskName: string): string {
-  return `dev-bash-history-v1:${taskName}`
-}
-
 /** Bash transcript: dark shell block for command+output; footer after `---` shown separately (016-user). */
 function BashCommsFeedBody({ text }: { text: string }) {
-  const sep = '\n---\n'
-  const idx = text.lastIndexOf(sep)
-  const loading = text === '(loading…)'
-  if (loading || idx === -1) {
+  const { loading, shellBody, metaPart } = bashTranscriptShellDisplayBlocks(text)
+  if (loading) {
     return (
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
         <pre className="feed-log-shell-block">{text}</pre>
       </div>
     )
   }
-  const shellPart = text.slice(0, idx)
-  const metaPart = text.slice(idx + sep.length).trimEnd()
   return (
     <>
       <div className="feed-log-segment feed-log-tool-call feed-log-tool-call-shell">
-        <pre className="feed-log-shell-block">{shellPart}</pre>
+        <pre className="feed-log-shell-block">{shellBody}</pre>
       </div>
       {metaPart !== '' ? (
         <div className="feed-comms-bash-meta-outside">
@@ -1343,11 +1336,26 @@ export function TaskCommsPageContent({
   const [bashDraftStatus, setBashDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
   const bashDraftLoadedRef = useRef(false)
   const lastSavedBashRef = useRef<string | null>(null)
-  const [bashHistory, setBashHistory] = useState<string[]>([])
-  const bashHistoryRef = useRef<string[]>([])
-  bashHistoryRef.current = bashHistory
   const [bashHistoryBrowseIdx, setBashHistoryBrowseIdx] = useState<number | null>(null)
   const [bashHistoryPicker, setBashHistoryPicker] = useState('')
+  const [activeBashCommsFilename, setActiveBashCommsFilename] = useState<string | null>(null)
+
+  const bashHistory = useMemo(() => {
+    const cmds: string[] = []
+    for (const e of feedEntries) {
+      if (e.type !== 'comms' || !isBashCommsEntry(e.id)) continue
+      const text = contents[e.id]
+      if (text === undefined || text === '(loading…)') continue
+      const cmd = extractBashCommandFromTranscript(text)
+      if (cmd !== null) cmds.push(cmd)
+    }
+    return cmds
+  }, [feedEntries, contents])
+
+  const bashHistoryRef = useRef<string[]>([])
+  bashHistoryRef.current = bashHistory
+  const activeBashCommsFilenameRef = useRef<string | null>(null)
+  activeBashCommsFilenameRef.current = activeBashCommsFilename
 
   const toggleCollapsed = useCallback((key: string) => {
     setCollapsedKeys((prev) => {
@@ -1393,6 +1401,9 @@ export function TaskCommsPageContent({
       setActiveCommand(nextActive)
       if (!nextActive) setCancelling(false)
       setActiveLogFilename(res.active && res.active_log_filename ? res.active_log_filename : null)
+      setActiveBashCommsFilename(
+        res.active && res.active_bash_comms_filename ? res.active_bash_comms_filename : null,
+      )
       if (nextActive) {
         setCommandError(null)
       } else if (res.command_error) {
@@ -1406,6 +1417,10 @@ export function TaskCommsPageContent({
   const loadEntryContent = useCallback(
     async (entryId: string, type: string) => {
       if (type === 'log' && entryId === activeLogFilename) {
+        setContents((prev) => ({ ...prev, [entryId]: prev[entryId] ?? '' }))
+        return
+      }
+      if (type === 'comms' && entryId === activeBashCommsFilenameRef.current) {
         setContents((prev) => ({ ...prev, [entryId]: prev[entryId] ?? '' }))
         return
       }
@@ -1568,6 +1583,12 @@ export function TaskCommsPageContent({
     }
   }, [activeCommand, activeLogFilename, loadFeed])
 
+  useEffect(() => {
+    if (activeCommand === 'bash' && activeBashCommsFilename) {
+      loadFeed({ incremental: true, prefetchNew: true })
+    }
+  }, [activeCommand, activeBashCommsFilename, loadFeed])
+
   // Stream the active log via SSE while command is running
   useEffect(() => {
     if (!activeCommand || !activeLogFilename) return
@@ -1586,6 +1607,26 @@ export function TaskCommsPageContent({
       es.close()
     }
   }, [taskName, activeCommand, activeLogFilename])
+
+  useEffect(() => {
+    if (!activeCommand || activeCommand !== 'bash' || !activeBashCommsFilename) return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const text = await api.getTaskCommsFile(taskName, activeBashCommsFilename)
+        if (cancelled) return
+        setContents((prev) => ({ ...prev, [activeBashCommsFilename]: text }))
+      } catch {
+        // ignore while the file is still being created
+      }
+    }
+    void poll()
+    const id = setInterval(poll, 550)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [taskName, activeCommand, activeBashCommsFilename])
 
   const handleStartCommand = async (command: string) => {
     setCommandError(null)
@@ -1742,33 +1783,7 @@ export function TaskCommsPageContent({
 
   useEffect(() => {
     setBashHistoryBrowseIdx(null)
-    try {
-      const raw = sessionStorage.getItem(bashHistoryStorageKey(taskName))
-      if (!raw) {
-        setBashHistory([])
-        return
-      }
-      const parsed = JSON.parse(raw) as unknown
-      if (!Array.isArray(parsed) || !parsed.every((x): x is string => typeof x === 'string')) {
-        setBashHistory([])
-        return
-      }
-      setBashHistory(parsed.slice(-80))
-    } catch {
-      setBashHistory([])
-    }
   }, [taskName])
-
-  const persistBashHistory = useCallback(
-    (next: string[]) => {
-      try {
-        sessionStorage.setItem(bashHistoryStorageKey(taskName), JSON.stringify(next))
-      } catch {
-        // ignore quota / private mode
-      }
-    },
-    [taskName],
-  )
 
   const bashHistoryOlder = useCallback(() => {
     const hist = bashHistoryRef.current
@@ -1807,15 +1822,6 @@ export function TaskCommsPageContent({
       lastSavedBashRef.current = ''
       setBashDraftStatus('saved')
       setBashHistoryBrowseIdx(null)
-      setBashHistory((prev) => {
-        let next = prev
-        if (prev.length === 0 || prev[prev.length - 1] !== cmd) {
-          next = [...prev, cmd]
-          if (next.length > 80) next = next.slice(-80)
-        }
-        persistBashHistory(next)
-        return next
-      })
       api.setTaskBashDraft(taskName, '').catch(() => {})
       setScrollToBottomAfterLoad(true)
     } catch (err) {
@@ -1823,7 +1829,7 @@ export function TaskCommsPageContent({
     } finally {
       setStartingCommand(null)
     }
-  }, [taskName, shellInput, loadCommandStatus, persistBashHistory])
+  }, [taskName, shellInput, loadCommandStatus])
 
   const handlePostComment = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -1956,6 +1962,27 @@ export function TaskCommsPageContent({
       }
     }
   }, [activeLogFilename, activeLogContent, feedEntries.length, lockedToBottom])
+
+  const activeBashCommsContent = activeBashCommsFilename ? (contents[activeBashCommsFilename] ?? '') : ''
+  useEffect(() => {
+    if (!activeBashCommsFilename || feedEntries.length === 0) return
+    const scrollHeight = document.documentElement.scrollHeight
+    const nearBottom =
+      window.scrollY + window.innerHeight >= scrollHeight - SCROLL_NEAR_BOTTOM_PX
+    const behind = window.scrollY + window.innerHeight < scrollHeight - SCROLL_BEHIND_THRESHOLD_PX
+    const now = Date.now()
+    const throttled = now - lastLockedScrollTimeRef.current < LOCKED_SCROLL_THROTTLE_MS
+    if (lockedToBottom || nearBottom) {
+      if (behind && !throttled) {
+        lastLockedScrollTimeRef.current = now
+        programmaticScrollRef.current = true
+        window.scrollTo({ top: scrollHeight, behavior: 'instant' })
+        setTimeout(() => {
+          programmaticScrollRef.current = false
+        }, PROGRAMMATIC_SCROLL_MS)
+      }
+    }
+  }, [activeBashCommsFilename, activeBashCommsContent, feedEntries.length, lockedToBottom])
 
   const scrollToTop = () => {
     setLockedToBottom(false)

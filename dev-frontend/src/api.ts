@@ -325,7 +325,13 @@ export const api = {
 
   getTaskCommandStatus(
     taskName: string
-  ): Promise<{ active: boolean; command: string | null; active_log_filename: string | null; command_error: string | null }> {
+  ): Promise<{
+    active: boolean;
+    command: string | null;
+    active_log_filename: string | null;
+    active_bash_comms_filename: string | null;
+    command_error: string | null;
+  }> {
     return request(`/tasks/${encodeURIComponent(taskName)}/commands`);
   },
 

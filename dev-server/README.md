@@ -18,7 +18,7 @@ FastAPI server for dev task management: create, list, archive.
 - `GET /tasks/{task_name}/feed` — list feed entries (comms + agent logs) sorted by creation date
 - `GET /tasks/{task_name}/logs/{filename}` — raw content of one agent log file (plain text)
 - `GET /tasks/{task_name}/logs/stream` — stream the **active** log file via Server-Sent Events (404 if no command is running)
-- `GET /tasks/{task_name}/commands` — command status: `active`, `command`, and when active, `active_log_filename` (log file being written; omitted while a shell command runs)
+- `GET /tasks/{task_name}/commands` — command status: `active`, `command`, and when active, `active_log_filename` (agent log file being written; null while a shell command runs) and `active_bash_comms_filename` (the `*-user-bash.md` file currently receiving streamed output; null for agent commands)
 - `POST /tasks/{task_name}/commands` — start a command (body: `command`: `plan-implement`, `implement`, `do`, or `bash`; optional `prompt` — required for `do` and `bash`, where `bash` runs `prompt` as `bash -c` with cwd set to the task directory). Returns 409 if any command (including bash) is already running for the task.
 - `POST /tasks/{task_name}/commands/cancel` — cancel the active command (agent or bash)
 - `POST /tasks/{task_name}/create-pr` — create a pull request
@@ -32,10 +32,11 @@ CORS is enabled for `http://localhost:5173` and `http://127.0.0.1:5173` so the d
 - `DEV_TASKS_DIR` — root directory for tasks (default: `~/tasks`). Repo shorthand is resolved from `~/.config/dev/repos.json` (same as the dev CLI).
 - `DEV_BASH_MAX_OUTPUT_BYTES` — max captured stdout/stderr bytes for task shell commands (default: `2000000`). When exceeded, the process is killed and the comms transcript notes truncation.
 - `DEV_BASH_TIMEOUT_SEC` — max runtime in seconds for task shell commands (default: `3600`). Use `0` to disable the timeout.
+- `DEV_BASH_NO_STDBUF` — set to `1`/`true`/`yes` to skip wrapping shell commands with `stdbuf -oL -eL`. Default uses `stdbuf` (GNU coreutils) so libc-backed stdout/stderr are **line-buffered** on the child when attached to a pipe (helps programs that would otherwise block-write until the buffer fills).
 
 ### Task shell commands (`bash`)
 
-The UI can run arbitrary shell in the task directory. Output is appended as a comms file (`*-user-bash.md`). Treat dev-server and task directories as a **trusted boundary**: anyone who can reach the API can run code as the server user in that tree.
+The UI can run arbitrary shell in the task directory. While the command runs, the server creates an indexed comms file (`*-user-bash.md`), writes a short delimiter-wrapped **input** block (`__DEV_BASH_INPUT__` / `__DEV_BASH_INPUT_END__`, full multi-line prompt inside), then streams stdout/stderr after it, then appends a footer (`---`, exit code or cancellation). Older transcripts used a single `$ command` first line only. `GET .../commands` exposes `active_bash_comms_filename` so the UI can poll `GET .../comms/{filename}` for live output. The server reads the child pipe with **unbuffered** `subprocess` mode (`bufsize=0`) so small writes reach comms promptly; child-side flushing still benefits from `stdbuf` (see `DEV_BASH_NO_STDBUF`). Treat dev-server and task directories as a **trusted boundary**: anyone who can reach the API can run code as the server user in that tree.
 
 ## Run
 

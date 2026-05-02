@@ -25,7 +25,15 @@ from dev_sdk.agent_run import (
     run_do,
     run_plan_implement,
 )
-from dev_sdk.comms import add_comms, comms_dir, index_path, read_index, remove_comms
+from dev_sdk.comms import (
+    add_comms,
+    bash_comms_input_header,
+    begin_streaming_bash_comms,
+    comms_dir,
+    index_path,
+    read_index,
+    remove_comms,
+)
 from dev_sdk.drafts import (
     get_new_task_draft,
     get_task_bash_draft,
@@ -50,6 +58,39 @@ logger = logging.getLogger("dev_server")
 _DEFAULT_BASH_MAX_OUTPUT_BYTES = 2_000_000
 _DEFAULT_BASH_TIMEOUT_SEC = 3600.0
 
+_bash_comms_append_lock = threading.Lock()
+
+
+def _append_bytes_to_bash_comms(path: Path, data: bytes) -> None:
+    with _bash_comms_append_lock:
+        with open(path, "ab") as f:
+            f.write(data)
+
+
+def _append_bash_comms_footer(
+    path: Path,
+    *,
+    truncated: bool,
+    cancelled: bool,
+    timed_out: bool,
+    exit_code: int | None,
+    timeout_sec: float,
+    interrupted: bool = False,
+) -> None:
+    with _bash_comms_append_lock:
+        with open(path, "a", encoding="utf-8") as f:
+            if truncated:
+                f.write("\n[… output truncated (DEV_BASH_MAX_OUTPUT_BYTES) …]")
+            f.write("\n---\n")
+            if interrupted:
+                f.write("Interrupted.\n")
+            elif cancelled:
+                f.write("Cancelled by user.\n")
+            elif timed_out:
+                f.write(f"Timed out after {timeout_sec:g}s (DEV_BASH_TIMEOUT_SEC).\n")
+            else:
+                f.write(f"Exit code: {exit_code if exit_code is not None else 'unknown'}\n")
+
 
 def _terminate_process_group(proc: subprocess.Popen, *, use_kill: bool = False) -> None:
     """Send SIGTERM (or SIGKILL) to the child's process group."""
@@ -60,13 +101,48 @@ def _terminate_process_group(proc: subprocess.Popen, *, use_kill: bool = False) 
         pass
 
 
+def _popen_bash_for_streaming(shell_command: str, *, cwd: str) -> subprocess.Popen[str]:
+    """
+    Spawn `bash -c` with stdout/stderr merged to a PIPE.
+
+    Uses ``bufsize=0`` so Python does not wrap the pipe in a large BufferedReader
+    (default ``bufsize`` blocks ``read()`` until ~8KiB accumulates or the pipe closes).
+
+    Without a TTY, libc stdio defaults to fully buffered stdout on the child; prefer
+    coreutils ``stdbuf`` line buffering when available so programs flush often enough.
+    Set DEV_BASH_NO_STDBUF=1 to skip ``stdbuf`` (e.g. minimal images without coreutils).
+    """
+    use_stdbuf = os.environ.get("DEV_BASH_NO_STDBUF", "").strip().lower() not in ("1", "true", "yes")
+    argv_candidates: list[list[str]] = []
+    if use_stdbuf:
+        argv_candidates.append(["stdbuf", "-oL", "-eL", "bash", "-c", shell_command])
+    argv_candidates.append(["bash", "-c", shell_command])
+    last_fe: FileNotFoundError | None = None
+    for argv in argv_candidates:
+        try:
+            return subprocess.Popen(
+                argv,
+                cwd=cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                stdin=subprocess.DEVNULL,
+                start_new_session=True,
+                bufsize=0,
+            )
+        except FileNotFoundError as e:
+            last_fe = e
+            continue
+    assert last_fe is not None
+    raise last_fe
+
+
 def _run_bash_in_thread(
     task_name: str,
     task_dir: Path,
     cancel_requested: threading.Event,
     shell_command: str,
 ) -> None:
-    """Run bash -c in task_dir; write transcript to comms (kind=bash); clear registry when done."""
+    """Run bash -c in task_dir; stream stdout into comms file; append footer; clear registry when done."""
     try:
         max_bytes = int(os.environ.get("DEV_BASH_MAX_OUTPUT_BYTES", str(_DEFAULT_BASH_MAX_OUTPUT_BYTES)))
     except ValueError:
@@ -77,21 +153,14 @@ def _run_bash_in_thread(
         timeout_sec = _DEFAULT_BASH_TIMEOUT_SEC
 
     try:
-        proc = subprocess.Popen(
-            ["bash", "-c", shell_command],
-            cwd=str(task_dir),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            stdin=subprocess.DEVNULL,
-            start_new_session=True,
-        )
+        proc = _popen_bash_for_streaming(shell_command, cwd=str(task_dir))
     except OSError as exc:
         logger.warning("bash spawn failed for task %s: %s", task_name, exc)
         try:
             add_comms(
                 task_dir,
                 "user",
-                f"$ {shell_command}\n---\nFailed to start process: {exc}\n",
+                f"{bash_comms_input_header(shell_command)}\n---\nFailed to start process: {exc}\n",
                 kind="bash",
             )
         except OSError:
@@ -101,83 +170,112 @@ def _run_bash_in_thread(
                 _command_registry.pop(task_name, None)
         return
 
-    collected = bytearray()
+    path: Path | None = None
+    footer_written = False
     truncated = False
     cancelled = False
     timed_out = False
     start = time.monotonic()
+    trunc_cell: list[bool] = [False]
     stdout = proc.stdout
     assert stdout is not None
-    trunc_cell: list[bool] = [False]
-
-    def read_stdout() -> None:
-        while True:
-            chunk = stdout.read(4096)
-            if not chunk:
-                break
-            room = max_bytes - len(collected)
-            if room <= 0:
-                trunc_cell[0] = True
-                break
-            take = min(len(chunk), room)
-            collected.extend(chunk[:take])
-            if take < len(chunk):
-                trunc_cell[0] = True
-                break
-
-    reader = threading.Thread(target=read_stdout, daemon=True)
-    reader.start()
 
     try:
-        while proc.poll() is None:
-            if cancel_requested.is_set():
-                cancelled = True
-                _terminate_process_group(proc, use_kill=False)
-                break
-            if timeout_sec > 0 and (time.monotonic() - start) > timeout_sec:
-                timed_out = True
-                _terminate_process_group(proc, use_kill=True)
-                break
-            if trunc_cell[0] or len(collected) >= max_bytes:
-                truncated = True
-                _terminate_process_group(proc, use_kill=True)
-                break
-            time.sleep(0.1)
-        reader.join(timeout=30.0)
-        if proc.poll() is None:
-            _terminate_process_group(proc, use_kill=True)
-            proc.wait(timeout=15)
-        else:
-            proc.wait(timeout=15)
-    finally:
+        path = begin_streaming_bash_comms(task_dir, shell_command)
+        with _command_registry_lock:
+            if task_name in _command_registry:
+                _command_registry[task_name]["active_bash_comms_filename"] = path.name
+
+        collected = bytearray()
+
+        def read_stdout() -> None:
+            while True:
+                chunk = stdout.read(4096)
+                if not chunk:
+                    break
+                room = max_bytes - len(collected)
+                if room <= 0:
+                    trunc_cell[0] = True
+                    break
+                take = min(len(chunk), room)
+                portion = chunk[:take]
+                collected.extend(portion)
+                _append_bytes_to_bash_comms(path, portion)
+                if take < len(chunk):
+                    trunc_cell[0] = True
+                    break
+
+        reader = threading.Thread(target=read_stdout, daemon=True)
+        reader.start()
+
         try:
-            stdout.close()
-        except OSError:
-            pass
+            while proc.poll() is None:
+                if cancel_requested.is_set():
+                    cancelled = True
+                    _terminate_process_group(proc, use_kill=False)
+                    break
+                if timeout_sec > 0 and (time.monotonic() - start) > timeout_sec:
+                    timed_out = True
+                    _terminate_process_group(proc, use_kill=True)
+                    break
+                if trunc_cell[0] or len(collected) >= max_bytes:
+                    truncated = True
+                    _terminate_process_group(proc, use_kill=True)
+                    break
+                time.sleep(0.1)
+            reader.join(timeout=30.0)
+            if proc.poll() is None:
+                _terminate_process_group(proc, use_kill=True)
+                proc.wait(timeout=15)
+            else:
+                proc.wait(timeout=15)
+        finally:
+            try:
+                stdout.close()
+            except OSError:
+                pass
 
-    truncated = truncated or trunc_cell[0]
-    out_text = bytes(collected).decode("utf-8", errors="replace")
-    exit_code = proc.returncode
-
-    lines: list[str] = [f"$ {shell_command}"]
-    if out_text:
-        lines.append(out_text.rstrip("\n"))
-    if truncated:
-        lines.append("\n[… output truncated (DEV_BASH_MAX_OUTPUT_BYTES) …]")
-    lines.append("---")
-    if cancelled:
-        lines.append("Cancelled by user.")
-    elif timed_out:
-        lines.append(f"Timed out after {timeout_sec:g}s (DEV_BASH_TIMEOUT_SEC).")
-    else:
-        lines.append(f"Exit code: {exit_code if exit_code is not None else 'unknown'}")
-    transcript = "\n".join(lines).strip() + "\n"
-
-    try:
-        add_comms(task_dir, "user", transcript, kind="bash")
-    except OSError:
-        logger.exception("failed to write bash comms for task %s", task_name)
+        truncated = truncated or trunc_cell[0]
+        exit_code = proc.returncode
+        _append_bash_comms_footer(
+            path,
+            truncated=truncated,
+            cancelled=cancelled,
+            timed_out=timed_out,
+            exit_code=exit_code,
+            timeout_sec=timeout_sec,
+        )
+        footer_written = True
+    except Exception:
+        logger.exception("bash run failed for task %s", task_name)
+        if path is not None and not footer_written:
+            try:
+                _append_bash_comms_footer(
+                    path,
+                    truncated=False,
+                    cancelled=False,
+                    timed_out=False,
+                    exit_code=None,
+                    timeout_sec=timeout_sec,
+                    interrupted=True,
+                )
+                footer_written = True
+            except OSError:
+                logger.exception("failed to write bash interrupted footer for task %s", task_name)
     finally:
+        if path is not None and not footer_written:
+            try:
+                _append_bash_comms_footer(
+                    path,
+                    truncated=False,
+                    cancelled=False,
+                    timed_out=False,
+                    exit_code=None,
+                    timeout_sec=timeout_sec,
+                    interrupted=True,
+                )
+            except OSError:
+                logger.exception("failed to finalize bash comms for task %s", task_name)
         with _command_registry_lock:
             _command_registry.pop(task_name, None)
 
@@ -335,6 +433,7 @@ class CommandStatusResponse(BaseModel):
     active: bool
     command: str | None = None
     active_log_filename: str | None = None
+    active_bash_comms_filename: str | None = None
     command_error: str | None = None
 
 
@@ -868,11 +967,18 @@ def get_task_command_status(task_name: str) -> CommandStatusResponse:
         entry = _command_registry.get(task_name)
         last_error = _last_command_error.get(task_name)
     if entry is None:
-        return CommandStatusResponse(active=False, command=None, active_log_filename=None, command_error=last_error)
+        return CommandStatusResponse(
+            active=False,
+            command=None,
+            active_log_filename=None,
+            active_bash_comms_filename=None,
+            command_error=last_error,
+        )
     return CommandStatusResponse(
         active=True,
         command=entry["command_id"],
         active_log_filename=entry.get("active_log_filename"),
+        active_bash_comms_filename=entry.get("active_bash_comms_filename"),
         command_error=None,
     )
 

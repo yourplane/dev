@@ -56,6 +56,7 @@ describe('App', () => {
       active: false,
       command: null,
       active_log_filename: null,
+      active_bash_comms_filename: null,
       command_error: null,
     })
   })
