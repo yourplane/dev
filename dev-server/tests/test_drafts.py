@@ -39,6 +39,7 @@ def test_new_task_draft_get_empty(client: TestClient) -> None:
     assert data.get("title") is None
     assert data.get("repo") is None
     assert data.get("comment") is None
+    assert data.get("no_code_checkout") is False
 
 
 def test_new_task_draft_put_and_get(client: TestClient, tasks_root: Path) -> None:
@@ -58,6 +59,14 @@ def test_new_task_draft_put_and_get(client: TestClient, tasks_root: Path) -> Non
 
     draft_file = tasks_root / ".drafts" / "new-task.json"
     assert draft_file.is_file()
+
+
+def test_new_task_draft_put_host_ops_flag(client: TestClient, tasks_root: Path) -> None:
+    """PUT can persist no_code_checkout without title/repo/comment."""
+    resp = client.put("/drafts/new-task", json={"no_code_checkout": True})
+    assert resp.status_code == 204
+    resp2 = client.get("/drafts/new-task")
+    assert resp2.json().get("no_code_checkout") is True
 
 
 def test_new_task_draft_put_empty_clears(client: TestClient, tasks_root: Path) -> None:

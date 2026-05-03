@@ -36,8 +36,15 @@ async function request<T>(
 
 export interface CreateTaskBody {
   title: string;
-  repo: string;
+  repo?: string | null;
   comment?: string | null;
+  /** When true, skip clone and git-workspace rule (host / maintenance task). */
+  no_code_checkout?: boolean;
+}
+
+export interface TaskWorkspaceInfo {
+  has_cloned_repo: boolean;
+  repo_label: string | null;
 }
 
 export interface CreateTaskResponse {
@@ -75,6 +82,10 @@ export interface CopyFromArchiveResponse {
 export const api = {
   getTasks(): Promise<{ tasks: string[] }> {
     return request('/tasks');
+  },
+
+  getTaskWorkspace(taskName: string): Promise<TaskWorkspaceInfo> {
+    return request(`/tasks/${encodeURIComponent(taskName)}/workspace`);
   },
 
   getRepos(): Promise<Record<string, string>> {
@@ -185,11 +196,21 @@ export const api = {
     return result;
   },
 
-  getNewTaskDraft(): Promise<{ title?: string; repo?: string; comment?: string }> {
+  getNewTaskDraft(): Promise<{
+    title?: string;
+    repo?: string;
+    comment?: string;
+    no_code_checkout?: boolean;
+  }> {
     return request('/drafts/new-task');
   },
 
-  setNewTaskDraft(data: { title?: string; repo?: string; comment?: string }): Promise<void> {
+  setNewTaskDraft(data: {
+    title?: string;
+    repo?: string;
+    comment?: string;
+    no_code_checkout?: boolean;
+  }): Promise<void> {
     return request('/drafts/new-task', {
       method: 'PUT',
       body: JSON.stringify(data),

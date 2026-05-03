@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api, apiBaseUrl } from './api'
+import { api, apiBaseUrl, type TaskWorkspaceInfo } from './api'
 import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import './App.css'
@@ -416,6 +416,7 @@ function CreateTaskForm({
   const [title, setTitle] = useState('')
   const [repo, setRepo] = useState('')
   const [comment, setComment] = useState('')
+  const [noCodeCheckout, setNoCodeCheckout] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [createStatusMessage, setCreateStatusMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -427,7 +428,12 @@ function CreateTaskForm({
   const [removing, setRemoving] = useState<string | null>(null)
   const [draftStatus, setDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
   const draftLoadedRef = useRef(false)
-  const lastSavedSnapshotRef = useRef<{ title: string; repo: string; comment: string } | null>(null)
+  const lastSavedSnapshotRef = useRef<{
+    title: string
+    repo: string
+    comment: string
+    noCodeCheckout: boolean
+  } | null>(null)
 
   const loadRepos = useCallback(() => {
     return api.getRepos().then(setRepos)
@@ -451,10 +457,17 @@ function CreateTaskForm({
       const loadedTitle = d.title ?? ''
       const loadedRepo = d.repo ?? ''
       const loadedComment = d.comment ?? ''
+      const loadedNoCode = Boolean(d.no_code_checkout)
       setTitle(loadedTitle)
       setRepo(loadedRepo)
       setComment(loadedComment)
-      lastSavedSnapshotRef.current = { title: loadedTitle, repo: loadedRepo, comment: loadedComment }
+      setNoCodeCheckout(loadedNoCode)
+      lastSavedSnapshotRef.current = {
+        title: loadedTitle,
+        repo: loadedRepo,
+        comment: loadedComment,
+        noCodeCheckout: loadedNoCode,
+      }
       draftLoadedRef.current = true
       setDraftStatus('saved')
     }).catch(() => { /* ignore */ })
@@ -464,24 +477,30 @@ function CreateTaskForm({
   useEffect(() => {
     if (!draftLoadedRef.current) return
     const snapshot = lastSavedSnapshotRef.current
-    if (snapshot && title === snapshot.title && repo === snapshot.repo && comment === snapshot.comment) {
+    if (
+      snapshot
+      && title === snapshot.title
+      && repo === snapshot.repo
+      && comment === snapshot.comment
+      && noCodeCheckout === snapshot.noCodeCheckout
+    ) {
       setDraftStatus('saved')
       return
     }
     setDraftStatus('unsaved')
     const t = setTimeout(() => {
-      const payload = { title, repo, comment }
-      const empty = !title.trim() && !repo.trim() && !comment.trim()
+      const payload = { title, repo, comment, no_code_checkout: noCodeCheckout }
+      const empty = !title.trim() && !repo.trim() && !comment.trim() && !noCodeCheckout
       setDraftStatus('saving')
       api.setNewTaskDraft(empty ? {} : payload).then(() => {
-        lastSavedSnapshotRef.current = { title, repo, comment }
+        lastSavedSnapshotRef.current = { title, repo, comment, noCodeCheckout }
         setDraftStatus('saved')
       }).catch(() => {
         setDraftStatus('unsaved')
       })
     }, DRAFT_DEBOUNCE_MS)
     return () => clearTimeout(t)
-  }, [title, repo, comment])
+  }, [title, repo, comment, noCodeCheckout])
 
   const handleRemoveRepo = async (name: string) => {
     if (!confirm(`Remove "${name}" from your repo list?`)) return
@@ -530,16 +549,22 @@ function CreateTaskForm({
     e.preventDefault()
     setError(null)
     if (!title.trim()) { setError('Title is required'); return }
-    if (!repo.trim()) { setError('Select a repo'); return }
+    if (!noCodeCheckout && !repo.trim()) { setError('Select a repo'); return }
     setCreateStatusMessage(null)
     setSubmitting(true)
     try {
       const res = await api.createTask(
-        {
-          title: title.trim(),
-          repo: repo.trim(),
-          comment: comment.trim() || undefined,
-        },
+        noCodeCheckout
+          ? {
+              title: title.trim(),
+              comment: comment.trim() || undefined,
+              no_code_checkout: true,
+            }
+          : {
+              title: title.trim(),
+              repo: repo.trim(),
+              comment: comment.trim() || undefined,
+            },
         (msg) => setCreateStatusMessage(msg),
       )
       onCreated(res.task_name)
@@ -571,8 +596,22 @@ function CreateTaskForm({
             required
           />
         </label>
+        <label className="create-form-checkbox-row">
+          <input
+            type="checkbox"
+            checked={noCodeCheckout}
+            onChange={(e) => {
+              setNoCodeCheckout(e.target.checked)
+              if (e.target.checked) setRepo('')
+            }}
+          />
+          <span>Host / ops task (no repository clone)</span>
+        </label>
         <label>
-          <span>Repo <span className="required">*</span></span>
+          <span>Repo {!noCodeCheckout && <span className="required">*</span>}</span>
+          {noCodeCheckout && (
+            <span className="hint"> Not used for host-ops tasks.</span>
+          )}
           {reposLoading ? (
             <span className="hint">Loading shorthands…</span>
           ) : Object.keys(repos).length === 0 ? (
@@ -1368,6 +1407,7 @@ export function TaskCommsPageContent({
   const [bashHistoryBrowseIdx, setBashHistoryBrowseIdx] = useState<number | null>(null)
   const [bashHistoryPicker, setBashHistoryPicker] = useState('')
   const [activeBashCommsFilename, setActiveBashCommsFilename] = useState<string | null>(null)
+  const [workspaceInfo, setWorkspaceInfo] = useState<TaskWorkspaceInfo | null>(null)
 
   const bashHistory = useMemo(() => {
     const cmds: string[] = []
@@ -1430,6 +1470,24 @@ export function TaskCommsPageContent({
     },
     [activeLogFilename],
   )
+
+  useEffect(() => {
+    let cancelled = false
+    setWorkspaceInfo(null)
+    api
+      .getTaskWorkspace(taskName)
+      .then((ws) => {
+        if (!cancelled) setWorkspaceInfo(ws)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWorkspaceInfo({ has_cloned_repo: true, repo_label: null })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [taskName])
 
   const handleArchive = async () => {
     if (!confirm(`Archive task "${taskName}"?`)) return
@@ -2080,7 +2138,20 @@ export function TaskCommsPageContent({
   return (
     <section className="task-comms">
       <div className="task-comms-header">
-        <h2>{taskName}</h2>
+        <div className="task-comms-header-title">
+          <h2>{taskName}</h2>
+          {workspaceInfo && (
+            <p className="task-repo-meta">
+              {workspaceInfo.has_cloned_repo ? (
+                <>
+                  Repository: <code>{workspaceInfo.repo_label ?? '—'}</code>
+                </>
+              ) : (
+                'No repository (host-ops style task).'
+              )}
+            </p>
+          )}
+        </div>
         <div className="task-comms-header-actions">
           <button
             type="button"
@@ -2179,17 +2250,19 @@ export function TaskCommsPageContent({
             >
               {startingCommand === 'implement' ? 'Starting…' : 'Implement'}
             </button>
-            <button
-              type="button"
-              className="command-btn"
-              disabled={!!startingCommand || creatingPr || pullingPrComments}
-              onClick={prUrl ? handlePullPrComments : handleCreatePr}
-              aria-busy={creatingPr || pullingPrComments}
-            >
-              {prUrl
-                ? (pullingPrComments ? 'Pulling comments…' : 'Pull Comments')
-                : (creatingPr ? 'Creating PR…' : 'Create PR')}
-            </button>
+            {(!workspaceInfo || workspaceInfo.has_cloned_repo) && (
+              <button
+                type="button"
+                className="command-btn"
+                disabled={!!startingCommand || creatingPr || pullingPrComments}
+                onClick={prUrl ? handlePullPrComments : handleCreatePr}
+                aria-busy={creatingPr || pullingPrComments}
+              >
+                {prUrl
+                  ? (pullingPrComments ? 'Pulling comments…' : 'Pull Comments')
+                  : (creatingPr ? 'Creating PR…' : 'Create PR')}
+              </button>
+            )}
           </div>
         )}
         {commandError && <p className="inline-error">{commandError}</p>}

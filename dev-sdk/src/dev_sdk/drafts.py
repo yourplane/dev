@@ -34,10 +34,12 @@ def get_new_task_draft(tasks_root: Path) -> dict | None:
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return None
-        out = {}
+        out: dict = {}
         for key in ("title", "repo", "comment"):
             if key in data and isinstance(data[key], str):
                 out[key] = data[key]
+        if data.get("no_code_checkout") is True:
+            out["no_code_checkout"] = True
         return out if out else None
     except (json.JSONDecodeError, OSError):
         return None
@@ -48,19 +50,21 @@ def set_new_task_draft(
     title: str = "",
     repo: str = "",
     comment: str = "",
+    *,
+    no_code_checkout: bool = False,
 ) -> None:
     """Write new-task draft. Empty strings clear the draft (file is removed if all empty)."""
     d = _drafts_dir(tasks_root)
     path = d / NEW_TASK_DRAFT_FILE
-    if not title.strip() and not repo.strip() and not comment.strip():
+    if not title.strip() and not repo.strip() and not comment.strip() and not no_code_checkout:
         if path.exists():
             path.unlink()
         return
     d.mkdir(parents=True, exist_ok=True)
-    path.write_text(
-        json.dumps({"title": title, "repo": repo, "comment": comment}, indent=2),
-        encoding="utf-8",
-    )
+    payload = {"title": title, "repo": repo, "comment": comment}
+    if no_code_checkout:
+        payload["no_code_checkout"] = True
+    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
 
 
 def get_task_comment_draft(tasks_root: Path, task_name: str) -> str:

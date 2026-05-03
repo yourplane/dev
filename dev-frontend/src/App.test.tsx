@@ -17,6 +17,7 @@ vi.mock('./api', () => ({
     copyFromArchive: vi.fn(),
     getTaskCommsList: vi.fn(),
     getTaskFeed: vi.fn(),
+    getTaskWorkspace: vi.fn(),
     getTaskCommentDraft: vi.fn(),
     setTaskCommentDraft: vi.fn(),
     getTaskBashDraft: vi.fn(),
@@ -48,6 +49,10 @@ describe('App', () => {
     vi.mocked(api.copyFromArchive).mockResolvedValue({ task_name: 'copied-task', task_dir: '/tmp/copied-task' })
     vi.mocked(api.getTaskCommsList).mockResolvedValue({ files: [] })
     vi.mocked(api.getTaskFeed).mockResolvedValue({ entries: [] })
+    vi.mocked(api.getTaskWorkspace).mockResolvedValue({
+      has_cloned_repo: true,
+      repo_label: 'https://github.com/acme/repo.git',
+    })
     vi.mocked(api.getTaskPr).mockResolvedValue({ pr_url: null })
     vi.mocked(api.getTaskCommentDraft).mockResolvedValue('')
     vi.mocked(api.setTaskCommentDraft).mockResolvedValue(undefined)
