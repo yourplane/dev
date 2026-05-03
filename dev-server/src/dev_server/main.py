@@ -1039,6 +1039,8 @@ def create_task_pr(task_name: str) -> CreatePRResponse:
 def get_task_pr(task_name: str) -> GetTaskPrResponse:
     """Return the existing pull request URL for the task, if any."""
     task_dir = _task_dir(task_name)
+    if TaskManager.describe_clone_layout(task_dir) is None:
+        return GetTaskPrResponse(pr_url=None)
     try:
         pr_url = find_existing_pull_request(task_dir)
     except CreatePRError as e:

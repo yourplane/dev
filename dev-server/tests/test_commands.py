@@ -297,6 +297,22 @@ def test_get_pr_returns_null_when_not_found(client_with_tasks: TestClient, task_
     assert resp.json()["pr_url"] is None
 
 
+def test_get_pr_no_nested_repo_returns_null_without_lookup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No-clone tasks: GET pr is 200 with null URL and must not call find_existing_pull_request."""
+    root = tmp_path / "tasks-root"
+    root.mkdir()
+    t = root / "ops-only"
+    t.mkdir()
+    monkeypatch.setenv("DEV_TASKS_DIR", str(root))
+    with TestClient(app) as client, patch("dev_server.main.find_existing_pull_request") as mock_find:
+        resp = client.get("/tasks/ops-only/pr")
+    assert resp.status_code == 200
+    assert resp.json() == {"pr_url": None}
+    mock_find.assert_not_called()
+
+
 def test_get_pr_returns_422_on_error(client_with_tasks: TestClient, task_dir: Path) -> None:
     """GET pr returns 422 with detail when lookup raises CreatePRError."""
     from dev_sdk.create_pr import CreatePRError
