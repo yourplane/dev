@@ -117,8 +117,7 @@ def test_start_task_no_repo_skips_clone_and_git_workspace_rule(
         title="Ops",
         task_name="ops-task",
         comment=None,
-        repo_url="",
-        no_repo=True,
+        repo_url=None,
     )
 
     task_dir = tmp_tasks_root / "ops-task"
@@ -131,9 +130,8 @@ def test_start_task_no_repo_skips_clone_and_git_workspace_rule(
 def test_describe_clone_layout_empty(manager: TaskManager, tmp_tasks_root: Path) -> None:
     task_dir = tmp_tasks_root / "t"
     task_dir.mkdir(parents=True)
-    layout = manager.describe_clone_layout(task_dir)
-    assert layout.has_cloned_repo is False
-    assert layout.repo_label is None
+    label = manager.describe_clone_layout(task_dir)
+    assert label is None
 
 
 def test_describe_clone_layout_shows_origin(manager: TaskManager, tmp_tasks_root: Path) -> None:
@@ -148,9 +146,8 @@ def test_describe_clone_layout_shows_origin(manager: TaskManager, tmp_tasks_root
         check=True,
         capture_output=True,
     )
-    layout = manager.describe_clone_layout(task_dir)
-    assert layout.has_cloned_repo is True
-    assert layout.repo_label and "example/sample" in layout.repo_label
+    label = manager.describe_clone_layout(task_dir)
+    assert label and "example/sample" in label
 
 
 @patch("dev_sdk.task_manager.subprocess.run")

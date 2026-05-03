@@ -172,7 +172,7 @@ def _repo_name_from_url(repo_url: str) -> str:
     "--no-repo",
     "no_repo",
     is_flag=True,
-    help="Create the task without cloning a repository (no git-workspace Cursor rule).",
+    help="Create the task without cloning a repository.",
 )
 @click.option(
     "--comment",
@@ -217,9 +217,8 @@ def start_task(
             title=title,
             task_name=name,
             comment=comment,
-            repo_url=resolved_url,
+            repo_url=None if no_repo else resolved_url,
             on_progress=click.echo,
-            no_repo=no_repo,
         )
         task_dir = tasks_dir / name
         click.echo(f"Task created: {task_dir}")

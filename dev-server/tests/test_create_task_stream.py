@@ -43,12 +43,12 @@ def test_create_task_streams_progress_then_complete(client):
     assert "task_dir" in lines[2]
 
 
-def test_create_task_without_repo_passes_no_repo_and_empty_repo_url(client):
+def test_create_task_without_repo_passes_none_repo_url(client):
     manager = MagicMock()
 
     def start_task(**kwargs):
-        assert kwargs.get("no_repo") is True
-        assert kwargs.get("repo_url") == ""
+        assert kwargs.get("repo_url") is None
+        assert "no_repo" not in kwargs
         on = kwargs.get("on_progress")
         if on:
             on("Created task directory.")
@@ -72,8 +72,8 @@ def test_create_task_omitted_repo_behaves_like_no_repo(client):
     manager = MagicMock()
 
     def start_task(**kwargs):
-        assert kwargs.get("no_repo") is True
-        assert kwargs.get("repo_url") == ""
+        assert kwargs.get("repo_url") is None
+        assert "no_repo" not in kwargs
 
     manager.start_task.side_effect = start_task
 
@@ -93,7 +93,7 @@ def test_get_task_workspace_no_repo(client, tmp_path, monkeypatch):
     tc = TestClient(app)
     resp = tc.get("/tasks/ops-task/workspace")
     assert resp.status_code == 200
-    assert resp.json() == {"has_cloned_repo": False, "repo_label": None}
+    assert resp.json() == {"repo_label": None}
 
 
 def test_get_task_workspace_with_git_child(client, tmp_path, monkeypatch):
@@ -115,7 +115,6 @@ def test_get_task_workspace_with_git_child(client, tmp_path, monkeypatch):
     resp = tc.get("/tasks/code-task/workspace")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["has_cloned_repo"] is True
     assert "github.com" in (data.get("repo_label") or "")
 
 

@@ -25,12 +25,6 @@ class ArchivedTaskEntry(NamedTuple):
     last_modified_at: str
 
 
-class TaskWorkspaceLayout(NamedTuple):
-    """Whether the task has a cloned repo under it (direct child with .git) and a short label."""
-
-    has_cloned_repo: bool
-    repo_label: str | None
-
 logger = logging.getLogger("dev_sdk")
 
 ProgressCallback = Callable[[str], None]
@@ -50,21 +44,20 @@ class TaskManager:
         title: str,
         task_name: str,
         comment: str | None,
-        repo_url: str,
+        repo_url: str | None,
         on_progress: ProgressCallback | None = None,
-        *,
-        no_repo: bool = False,
     ) -> None:
         """Create task dir, comms dir (and optional first user comment), agent chat, and clone repo.
 
-        When ``no_repo`` is True, skip cloning, feature branch checkout, and the
-        ``git-workspace.mdc`` rule (task workspace with no nested repository).
+        When ``repo_url`` is missing or blank after stripping, skip cloning, feature branch
+        checkout, and the ``git-workspace.mdc`` rule.
         """
+        will_clone = repo_url is not None and bool(repo_url.strip())
         logger.debug(
-            "start_task: task_name=%s repo_url=%s no_repo=%s task_dir=%s",
+            "start_task: task_name=%s repo_url=%s will_clone=%s task_dir=%s",
             task_name,
             repo_url,
-            no_repo,
+            will_clone,
             self.tasks_root / task_name,
         )
         task_dir = self.tasks_root / task_name
@@ -86,18 +79,19 @@ class TaskManager:
         if on_progress:
             on_progress("Agent chat created.")
         self._write_chat_id_file(task_dir, chat_id)
-        if no_repo:
+        if not will_clone:
             if on_progress:
                 on_progress("Task ready (no repository cloned).")
-            logger.debug("start_task: completed task_name=%s (no_repo)", task_name)
+            logger.debug("start_task: completed task_name=%s (no clone)", task_name)
             return
+        clone_url = repo_url.strip()
         self._write_cursor_rules(task_dir)
         if on_progress:
             on_progress("Cloning repository…")
-        self._clone_repo(task_dir, repo_url)
+        self._clone_repo(task_dir, clone_url)
         if on_progress:
             on_progress("Repository cloned.")
-        self._checkout_feature_branch(task_dir, repo_url, task_name, on_progress=on_progress)
+        self._checkout_feature_branch(task_dir, clone_url, task_name, on_progress=on_progress)
         logger.debug("start_task: completed task_name=%s", task_name)
 
     def _ensure_comms_dir(self, task_dir: Path) -> None:
@@ -227,13 +221,17 @@ class TaskManager:
         return sorted(found, key=lambda p: p.name)
 
     @staticmethod
-    def describe_clone_layout(task_dir: Path) -> TaskWorkspaceLayout:
-        """Summarize cloned repos under a task root for UI (PR button, repo label)."""
+    def describe_clone_layout(task_dir: Path) -> str | None:
+        """Label for the cloned repo under a task root, or ``None`` if there is none.
+
+        Multiple direct git children are summarized as a fixed phrase so callers can still
+        treat a non-``None`` return as “has at least one nested repo”.
+        """
         clones = TaskManager._direct_child_git_clone_dirs(task_dir)
         if not clones:
-            return TaskWorkspaceLayout(False, None)
+            return None
         if len(clones) > 1:
-            return TaskWorkspaceLayout(True, "Multiple repositories")
+            return "Multiple repositories"
         repo_path = clones[0]
         try:
             result = subprocess.run(
@@ -245,10 +243,10 @@ class TaskManager:
             )
             url = result.stdout.strip()
             if url:
-                return TaskWorkspaceLayout(True, url)
+                return url
         except (subprocess.CalledProcessError, OSError):
             pass
-        return TaskWorkspaceLayout(True, repo_path.name)
+        return repo_path.name
 
     @staticmethod
     def _repo_name_from_url(repo_url: str) -> str:

@@ -34,19 +34,15 @@ def get_new_task_draft(tasks_root: Path) -> dict | None:
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return None
-        out: dict = {}
-        if "title" in data and isinstance(data["title"], str):
-            out["title"] = data["title"]
+        out: dict[str, str | None] = {}
+        for key in ("title", "comment"):
+            v = data.get(key)
+            if isinstance(v, str):
+                out[key] = v
         if "repo" in data:
-            if data["repo"] is None:
-                out["repo"] = None
-            elif isinstance(data["repo"], str):
-                out["repo"] = data["repo"]
-        if "comment" in data and isinstance(data["comment"], str):
-            out["comment"] = data["comment"]
-        # Legacy drafts used no_code_checkout instead of repo: null
-        if data.get("no_code_checkout") is True and "repo" not in out:
-            out["repo"] = None
+            r = data["repo"]
+            if r is None or isinstance(r, str):
+                out["repo"] = r
         return out if out else None
     except (json.JSONDecodeError, OSError):
         return None
@@ -58,23 +54,21 @@ def set_new_task_draft(
     repo: str | None = None,
     comment: str = "",
 ) -> None:
-    """Write new-task draft. ``repo`` may be None (JSON null) to mean no repository selected.
-
-    Removes the draft file when title, comment, and repo are all empty (``repo`` empty means
-    None or a blank string).
-    """
+    """Write ``tasks_root/.drafts/new-task.json`` (``repo`` may be JSON null)."""
     d = _drafts_dir(tasks_root)
-    path = d / NEW_TASK_DRAFT_FILE
-    # Remove draft only when everything is blank and repo is not an explicit null (null means
-    # "task without a repo" in the UI, which we still persist).
-    repo_blank = isinstance(repo, str) and not repo.strip()
-    if not title.strip() and not (comment or "").strip() and repo_blank:
-        if path.exists():
-            path.unlink()
-        return
     d.mkdir(parents=True, exist_ok=True)
-    payload = {"title": title, "repo": repo, "comment": comment}
-    path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    path = d / NEW_TASK_DRAFT_FILE
+    path.write_text(
+        json.dumps({"title": title, "repo": repo, "comment": comment}, indent=2),
+        encoding="utf-8",
+    )
+
+
+def delete_new_task_draft(tasks_root: Path) -> None:
+    """Remove the new-task draft file if it exists."""
+    path = _drafts_dir(tasks_root) / NEW_TASK_DRAFT_FILE
+    if path.is_file():
+        path.unlink()
 
 
 def get_task_comment_draft(tasks_root: Path, task_name: str) -> str:

@@ -17,7 +17,7 @@ from pathlib import Path
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, Response, StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
 from dev_sdk.agent_run import (
     AgentRunError,
@@ -35,8 +35,7 @@ from dev_sdk.comms import (
     remove_comms,
 )
 from dev_sdk.drafts import (
-    DRAFTS_DIR,
-    NEW_TASK_DRAFT_FILE,
+    delete_new_task_draft,
     get_new_task_draft,
     get_task_bash_draft,
     get_task_comment_draft,
@@ -360,8 +359,6 @@ def _slugify(title: str) -> str:
 
 
 class CreateTaskRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
     title: str = Field(..., min_length=1, description="Task title")
     repo: str | None = Field(
         None,
@@ -482,7 +479,6 @@ class NewTaskDraftRequest(BaseModel):
 
 
 class TaskWorkspaceResponse(BaseModel):
-    has_cloned_repo: bool
     repo_label: str | None = None
 
 
@@ -581,9 +577,7 @@ def put_new_task_draft_endpoint(body: NewTaskDraftRequest) -> None:
     root = _tasks_root()
     submitted = body.model_dump(exclude_unset=True)
     if not submitted:
-        path = _tasks_root() / DRAFTS_DIR / NEW_TASK_DRAFT_FILE
-        if path.exists():
-            path.unlink()
+        delete_new_task_draft(root)
         return
     title = body.title or ""
     comment = body.comment or ""
@@ -627,10 +621,10 @@ def list_tasks() -> ListTasksResponse:
 
 @app.get("/tasks/{task_name}/workspace", response_model=TaskWorkspaceResponse)
 def get_task_workspace(task_name: str) -> TaskWorkspaceResponse:
-    """Whether the task has a cloned git repo (direct child) and an optional label (e.g. origin URL)."""
+    """Return a label for the nested clone (e.g. origin URL), or null if there is none."""
     task_dir = _task_dir(task_name)
-    layout = TaskManager.describe_clone_layout(task_dir)
-    return TaskWorkspaceResponse(has_cloned_repo=layout.has_cloned_repo, repo_label=layout.repo_label)
+    label = TaskManager.describe_clone_layout(task_dir)
+    return TaskWorkspaceResponse(repo_label=label)
 
 
 @app.post("/tasks")
@@ -639,7 +633,7 @@ def create_task(body: CreateTaskRequest) -> StreamingResponse:
     manager = _get_manager()
     task_name = body.task_name if body.task_name is not None else _slugify(body.title)
     will_clone = body.repo is not None and bool(str(body.repo).strip())
-    repo_url = ""
+    repo_url: str | None = None
     if will_clone:
         try:
             repo_url = resolve_repo(str(body.repo).strip())
@@ -659,9 +653,8 @@ def create_task(body: CreateTaskRequest) -> StreamingResponse:
                     comment=body.comment,
                     repo_url=repo_url,
                     on_progress=lambda msg: q.put(("progress", msg)),
-                    no_repo=not will_clone,
                 )
-                set_new_task_draft(tasks_root, "", None, "")
+                delete_new_task_draft(tasks_root)
                 task_dir = tasks_root / task_name
                 q.put(("complete", str(task_dir)))
             except FileExistsError:

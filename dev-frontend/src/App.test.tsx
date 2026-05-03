@@ -50,7 +50,6 @@ describe('App', () => {
     vi.mocked(api.getTaskCommsList).mockResolvedValue({ files: [] })
     vi.mocked(api.getTaskFeed).mockResolvedValue({ entries: [] })
     vi.mocked(api.getTaskWorkspace).mockResolvedValue({
-      has_cloned_repo: true,
       repo_label: 'https://github.com/acme/repo.git',
     })
     vi.mocked(api.getTaskPr).mockResolvedValue({ pr_url: null })

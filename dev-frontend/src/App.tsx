@@ -404,6 +404,9 @@ function ArchivePage() {
 
 const DRAFT_DEBOUNCE_MS = 400
 
+/** Sentinel radio value for “no repository” (draft/API use JSON null). */
+const CREATE_TASK_NO_REPO = '__no_repo__'
+
 function CreateTaskForm({
   onCreated,
   onCancel,
@@ -416,7 +419,6 @@ function CreateTaskForm({
   const [title, setTitle] = useState('')
   const [repo, setRepo] = useState('')
   const [comment, setComment] = useState('')
-  const [noRepo, setNoRepo] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [createStatusMessage, setCreateStatusMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -432,7 +434,6 @@ function CreateTaskForm({
     title: string
     repo: string
     comment: string
-    noRepo: boolean
   } | null>(null)
 
   const loadRepos = useCallback(() => {
@@ -455,18 +456,15 @@ function CreateTaskForm({
     api.getNewTaskDraft().then((d) => {
       if (cancelled) return
       const loadedTitle = d.title ?? ''
-      const loadedNoRepo = d.repo === null
-      const loadedRepo = typeof d.repo === 'string' ? d.repo : ''
+      const loadedRepo = d.repo === null ? CREATE_TASK_NO_REPO : (typeof d.repo === 'string' ? d.repo : '')
       const loadedComment = d.comment ?? ''
       setTitle(loadedTitle)
       setRepo(loadedRepo)
       setComment(loadedComment)
-      setNoRepo(loadedNoRepo)
       lastSavedSnapshotRef.current = {
         title: loadedTitle,
         repo: loadedRepo,
         comment: loadedComment,
-        noRepo: loadedNoRepo,
       }
       draftLoadedRef.current = true
       setDraftStatus('saved')
@@ -482,25 +480,24 @@ function CreateTaskForm({
       && title === snapshot.title
       && repo === snapshot.repo
       && comment === snapshot.comment
-      && noRepo === snapshot.noRepo
     ) {
       setDraftStatus('saved')
       return
     }
     setDraftStatus('unsaved')
     const t = setTimeout(() => {
-      const payload = { title, repo: noRepo ? null : repo, comment }
-      const empty = !title.trim() && !repo.trim() && !comment.trim() && !noRepo
+      const payload = { title, repo: repo === CREATE_TASK_NO_REPO ? null : repo, comment }
+      const empty = !title.trim() && !comment.trim() && repo !== CREATE_TASK_NO_REPO && !repo.trim()
       setDraftStatus('saving')
       api.setNewTaskDraft(empty ? {} : payload).then(() => {
-        lastSavedSnapshotRef.current = { title, repo, comment, noRepo }
+        lastSavedSnapshotRef.current = { title, repo, comment }
         setDraftStatus('saved')
       }).catch(() => {
         setDraftStatus('unsaved')
       })
     }, DRAFT_DEBOUNCE_MS)
     return () => clearTimeout(t)
-  }, [title, repo, comment, noRepo])
+  }, [title, repo, comment])
 
   const handleRemoveRepo = async (name: string) => {
     if (!confirm(`Remove "${name}" from your repo list?`)) return
@@ -549,14 +546,14 @@ function CreateTaskForm({
     e.preventDefault()
     setError(null)
     if (!title.trim()) { setError('Title is required'); return }
-    if (!noRepo && !repo.trim()) { setError('Select a repo'); return }
+    if (repo !== CREATE_TASK_NO_REPO && !repo.trim()) { setError('Select a repo'); return }
     setCreateStatusMessage(null)
     setSubmitting(true)
     try {
       const res = await api.createTask(
         {
           title: title.trim(),
-          repo: noRepo ? null : repo.trim(),
+          repo: repo === CREATE_TASK_NO_REPO ? null : repo.trim(),
           comment: comment.trim() || undefined,
         },
         (msg) => setCreateStatusMessage(msg),
@@ -590,34 +587,25 @@ function CreateTaskForm({
             required
           />
         </label>
-        <label className="create-form-checkbox-row">
-          <input
-            type="checkbox"
-            checked={noRepo}
-            onChange={(e) => {
-              setNoRepo(e.target.checked)
-              if (e.target.checked) setRepo('')
-            }}
-          />
-          <span>No repository (same as CLI <code>--no-repo</code>)</span>
-        </label>
         <label>
-          <span>Repo {!noRepo && <span className="required">*</span>}</span>
-          {noRepo && (
-            <span className="hint"> Not used when creating a task without a repository.</span>
-          )}
+          <span>Repo <span className="required">*</span></span>
           {reposLoading ? (
             <span className="hint">Loading shorthands…</span>
-          ) : Object.keys(repos).length === 0 ? (
-            <div className="repo-empty">
-              <p className="hint">No repos yet. Click Add to add one.</p>
-              <button type="button" className="repo-add-open-btn" onClick={openAddModal}>
-                Add repo
-              </button>
-            </div>
           ) : (
             <>
-            <div className="repo-radio-group" role="radiogroup" aria-label="Repo">
+            <div className="repo-radio-group" role="radiogroup" aria-label="Repository">
+              <div className="repo-radio-option repo-radio-row">
+                <label className="repo-radio-label">
+                  <input
+                    type="radio"
+                    name="repo"
+                    value={CREATE_TASK_NO_REPO}
+                    checked={repo === CREATE_TASK_NO_REPO}
+                    onChange={() => setRepo(CREATE_TASK_NO_REPO)}
+                  />
+                  <span>No repository (CLI: <code>--no-repo</code>)</span>
+                </label>
+              </div>
               {Object.entries(repos).map(([name, url]) => (
                 <div key={name} className="repo-radio-option repo-radio-row">
                   <label className="repo-radio-label">
@@ -643,6 +631,9 @@ function CreateTaskForm({
                 </div>
               ))}
             </div>
+            {Object.keys(repos).length === 0 && (
+              <p className="hint">No saved shorthands yet. Add one below, or choose “No repository”.</p>
+            )}
             <button type="button" className="repo-add-open-btn" onClick={openAddModal}>
               Add repo
             </button>
@@ -1475,7 +1466,7 @@ export function TaskCommsPageContent({
       })
       .catch(() => {
         if (!cancelled) {
-          setWorkspaceInfo({ has_cloned_repo: true, repo_label: null })
+          setWorkspaceInfo({ repo_label: '—' })
         }
       })
     return () => {
@@ -2136,9 +2127,9 @@ export function TaskCommsPageContent({
           <h2>{taskName}</h2>
           {workspaceInfo && (
             <p className="task-repo-meta">
-              {workspaceInfo.has_cloned_repo ? (
+              {workspaceInfo.repo_label != null ? (
                 <>
-                  Repository: <code>{workspaceInfo.repo_label ?? '—'}</code>
+                  Repository: <code>{workspaceInfo.repo_label}</code>
                 </>
               ) : (
                 'No repository cloned for this task.'
@@ -2244,7 +2235,7 @@ export function TaskCommsPageContent({
             >
               {startingCommand === 'implement' ? 'Starting…' : 'Implement'}
             </button>
-            {(!workspaceInfo || workspaceInfo.has_cloned_repo) && (
+            {(!workspaceInfo || workspaceInfo.repo_label != null) && (
               <button
                 type="button"
                 className="command-btn"

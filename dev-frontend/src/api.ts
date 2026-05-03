@@ -36,13 +36,11 @@ async function request<T>(
 
 export interface CreateTaskBody {
   title: string;
-  /** Omit, null, or blank to create the task without cloning a repository. */
   repo?: string | null;
   comment?: string | null;
 }
 
 export interface TaskWorkspaceInfo {
-  has_cloned_repo: boolean;
   repo_label: string | null;
 }
 
