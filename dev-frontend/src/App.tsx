@@ -2233,23 +2233,16 @@ export function TaskCommsPageContent({
             >
               {startingCommand === 'plan-implement' ? 'Starting…' : 'Plan'}
             </button>
-            <button
-              type="button"
-              className="command-btn"
-              disabled={
-                !!startingCommand ||
-                workspaceInfo === null ||
-                workspaceInfo.repo_label === null
-              }
-              title={
-                workspaceInfo && workspaceInfo.repo_label === null
-                  ? 'Implement requires a cloned repository under the task root.'
-                  : undefined
-              }
-              onClick={() => handleStartCommand('implement')}
-            >
-              {startingCommand === 'implement' ? 'Starting…' : 'Implement'}
-            </button>
+            {workspaceInfo && workspaceInfo.repo_label != null && (
+              <button
+                type="button"
+                className="command-btn"
+                disabled={!!startingCommand}
+                onClick={() => handleStartCommand('implement')}
+              >
+                {startingCommand === 'implement' ? 'Starting…' : 'Implement'}
+              </button>
+            )}
             {(!workspaceInfo || workspaceInfo.repo_label != null) && (
               <button
                 type="button"

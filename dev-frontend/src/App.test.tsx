@@ -121,7 +121,7 @@ describe('App', () => {
     })
   })
 
-  it('disables Implement when the task has no cloned repository', async () => {
+  it('hides Implement when the task has no cloned repository', async () => {
     const noop = () => {}
     const { api } = await import('./api')
     vi.mocked(api.getTaskWorkspace).mockResolvedValue({ repo_label: null })
@@ -132,9 +132,8 @@ describe('App', () => {
       </MemoryRouter>,
     )
 
-    const implementBtn = await screen.findByRole('button', { name: 'Implement' })
     await waitFor(() => {
-      expect((implementBtn as HTMLButtonElement).disabled).toBe(true)
+      expect(screen.queryByRole('button', { name: 'Implement' })).toBeNull()
     })
     const planBtn = screen.getByRole('button', { name: 'Plan' })
     expect((planBtn as HTMLButtonElement).disabled).toBe(false)
