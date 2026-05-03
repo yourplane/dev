@@ -1,7 +1,5 @@
 """FastAPI app: create, list, archive tasks."""
 
-from __future__ import annotations
-
 import asyncio
 import io
 import json
@@ -19,7 +17,7 @@ from pathlib import Path
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse, Response, StreamingResponse
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from dev_sdk.agent_run import (
     AgentRunError,
@@ -37,6 +35,8 @@ from dev_sdk.comms import (
     remove_comms,
 )
 from dev_sdk.drafts import (
+    DRAFTS_DIR,
+    NEW_TASK_DRAFT_FILE,
     get_new_task_draft,
     get_task_bash_draft,
     get_task_comment_draft,
@@ -360,24 +360,15 @@ def _slugify(title: str) -> str:
 
 
 class CreateTaskRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     title: str = Field(..., min_length=1, description="Task title")
     repo: str | None = Field(
         None,
-        description="Repo URL or shorthand from ~/.config/dev/repos.json (required unless no_code_checkout)",
+        description="Repo URL or shorthand from ~/.config/dev/repos.json; omit, null, or blank for no clone",
     )
     comment: str | None = Field(None, description="Optional initial user comment")
     task_name: str | None = Field(None, description="Override task directory name (default: slug of title)")
-    no_code_checkout: bool = Field(
-        False,
-        description="Host/ops task: do not clone a repo or write git-workspace Cursor rule",
-    )
-
-    @model_validator(mode="after")
-    def repo_required_when_cloning(self) -> CreateTaskRequest:
-        if not self.no_code_checkout:
-            if self.repo is None or not str(self.repo).strip():
-                raise ValueError("repo is required unless no_code_checkout is true")
-        return self
 
 
 class CreateTaskResponse(BaseModel):
@@ -482,14 +473,12 @@ class NewTaskDraftResponse(BaseModel):
     title: str | None = None
     repo: str | None = None
     comment: str | None = None
-    no_code_checkout: bool = False
 
 
 class NewTaskDraftRequest(BaseModel):
     title: str | None = None
     repo: str | None = None
     comment: str | None = None
-    no_code_checkout: bool = False
 
 
 class TaskWorkspaceResponse(BaseModel):
@@ -578,25 +567,28 @@ def get_new_task_draft_endpoint() -> NewTaskDraftResponse:
     draft = get_new_task_draft(root)
     if draft is None:
         return NewTaskDraftResponse()
+    repo_val = draft["repo"] if "repo" in draft else None
     return NewTaskDraftResponse(
         title=draft.get("title") or None,
-        repo=draft.get("repo") or None,
+        repo=repo_val,
         comment=draft.get("comment") or None,
-        no_code_checkout=bool(draft.get("no_code_checkout")),
     )
 
 
 @app.put("/drafts/new-task", status_code=204)
 def put_new_task_draft_endpoint(body: NewTaskDraftRequest) -> None:
-    """Save or clear the new-task draft. Empty body clears the draft."""
+    """Save or clear the new-task draft. Empty JSON object ``{}`` clears the draft."""
     root = _tasks_root()
-    set_new_task_draft(
-        root,
-        title=body.title or "",
-        repo=body.repo or "",
-        comment=body.comment or "",
-        no_code_checkout=body.no_code_checkout,
-    )
+    submitted = body.model_dump(exclude_unset=True)
+    if not submitted:
+        path = _tasks_root() / DRAFTS_DIR / NEW_TASK_DRAFT_FILE
+        if path.exists():
+            path.unlink()
+        return
+    title = body.title or ""
+    comment = body.comment or ""
+    repo = body.repo if "repo" in submitted else ""
+    set_new_task_draft(root, title=title, repo=repo, comment=comment)
 
 
 @app.get("/tasks/{task_name}/drafts/comment", response_class=PlainTextResponse)
@@ -646,10 +638,11 @@ def create_task(body: CreateTaskRequest) -> StreamingResponse:
     """Create a task; streams NDJSON lines as work progresses (same messages as CLI `on_progress`)."""
     manager = _get_manager()
     task_name = body.task_name if body.task_name is not None else _slugify(body.title)
+    will_clone = body.repo is not None and bool(str(body.repo).strip())
     repo_url = ""
-    if not body.no_code_checkout:
+    if will_clone:
         try:
-            repo_url = resolve_repo(body.repo or "")
+            repo_url = resolve_repo(str(body.repo).strip())
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
 
@@ -666,9 +659,9 @@ def create_task(body: CreateTaskRequest) -> StreamingResponse:
                     comment=body.comment,
                     repo_url=repo_url,
                     on_progress=lambda msg: q.put(("progress", msg)),
-                    no_code_checkout=body.no_code_checkout,
+                    no_repo=not will_clone,
                 )
-                set_new_task_draft(tasks_root, "", "", "", no_code_checkout=False)
+                set_new_task_draft(tasks_root, "", None, "")
                 task_dir = tasks_root / task_name
                 q.put(("complete", str(task_dir)))
             except FileExistsError:

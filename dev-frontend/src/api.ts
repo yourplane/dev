@@ -36,10 +36,9 @@ async function request<T>(
 
 export interface CreateTaskBody {
   title: string;
+  /** Omit, null, or blank to create the task without cloning a repository. */
   repo?: string | null;
   comment?: string | null;
-  /** When true, skip clone and git-workspace rule (host / maintenance task). */
-  no_code_checkout?: boolean;
 }
 
 export interface TaskWorkspaceInfo {
@@ -198,18 +197,16 @@ export const api = {
 
   getNewTaskDraft(): Promise<{
     title?: string;
-    repo?: string;
+    repo?: string | null;
     comment?: string;
-    no_code_checkout?: boolean;
   }> {
     return request('/drafts/new-task');
   },
 
   setNewTaskDraft(data: {
     title?: string;
-    repo?: string;
+    repo?: string | null;
     comment?: string;
-    no_code_checkout?: boolean;
   }): Promise<void> {
     return request('/drafts/new-task', {
       method: 'PUT',

@@ -416,7 +416,7 @@ function CreateTaskForm({
   const [title, setTitle] = useState('')
   const [repo, setRepo] = useState('')
   const [comment, setComment] = useState('')
-  const [noCodeCheckout, setNoCodeCheckout] = useState(false)
+  const [noRepo, setNoRepo] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [createStatusMessage, setCreateStatusMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -432,7 +432,7 @@ function CreateTaskForm({
     title: string
     repo: string
     comment: string
-    noCodeCheckout: boolean
+    noRepo: boolean
   } | null>(null)
 
   const loadRepos = useCallback(() => {
@@ -455,18 +455,18 @@ function CreateTaskForm({
     api.getNewTaskDraft().then((d) => {
       if (cancelled) return
       const loadedTitle = d.title ?? ''
-      const loadedRepo = d.repo ?? ''
+      const loadedNoRepo = d.repo === null
+      const loadedRepo = typeof d.repo === 'string' ? d.repo : ''
       const loadedComment = d.comment ?? ''
-      const loadedNoCode = Boolean(d.no_code_checkout)
       setTitle(loadedTitle)
       setRepo(loadedRepo)
       setComment(loadedComment)
-      setNoCodeCheckout(loadedNoCode)
+      setNoRepo(loadedNoRepo)
       lastSavedSnapshotRef.current = {
         title: loadedTitle,
         repo: loadedRepo,
         comment: loadedComment,
-        noCodeCheckout: loadedNoCode,
+        noRepo: loadedNoRepo,
       }
       draftLoadedRef.current = true
       setDraftStatus('saved')
@@ -482,25 +482,25 @@ function CreateTaskForm({
       && title === snapshot.title
       && repo === snapshot.repo
       && comment === snapshot.comment
-      && noCodeCheckout === snapshot.noCodeCheckout
+      && noRepo === snapshot.noRepo
     ) {
       setDraftStatus('saved')
       return
     }
     setDraftStatus('unsaved')
     const t = setTimeout(() => {
-      const payload = { title, repo, comment, no_code_checkout: noCodeCheckout }
-      const empty = !title.trim() && !repo.trim() && !comment.trim() && !noCodeCheckout
+      const payload = { title, repo: noRepo ? null : repo, comment }
+      const empty = !title.trim() && !repo.trim() && !comment.trim() && !noRepo
       setDraftStatus('saving')
       api.setNewTaskDraft(empty ? {} : payload).then(() => {
-        lastSavedSnapshotRef.current = { title, repo, comment, noCodeCheckout }
+        lastSavedSnapshotRef.current = { title, repo, comment, noRepo }
         setDraftStatus('saved')
       }).catch(() => {
         setDraftStatus('unsaved')
       })
     }, DRAFT_DEBOUNCE_MS)
     return () => clearTimeout(t)
-  }, [title, repo, comment, noCodeCheckout])
+  }, [title, repo, comment, noRepo])
 
   const handleRemoveRepo = async (name: string) => {
     if (!confirm(`Remove "${name}" from your repo list?`)) return
@@ -549,22 +549,16 @@ function CreateTaskForm({
     e.preventDefault()
     setError(null)
     if (!title.trim()) { setError('Title is required'); return }
-    if (!noCodeCheckout && !repo.trim()) { setError('Select a repo'); return }
+    if (!noRepo && !repo.trim()) { setError('Select a repo'); return }
     setCreateStatusMessage(null)
     setSubmitting(true)
     try {
       const res = await api.createTask(
-        noCodeCheckout
-          ? {
-              title: title.trim(),
-              comment: comment.trim() || undefined,
-              no_code_checkout: true,
-            }
-          : {
-              title: title.trim(),
-              repo: repo.trim(),
-              comment: comment.trim() || undefined,
-            },
+        {
+          title: title.trim(),
+          repo: noRepo ? null : repo.trim(),
+          comment: comment.trim() || undefined,
+        },
         (msg) => setCreateStatusMessage(msg),
       )
       onCreated(res.task_name)
@@ -599,18 +593,18 @@ function CreateTaskForm({
         <label className="create-form-checkbox-row">
           <input
             type="checkbox"
-            checked={noCodeCheckout}
+            checked={noRepo}
             onChange={(e) => {
-              setNoCodeCheckout(e.target.checked)
+              setNoRepo(e.target.checked)
               if (e.target.checked) setRepo('')
             }}
           />
-          <span>Host / ops task (no repository clone)</span>
+          <span>No repository (same as CLI <code>--no-repo</code>)</span>
         </label>
         <label>
-          <span>Repo {!noCodeCheckout && <span className="required">*</span>}</span>
-          {noCodeCheckout && (
-            <span className="hint"> Not used for host-ops tasks.</span>
+          <span>Repo {!noRepo && <span className="required">*</span>}</span>
+          {noRepo && (
+            <span className="hint"> Not used when creating a task without a repository.</span>
           )}
           {reposLoading ? (
             <span className="hint">Loading shorthands…</span>
@@ -2147,7 +2141,7 @@ export function TaskCommsPageContent({
                   Repository: <code>{workspaceInfo.repo_label ?? '—'}</code>
                 </>
               ) : (
-                'No repository (host-ops style task).'
+                'No repository cloned for this task.'
               )}
             </p>
           )}

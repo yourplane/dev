@@ -101,7 +101,7 @@ def test_start_task(
 
 
 @patch("dev_sdk.task_manager.subprocess.run")
-def test_start_task_no_code_checkout_skips_clone_and_git_workspace_rule(
+def test_start_task_no_repo_skips_clone_and_git_workspace_rule(
     mock_run: MagicMock,
     manager: TaskManager,
     tmp_tasks_root: Path,
@@ -118,7 +118,7 @@ def test_start_task_no_code_checkout_skips_clone_and_git_workspace_rule(
         task_name="ops-task",
         comment=None,
         repo_url="",
-        no_code_checkout=True,
+        no_repo=True,
     )
 
     task_dir = tmp_tasks_root / "ops-task"

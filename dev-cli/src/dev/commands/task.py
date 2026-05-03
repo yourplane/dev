@@ -166,12 +166,13 @@ def _repo_name_from_url(repo_url: str) -> str:
     default=None,
     type=str,
     help="Git repository URL or shorthand (e.g. desk) from config (~/.config/dev/repos.json). "
-    "Not used with --host-ops.",
+    "Do not pass with --no-repo.",
 )
 @click.option(
-    "--host-ops",
+    "--no-repo",
+    "no_repo",
     is_flag=True,
-    help="Host / maintenance task: no repository clone and no git-workspace Cursor rule.",
+    help="Create the task without cloning a repository (no git-workspace Cursor rule).",
 )
 @click.option(
     "--comment",
@@ -192,18 +193,18 @@ def start_task(
     title: str,
     repo_url: str | None,
     comment: str | None,
-    host_ops: bool,
+    no_repo: bool,
     tasks_dir: Path,
 ) -> None:
     """Create a new task: create directory, comms dir, agent chat, and clone repo."""
-    if host_ops and repo_url:
-        click.echo("Do not pass --repo with --host-ops.", err=True)
+    if no_repo and repo_url:
+        click.echo("Do not pass --repo with --no-repo.", err=True)
         raise SystemExit(2)
-    if not host_ops and not repo_url:
-        click.echo("Either --repo or --host-ops is required.", err=True)
+    if not no_repo and not repo_url:
+        click.echo("Either --repo or --no-repo is required.", err=True)
         raise SystemExit(2)
     resolved_url = ""
-    if not host_ops:
+    if not no_repo:
         try:
             resolved_url = resolve_repo(repo_url or "")
         except ValueError as e:
@@ -218,14 +219,14 @@ def start_task(
             comment=comment,
             repo_url=resolved_url,
             on_progress=click.echo,
-            no_code_checkout=host_ops,
+            no_repo=no_repo,
         )
         task_dir = tasks_dir / name
         click.echo(f"Task created: {task_dir}")
         click.echo(f"  Comms: {comms_dir(task_dir)}")
         click.echo(f"  Chat ID file: {task_dir / AGENT_CHAT_ID_FILE}")
-        if host_ops:
-            click.echo("  No repository cloned (host-ops task).")
+        if no_repo:
+            click.echo("  No repository cloned (--no-repo).")
         else:
             repo_dir = _repo_name_from_url(resolved_url)
             click.echo(f"  Repo cloned into: {task_dir / repo_dir}")

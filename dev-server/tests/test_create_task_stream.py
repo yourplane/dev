@@ -43,11 +43,11 @@ def test_create_task_streams_progress_then_complete(client):
     assert "task_dir" in lines[2]
 
 
-def test_create_task_no_code_checkout_passes_flag_and_repo_optional(client):
+def test_create_task_without_repo_passes_no_repo_and_empty_repo_url(client):
     manager = MagicMock()
 
     def start_task(**kwargs):
-        assert kwargs.get("no_code_checkout") is True
+        assert kwargs.get("no_repo") is True
         assert kwargs.get("repo_url") == ""
         on = kwargs.get("on_progress")
         if on:
@@ -58,7 +58,7 @@ def test_create_task_no_code_checkout_passes_flag_and_repo_optional(client):
     with patch("dev_server.main._get_manager", return_value=manager):
         resp = client.post(
             "/tasks",
-            json={"title": "Host ops", "no_code_checkout": True},
+            json={"title": "Host ops", "repo": None},
         )
 
     assert resp.status_code == 200
@@ -67,9 +67,22 @@ def test_create_task_no_code_checkout_passes_flag_and_repo_optional(client):
     manager.start_task.assert_called_once()
 
 
-def test_create_task_requires_repo_when_not_no_code(client):
-    resp = client.post("/tasks", json={"title": "Only title"})
-    assert resp.status_code == 422
+def test_create_task_omitted_repo_behaves_like_no_repo(client):
+    """Omitting repo creates a task without a clone (same as explicit null)."""
+    manager = MagicMock()
+
+    def start_task(**kwargs):
+        assert kwargs.get("no_repo") is True
+        assert kwargs.get("repo_url") == ""
+
+    manager.start_task.side_effect = start_task
+
+    with patch("dev_server.main._get_manager", return_value=manager):
+        resp = client.post("/tasks", json={"title": "Only title"})
+
+    assert resp.status_code == 200
+    lines = [json.loads(line) for line in resp.text.strip().split("\n") if line.strip()]
+    assert lines[-1]["type"] == "complete"
 
 
 def test_get_task_workspace_no_repo(client, tmp_path, monkeypatch):

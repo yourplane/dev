@@ -53,18 +53,18 @@ class TaskManager:
         repo_url: str,
         on_progress: ProgressCallback | None = None,
         *,
-        no_code_checkout: bool = False,
+        no_repo: bool = False,
     ) -> None:
         """Create task dir, comms dir (and optional first user comment), agent chat, and clone repo.
 
-        When ``no_code_checkout`` is True, skip cloning, feature branch checkout, and the
-        ``git-workspace.mdc`` rule (host / maintenance tasks with no nested repository).
+        When ``no_repo`` is True, skip cloning, feature branch checkout, and the
+        ``git-workspace.mdc`` rule (task workspace with no nested repository).
         """
         logger.debug(
-            "start_task: task_name=%s repo_url=%s no_code_checkout=%s task_dir=%s",
+            "start_task: task_name=%s repo_url=%s no_repo=%s task_dir=%s",
             task_name,
             repo_url,
-            no_code_checkout,
+            no_repo,
             self.tasks_root / task_name,
         )
         task_dir = self.tasks_root / task_name
@@ -86,10 +86,10 @@ class TaskManager:
         if on_progress:
             on_progress("Agent chat created.")
         self._write_chat_id_file(task_dir, chat_id)
-        if no_code_checkout:
+        if no_repo:
             if on_progress:
                 on_progress("Task ready (no repository cloned).")
-            logger.debug("start_task: completed task_name=%s (no code checkout)", task_name)
+            logger.debug("start_task: completed task_name=%s (no_repo)", task_name)
             return
         self._write_cursor_rules(task_dir)
         if on_progress:
@@ -421,7 +421,7 @@ class TaskManager:
         # New agent chat for the new task
         chat_id = self._create_agent_chat()
         self._write_chat_id_file(dest, chat_id)
-        # git-workspace rule only when a nested clone exists (not for host-ops archives)
+        # git-workspace rule only when a nested clone exists (not for no-repo task archives)
         if self._direct_child_git_clone_dirs(dest) and not (dest / ".cursor" / "rules" / "git-workspace.mdc").exists():
             self._write_cursor_rules(dest)
         if not (dest / ".cursor" / "rules" / "task-comms.mdc").exists():

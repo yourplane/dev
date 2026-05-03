@@ -31,7 +31,7 @@ def test_create_help() -> None:
     assert result.exit_code == 0
     assert "TITLE" in result.output
     assert "--repo" in result.output
-    assert "--host-ops" in result.output
+    assert "--no-repo" in result.output
     assert "--comment" in result.output
 
 
@@ -366,7 +366,7 @@ def test_create_prints_progress_messages(
     assert "Task created:" in output
 
 
-def test_create_host_ops_skips_clone_and_git_workspace_rule(
+def test_create_no_repo_skips_clone_and_git_workspace_rule(
     runner: CliRunner, tmp_path: Path
 ) -> None:
     tasks_dir = tmp_path / "tasks"
@@ -378,7 +378,7 @@ def test_create_host_ops_skips_clone_and_git_workspace_rule(
             [
                 "create",
                 "Ops task",
-                "--host-ops",
+                "--no-repo",
                 "--tasks-dir",
                 str(tasks_dir),
             ],
@@ -393,15 +393,15 @@ def test_create_host_ops_skips_clone_and_git_workspace_rule(
     assert "No repository cloned" in result.output
 
 
-def test_create_requires_repo_without_host_ops(runner: CliRunner, tmp_path: Path) -> None:
+def test_create_requires_repo_without_no_repo_flag(runner: CliRunner, tmp_path: Path) -> None:
     tasks_dir = tmp_path / "tasks"
     tasks_dir.mkdir()
     result = runner.invoke(main, ["create", "T", "--tasks-dir", str(tasks_dir)])
     assert result.exit_code == 2
-    assert "Either --repo or --host-ops" in result.output
+    assert "Either --repo or --no-repo" in result.output
 
 
-def test_create_rejects_repo_with_host_ops(runner: CliRunner, tmp_path: Path) -> None:
+def test_create_rejects_repo_with_no_repo(runner: CliRunner, tmp_path: Path) -> None:
     tasks_dir = tmp_path / "tasks"
     tasks_dir.mkdir()
     result = runner.invoke(
@@ -409,7 +409,7 @@ def test_create_rejects_repo_with_host_ops(runner: CliRunner, tmp_path: Path) ->
         [
             "create",
             "T",
-            "--host-ops",
+            "--no-repo",
             "--repo",
             "https://github.com/a/b.git",
             "--tasks-dir",
