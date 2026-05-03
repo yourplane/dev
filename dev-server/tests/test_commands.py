@@ -16,10 +16,13 @@ from dev_server.main import _popen_bash_for_streaming, app
 
 @pytest.fixture
 def task_dir(tmp_path: Path) -> Path:
-    """Create a minimal task dir with agent-chat-id so run_plan_implement/run_implement can be called."""
+    """Create a minimal task dir with agent-chat-id and one nested clone so Implement is allowed."""
     t = tmp_path / "mytask"
     t.mkdir()
     (t / "agent-chat-id").write_text("fake-chat-id")
+    repo = t / "myrepo"
+    repo.mkdir()
+    (repo / ".git").mkdir()
     return t
 
 
@@ -117,6 +120,21 @@ def test_status_includes_last_command_error_when_run_fails(
     assert resp2.status_code == 200
     assert resp2.json()["active"] is False
     assert resp2.json()["command_error"] == "agent boom"
+
+
+def test_start_implement_without_nested_repo_returns_400(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Implement is rejected when the task has no cloned repository under the task root."""
+    root = tmp_path / "tasks-root"
+    root.mkdir()
+    t = root / "ops-only"
+    t.mkdir()
+    (t / "agent-chat-id").write_text("fake-chat-id")
+    monkeypatch.setenv("DEV_TASKS_DIR", str(root))
+    with TestClient(app) as client:
+        resp = client.post("/tasks/ops-only/commands", json={"command": "implement"})
+    assert resp.status_code == 400
+    detail = str(resp.json().get("detail", "")).lower()
+    assert "no cloned repository" in detail
 
 
 def test_start_unsupported_command_returns_400(client_with_tasks: TestClient) -> None:
@@ -277,6 +295,22 @@ def test_get_pr_returns_null_when_not_found(client_with_tasks: TestClient, task_
         resp = client_with_tasks.get("/tasks/mytask/pr")
     assert resp.status_code == 200
     assert resp.json()["pr_url"] is None
+
+
+def test_get_pr_no_nested_repo_returns_null_without_lookup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No-clone tasks: GET pr is 200 with null URL and must not call find_existing_pull_request."""
+    root = tmp_path / "tasks-root"
+    root.mkdir()
+    t = root / "ops-only"
+    t.mkdir()
+    monkeypatch.setenv("DEV_TASKS_DIR", str(root))
+    with TestClient(app) as client, patch("dev_server.main.find_existing_pull_request") as mock_find:
+        resp = client.get("/tasks/ops-only/pr")
+    assert resp.status_code == 200
+    assert resp.json() == {"pr_url": None}
+    mock_find.assert_not_called()
 
 
 def test_get_pr_returns_422_on_error(client_with_tasks: TestClient, task_dir: Path) -> None:

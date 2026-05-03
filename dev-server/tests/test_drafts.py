@@ -60,6 +60,14 @@ def test_new_task_draft_put_and_get(client: TestClient, tasks_root: Path) -> Non
     assert draft_file.is_file()
 
 
+def test_new_task_draft_put_repo_null_roundtrip(client: TestClient, tasks_root: Path) -> None:
+    """PUT can persist explicit null repo (no-repository draft) without other fields."""
+    resp = client.put("/drafts/new-task", json={"repo": None})
+    assert resp.status_code == 204
+    resp2 = client.get("/drafts/new-task")
+    assert resp2.json().get("repo") is None
+
+
 def test_new_task_draft_put_empty_clears(client: TestClient, tasks_root: Path) -> None:
     """PUT with empty body clears the draft."""
     client.put("/drafts/new-task", json={"title": "X", "repo": "r", "comment": "c"})

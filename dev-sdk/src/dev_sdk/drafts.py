@@ -34,10 +34,15 @@ def get_new_task_draft(tasks_root: Path) -> dict | None:
         data = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(data, dict):
             return None
-        out = {}
-        for key in ("title", "repo", "comment"):
-            if key in data and isinstance(data[key], str):
-                out[key] = data[key]
+        out: dict[str, str | None] = {}
+        for key in ("title", "comment"):
+            v = data.get(key)
+            if isinstance(v, str):
+                out[key] = v
+        if "repo" in data:
+            r = data["repo"]
+            if r is None or isinstance(r, str):
+                out["repo"] = r
         return out if out else None
     except (json.JSONDecodeError, OSError):
         return None
@@ -46,21 +51,24 @@ def get_new_task_draft(tasks_root: Path) -> dict | None:
 def set_new_task_draft(
     tasks_root: Path,
     title: str = "",
-    repo: str = "",
+    repo: str | None = None,
     comment: str = "",
 ) -> None:
-    """Write new-task draft. Empty strings clear the draft (file is removed if all empty)."""
+    """Write ``tasks_root/.drafts/new-task.json`` (``repo`` may be JSON null)."""
     d = _drafts_dir(tasks_root)
-    path = d / NEW_TASK_DRAFT_FILE
-    if not title.strip() and not repo.strip() and not comment.strip():
-        if path.exists():
-            path.unlink()
-        return
     d.mkdir(parents=True, exist_ok=True)
+    path = d / NEW_TASK_DRAFT_FILE
     path.write_text(
         json.dumps({"title": title, "repo": repo, "comment": comment}, indent=2),
         encoding="utf-8",
     )
+
+
+def delete_new_task_draft(tasks_root: Path) -> None:
+    """Remove the new-task draft file if it exists."""
+    path = _drafts_dir(tasks_root) / NEW_TASK_DRAFT_FILE
+    if path.is_file():
+        path.unlink()
 
 
 def get_task_comment_draft(tasks_root: Path, task_name: str) -> str:

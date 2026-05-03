@@ -35,6 +35,7 @@ from dev_sdk.comms import (
     remove_comms,
 )
 from dev_sdk.drafts import (
+    delete_new_task_draft,
     get_new_task_draft,
     get_task_bash_draft,
     get_task_comment_draft,
@@ -359,7 +360,10 @@ def _slugify(title: str) -> str:
 
 class CreateTaskRequest(BaseModel):
     title: str = Field(..., min_length=1, description="Task title")
-    repo: str = Field(..., min_length=1, description="Repo URL or shorthand from ~/.config/dev/repos.json")
+    repo: str | None = Field(
+        None,
+        description="Repo URL or shorthand from ~/.config/dev/repos.json; omit, null, or blank for no clone",
+    )
     comment: str | None = Field(None, description="Optional initial user comment")
     task_name: str | None = Field(None, description="Override task directory name (default: slug of title)")
 
@@ -474,6 +478,10 @@ class NewTaskDraftRequest(BaseModel):
     comment: str | None = None
 
 
+class TaskWorkspaceResponse(BaseModel):
+    repo_label: str | None = None
+
+
 class TaskCommentDraftRequest(BaseModel):
     content: str = ""
 
@@ -555,23 +563,26 @@ def get_new_task_draft_endpoint() -> NewTaskDraftResponse:
     draft = get_new_task_draft(root)
     if draft is None:
         return NewTaskDraftResponse()
+    repo_val = draft["repo"] if "repo" in draft else None
     return NewTaskDraftResponse(
         title=draft.get("title") or None,
-        repo=draft.get("repo") or None,
+        repo=repo_val,
         comment=draft.get("comment") or None,
     )
 
 
 @app.put("/drafts/new-task", status_code=204)
 def put_new_task_draft_endpoint(body: NewTaskDraftRequest) -> None:
-    """Save or clear the new-task draft. Empty body clears the draft."""
+    """Save or clear the new-task draft. Empty JSON object ``{}`` clears the draft."""
     root = _tasks_root()
-    set_new_task_draft(
-        root,
-        title=body.title or "",
-        repo=body.repo or "",
-        comment=body.comment or "",
-    )
+    submitted = body.model_dump(exclude_unset=True)
+    if not submitted:
+        delete_new_task_draft(root)
+        return
+    title = body.title or ""
+    comment = body.comment or ""
+    repo = body.repo if "repo" in submitted else ""
+    set_new_task_draft(root, title=title, repo=repo, comment=comment)
 
 
 @app.get("/tasks/{task_name}/drafts/comment", response_class=PlainTextResponse)
@@ -608,15 +619,26 @@ def list_tasks() -> ListTasksResponse:
     return ListTasksResponse(tasks=manager.list_tasks())
 
 
+@app.get("/tasks/{task_name}/workspace", response_model=TaskWorkspaceResponse)
+def get_task_workspace(task_name: str) -> TaskWorkspaceResponse:
+    """Return a label for the nested clone (e.g. origin URL), or null if there is none."""
+    task_dir = _task_dir(task_name)
+    label = TaskManager.describe_clone_layout(task_dir)
+    return TaskWorkspaceResponse(repo_label=label)
+
+
 @app.post("/tasks")
 def create_task(body: CreateTaskRequest) -> StreamingResponse:
     """Create a task; streams NDJSON lines as work progresses (same messages as CLI `on_progress`)."""
     manager = _get_manager()
     task_name = body.task_name if body.task_name is not None else _slugify(body.title)
-    try:
-        repo_url = resolve_repo(body.repo)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    will_clone = body.repo is not None and bool(str(body.repo).strip())
+    repo_url: str | None = None
+    if will_clone:
+        try:
+            repo_url = resolve_repo(str(body.repo).strip())
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
 
     tasks_root = _tasks_root()
 
@@ -632,7 +654,7 @@ def create_task(body: CreateTaskRequest) -> StreamingResponse:
                     repo_url=repo_url,
                     on_progress=lambda msg: q.put(("progress", msg)),
                 )
-                set_new_task_draft(tasks_root, "", "", "")
+                delete_new_task_draft(tasks_root)
                 task_dir = tasks_root / task_name
                 q.put(("complete", str(task_dir)))
             except FileExistsError:
@@ -926,6 +948,11 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
                 detail="prompt is required for bash command (shell command text)",
             )
     task_dir = _task_dir(task_name)
+    if body.command == "implement" and TaskManager.describe_clone_layout(task_dir) is None:
+        raise HTTPException(
+            status_code=400,
+            detail="This task has no cloned repository under the task root; the Implement command is not available.",
+        )
     if body.command == "do":
         set_task_comment_draft(_tasks_root(), task_name, "")
     if "DEV_TASKS_DIR" not in os.environ:
@@ -1012,6 +1039,8 @@ def create_task_pr(task_name: str) -> CreatePRResponse:
 def get_task_pr(task_name: str) -> GetTaskPrResponse:
     """Return the existing pull request URL for the task, if any."""
     task_dir = _task_dir(task_name)
+    if TaskManager.describe_clone_layout(task_dir) is None:
+        return GetTaskPrResponse(pr_url=None)
     try:
         pr_url = find_existing_pull_request(task_dir)
     except CreatePRError as e:

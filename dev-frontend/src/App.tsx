@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api, apiBaseUrl } from './api'
+import { api, apiBaseUrl, type TaskWorkspaceInfo } from './api'
 import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import './App.css'
@@ -404,6 +404,9 @@ function ArchivePage() {
 
 const DRAFT_DEBOUNCE_MS = 400
 
+/** Sentinel radio value for “no repository” (draft/API use JSON null). */
+const CREATE_TASK_NO_REPO = '__no_repo__'
+
 function CreateTaskForm({
   onCreated,
   onCancel,
@@ -427,7 +430,11 @@ function CreateTaskForm({
   const [removing, setRemoving] = useState<string | null>(null)
   const [draftStatus, setDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
   const draftLoadedRef = useRef(false)
-  const lastSavedSnapshotRef = useRef<{ title: string; repo: string; comment: string } | null>(null)
+  const lastSavedSnapshotRef = useRef<{
+    title: string
+    repo: string
+    comment: string
+  } | null>(null)
 
   const loadRepos = useCallback(() => {
     return api.getRepos().then(setRepos)
@@ -449,12 +456,16 @@ function CreateTaskForm({
     api.getNewTaskDraft().then((d) => {
       if (cancelled) return
       const loadedTitle = d.title ?? ''
-      const loadedRepo = d.repo ?? ''
+      const loadedRepo = d.repo === null ? CREATE_TASK_NO_REPO : (typeof d.repo === 'string' ? d.repo : '')
       const loadedComment = d.comment ?? ''
       setTitle(loadedTitle)
       setRepo(loadedRepo)
       setComment(loadedComment)
-      lastSavedSnapshotRef.current = { title: loadedTitle, repo: loadedRepo, comment: loadedComment }
+      lastSavedSnapshotRef.current = {
+        title: loadedTitle,
+        repo: loadedRepo,
+        comment: loadedComment,
+      }
       draftLoadedRef.current = true
       setDraftStatus('saved')
     }).catch(() => { /* ignore */ })
@@ -464,14 +475,19 @@ function CreateTaskForm({
   useEffect(() => {
     if (!draftLoadedRef.current) return
     const snapshot = lastSavedSnapshotRef.current
-    if (snapshot && title === snapshot.title && repo === snapshot.repo && comment === snapshot.comment) {
+    if (
+      snapshot
+      && title === snapshot.title
+      && repo === snapshot.repo
+      && comment === snapshot.comment
+    ) {
       setDraftStatus('saved')
       return
     }
     setDraftStatus('unsaved')
     const t = setTimeout(() => {
-      const payload = { title, repo, comment }
-      const empty = !title.trim() && !repo.trim() && !comment.trim()
+      const payload = { title, repo: repo === CREATE_TASK_NO_REPO ? null : repo, comment }
+      const empty = !title.trim() && !comment.trim() && repo !== CREATE_TASK_NO_REPO && !repo.trim()
       setDraftStatus('saving')
       api.setNewTaskDraft(empty ? {} : payload).then(() => {
         lastSavedSnapshotRef.current = { title, repo, comment }
@@ -530,14 +546,14 @@ function CreateTaskForm({
     e.preventDefault()
     setError(null)
     if (!title.trim()) { setError('Title is required'); return }
-    if (!repo.trim()) { setError('Select a repo'); return }
+    if (repo !== CREATE_TASK_NO_REPO && !repo.trim()) { setError('Select a repo'); return }
     setCreateStatusMessage(null)
     setSubmitting(true)
     try {
       const res = await api.createTask(
         {
           title: title.trim(),
-          repo: repo.trim(),
+          repo: repo === CREATE_TASK_NO_REPO ? null : repo.trim(),
           comment: comment.trim() || undefined,
         },
         (msg) => setCreateStatusMessage(msg),
@@ -575,16 +591,21 @@ function CreateTaskForm({
           <span>Repo <span className="required">*</span></span>
           {reposLoading ? (
             <span className="hint">Loading shorthands…</span>
-          ) : Object.keys(repos).length === 0 ? (
-            <div className="repo-empty">
-              <p className="hint">No repos yet. Click Add to add one.</p>
-              <button type="button" className="repo-add-open-btn" onClick={openAddModal}>
-                Add repo
-              </button>
-            </div>
           ) : (
             <>
-            <div className="repo-radio-group" role="radiogroup" aria-label="Repo">
+            <div className="repo-radio-group" role="radiogroup" aria-label="Repository">
+              <div className="repo-radio-option repo-radio-row">
+                <label className="repo-radio-label">
+                  <input
+                    type="radio"
+                    name="repo"
+                    value={CREATE_TASK_NO_REPO}
+                    checked={repo === CREATE_TASK_NO_REPO}
+                    onChange={() => setRepo(CREATE_TASK_NO_REPO)}
+                  />
+                  <span>No repository (CLI: <code>--no-repo</code>)</span>
+                </label>
+              </div>
               {Object.entries(repos).map(([name, url]) => (
                 <div key={name} className="repo-radio-option repo-radio-row">
                   <label className="repo-radio-label">
@@ -610,6 +631,9 @@ function CreateTaskForm({
                 </div>
               ))}
             </div>
+            {Object.keys(repos).length === 0 && (
+              <p className="hint">No saved shorthands yet. Add one below, or choose “No repository”.</p>
+            )}
             <button type="button" className="repo-add-open-btn" onClick={openAddModal}>
               Add repo
             </button>
@@ -1368,6 +1392,7 @@ export function TaskCommsPageContent({
   const [bashHistoryBrowseIdx, setBashHistoryBrowseIdx] = useState<number | null>(null)
   const [bashHistoryPicker, setBashHistoryPicker] = useState('')
   const [activeBashCommsFilename, setActiveBashCommsFilename] = useState<string | null>(null)
+  const [workspaceInfo, setWorkspaceInfo] = useState<TaskWorkspaceInfo | null>(null)
 
   const bashHistory = useMemo(() => {
     const cmds: string[] = []
@@ -1430,6 +1455,30 @@ export function TaskCommsPageContent({
     },
     [activeLogFilename],
   )
+
+  useEffect(() => {
+    let cancelled = false
+    setWorkspaceInfo(null)
+    api
+      .getTaskWorkspace(taskName)
+      .then((ws) => {
+        if (!cancelled) setWorkspaceInfo(ws)
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setWorkspaceInfo({ repo_label: '—' })
+        }
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [taskName])
+
+  useEffect(() => {
+    if (workspaceInfo?.repo_label === null) {
+      setCommandError(null)
+    }
+  }, [workspaceInfo?.repo_label])
 
   const handleArchive = async () => {
     if (!confirm(`Archive task "${taskName}"?`)) return
@@ -2080,7 +2129,20 @@ export function TaskCommsPageContent({
   return (
     <section className="task-comms">
       <div className="task-comms-header">
-        <h2>{taskName}</h2>
+        <div className="task-comms-header-title">
+          <h2>{taskName}</h2>
+          {workspaceInfo && (
+            <p className="task-repo-meta">
+              {workspaceInfo.repo_label != null ? (
+                <>
+                  Repository: <code>{workspaceInfo.repo_label}</code>
+                </>
+              ) : (
+                'No repository cloned for this task.'
+              )}
+            </p>
+          )}
+        </div>
         <div className="task-comms-header-actions">
           <button
             type="button"
@@ -2171,25 +2233,29 @@ export function TaskCommsPageContent({
             >
               {startingCommand === 'plan-implement' ? 'Starting…' : 'Plan'}
             </button>
-            <button
-              type="button"
-              className="command-btn"
-              disabled={!!startingCommand}
-              onClick={() => handleStartCommand('implement')}
-            >
-              {startingCommand === 'implement' ? 'Starting…' : 'Implement'}
-            </button>
-            <button
-              type="button"
-              className="command-btn"
-              disabled={!!startingCommand || creatingPr || pullingPrComments}
-              onClick={prUrl ? handlePullPrComments : handleCreatePr}
-              aria-busy={creatingPr || pullingPrComments}
-            >
-              {prUrl
-                ? (pullingPrComments ? 'Pulling comments…' : 'Pull Comments')
-                : (creatingPr ? 'Creating PR…' : 'Create PR')}
-            </button>
+            {workspaceInfo && workspaceInfo.repo_label != null && (
+              <button
+                type="button"
+                className="command-btn"
+                disabled={!!startingCommand}
+                onClick={() => handleStartCommand('implement')}
+              >
+                {startingCommand === 'implement' ? 'Starting…' : 'Implement'}
+              </button>
+            )}
+            {(!workspaceInfo || workspaceInfo.repo_label != null) && (
+              <button
+                type="button"
+                className="command-btn"
+                disabled={!!startingCommand || creatingPr || pullingPrComments}
+                onClick={prUrl ? handlePullPrComments : handleCreatePr}
+                aria-busy={creatingPr || pullingPrComments}
+              >
+                {prUrl
+                  ? (pullingPrComments ? 'Pulling comments…' : 'Pull Comments')
+                  : (creatingPr ? 'Creating PR…' : 'Create PR')}
+              </button>
+            )}
           </div>
         )}
         {commandError && <p className="inline-error">{commandError}</p>}

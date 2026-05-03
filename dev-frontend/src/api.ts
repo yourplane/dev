@@ -36,8 +36,12 @@ async function request<T>(
 
 export interface CreateTaskBody {
   title: string;
-  repo: string;
+  repo?: string | null;
   comment?: string | null;
+}
+
+export interface TaskWorkspaceInfo {
+  repo_label: string | null;
 }
 
 export interface CreateTaskResponse {
@@ -75,6 +79,10 @@ export interface CopyFromArchiveResponse {
 export const api = {
   getTasks(): Promise<{ tasks: string[] }> {
     return request('/tasks');
+  },
+
+  getTaskWorkspace(taskName: string): Promise<TaskWorkspaceInfo> {
+    return request(`/tasks/${encodeURIComponent(taskName)}/workspace`);
   },
 
   getRepos(): Promise<Record<string, string>> {
@@ -185,11 +193,19 @@ export const api = {
     return result;
   },
 
-  getNewTaskDraft(): Promise<{ title?: string; repo?: string; comment?: string }> {
+  getNewTaskDraft(): Promise<{
+    title?: string;
+    repo?: string | null;
+    comment?: string;
+  }> {
     return request('/drafts/new-task');
   },
 
-  setNewTaskDraft(data: { title?: string; repo?: string; comment?: string }): Promise<void> {
+  setNewTaskDraft(data: {
+    title?: string;
+    repo?: string | null;
+    comment?: string;
+  }): Promise<void> {
     return request('/drafts/new-task', {
       method: 'PUT',
       body: JSON.stringify(data),

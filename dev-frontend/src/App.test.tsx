@@ -17,6 +17,7 @@ vi.mock('./api', () => ({
     copyFromArchive: vi.fn(),
     getTaskCommsList: vi.fn(),
     getTaskFeed: vi.fn(),
+    getTaskWorkspace: vi.fn(),
     getTaskCommentDraft: vi.fn(),
     setTaskCommentDraft: vi.fn(),
     getTaskBashDraft: vi.fn(),
@@ -48,6 +49,9 @@ describe('App', () => {
     vi.mocked(api.copyFromArchive).mockResolvedValue({ task_name: 'copied-task', task_dir: '/tmp/copied-task' })
     vi.mocked(api.getTaskCommsList).mockResolvedValue({ files: [] })
     vi.mocked(api.getTaskFeed).mockResolvedValue({ entries: [] })
+    vi.mocked(api.getTaskWorkspace).mockResolvedValue({
+      repo_label: 'https://github.com/acme/repo.git',
+    })
     vi.mocked(api.getTaskPr).mockResolvedValue({ pr_url: null })
     vi.mocked(api.getTaskCommentDraft).mockResolvedValue('')
     vi.mocked(api.setTaskCommentDraft).mockResolvedValue(undefined)
@@ -115,6 +119,24 @@ describe('App', () => {
     await waitFor(() => {
       expect(vi.mocked(api.setTaskCommentDraft)).toHaveBeenCalledWith('test-task', '')
     })
+  })
+
+  it('hides Implement when the task has no cloned repository', async () => {
+    const noop = () => {}
+    const { api } = await import('./api')
+    vi.mocked(api.getTaskWorkspace).mockResolvedValue({ repo_label: null })
+
+    render(
+      <MemoryRouter>
+        <TaskCommsPageContent taskName="test-task" navigate={noop} />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Implement' })).toBeNull()
+    })
+    const planBtn = screen.getByRole('button', { name: 'Plan' })
+    expect((planBtn as HTMLButtonElement).disabled).toBe(false)
   })
 
   it('bash mode submits shell input and clears bash draft', async () => {

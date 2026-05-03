@@ -101,6 +101,56 @@ def test_start_task(
 
 
 @patch("dev_sdk.task_manager.subprocess.run")
+def test_start_task_no_repo_skips_clone_and_git_workspace_rule(
+    mock_run: MagicMock,
+    manager: TaskManager,
+    tmp_tasks_root: Path,
+) -> None:
+    def run_side_effect(cmd, **kwargs):
+        if cmd[0] == "cursor" and "create-chat" in cmd:
+            return MagicMock(stdout="ops-chat\n", stderr="", returncode=0)
+        raise AssertionError(f"unexpected subprocess: {cmd}")
+
+    mock_run.side_effect = run_side_effect
+
+    manager.start_task(
+        title="Ops",
+        task_name="ops-task",
+        comment=None,
+        repo_url=None,
+    )
+
+    task_dir = tmp_tasks_root / "ops-task"
+    assert (task_dir / ".cursor" / "rules" / "task-comms.mdc").exists()
+    assert not (task_dir / ".cursor" / "rules" / "git-workspace.mdc").exists()
+    git_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "git"]
+    assert git_calls == []
+
+
+def test_describe_clone_layout_empty(manager: TaskManager, tmp_tasks_root: Path) -> None:
+    task_dir = tmp_tasks_root / "t"
+    task_dir.mkdir(parents=True)
+    label = manager.describe_clone_layout(task_dir)
+    assert label is None
+
+
+def test_describe_clone_layout_shows_origin(manager: TaskManager, tmp_tasks_root: Path) -> None:
+    task_dir = tmp_tasks_root / "t"
+    task_dir.mkdir(parents=True)
+    repo = task_dir / "myrepo"
+    repo.mkdir()
+    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "remote", "add", "origin", "https://github.com/example/sample.git"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    label = manager.describe_clone_layout(task_dir)
+    assert label and "example/sample" in label
+
+
+@patch("dev_sdk.task_manager.subprocess.run")
 def test_start_task_calls_on_progress(
     mock_run: MagicMock,
     manager: TaskManager,
@@ -387,3 +437,53 @@ def test_copy_task_from_archive_task_name_override(
 
     assert dest == tmp_tasks_root / "new-name"
     assert dest.is_dir()
+
+
+@patch("dev_sdk.task_manager.subprocess.run")
+def test_copy_task_from_archive_ops_does_not_add_git_workspace_rule(
+    mock_run: MagicMock,
+    manager: TaskManager,
+    tmp_tasks_root: Path,
+) -> None:
+    """Archive with comms + rules but no cloned repo must not get git-workspace.mdc backfilled."""
+    tmp_tasks_root.mkdir(parents=True)
+    archive_root = tmp_tasks_root / ".archive"
+    archive_root.mkdir()
+    archived = archive_root / "ops-mar-14-a1b2c3"
+    archived.mkdir()
+    (archived / "comms").mkdir()
+    (archived / "comms" / "index.txt").write_text("")
+    (archived / ".cursor" / "rules").mkdir(parents=True)
+    (archived / ".cursor" / "rules" / "task-comms.mdc").write_text("comms rule")
+    mock_run.return_value = MagicMock(stdout="new-chat\n", stderr="", returncode=0)
+
+    dest = manager.copy_task_from_archive("ops-mar-14-a1b2c3")
+
+    assert (dest / ".cursor" / "rules" / "task-comms.mdc").exists()
+    assert not (dest / ".cursor" / "rules" / "git-workspace.mdc").exists()
+
+
+@patch("dev_sdk.task_manager.subprocess.run")
+def test_copy_task_from_archive_backfills_git_workspace_when_repo_copied(
+    mock_run: MagicMock,
+    manager: TaskManager,
+    tmp_tasks_root: Path,
+) -> None:
+    """When archive has a repo but no rules dir, copy still adds git-workspace after clone copy."""
+    tmp_tasks_root.mkdir(parents=True)
+    archive_root = tmp_tasks_root / ".archive"
+    archive_root.mkdir()
+    archived = archive_root / "with-repo-mar-14-a1b2c3"
+    archived.mkdir()
+    (archived / "comms").mkdir()
+    (archived / "comms" / "index.txt").write_text("")
+    repo_dir = archived / "proj"
+    repo_dir.mkdir()
+    (repo_dir / ".git").mkdir()
+    mock_run.return_value = MagicMock(stdout="cid\n", stderr="", returncode=0)
+
+    dest = manager.copy_task_from_archive("with-repo-mar-14-a1b2c3")
+
+    assert (dest / "proj" / ".git").is_dir()
+    assert (dest / ".cursor" / "rules" / "git-workspace.mdc").exists()
+    assert (dest / ".cursor" / "rules" / "task-comms.mdc").exists()

@@ -31,6 +31,7 @@ def test_create_help() -> None:
     assert result.exit_code == 0
     assert "TITLE" in result.output
     assert "--repo" in result.output
+    assert "--no-repo" in result.output
     assert "--comment" in result.output
 
 
@@ -363,6 +364,59 @@ def test_create_prints_progress_messages(
     assert "Checking out feature branch…" in output
     assert "Feature branch created." in output
     assert "Task created:" in output
+
+
+def test_create_no_repo_skips_clone_and_git_workspace_rule(
+    runner: CliRunner, tmp_path: Path
+) -> None:
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir()
+    with patch("dev_sdk.task_manager.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stdout="chat-id\n")
+        result = runner.invoke(
+            main,
+            [
+                "create",
+                "Ops task",
+                "--no-repo",
+                "--tasks-dir",
+                str(tasks_dir),
+            ],
+        )
+    assert result.exit_code == 0
+    task_dir = tasks_dir / "ops-task"
+    assert (task_dir / "comms").is_dir()
+    assert (task_dir / ".cursor" / "rules" / "task-comms.mdc").exists()
+    assert not (task_dir / ".cursor" / "rules" / "git-workspace.mdc").exists()
+    clone_calls = [c for c in mock_run.call_args_list if c[0][0][:2] == ["git", "clone"]]
+    assert len(clone_calls) == 0
+    assert "No repository cloned" in result.output
+
+
+def test_create_requires_repo_without_no_repo_flag(runner: CliRunner, tmp_path: Path) -> None:
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir()
+    result = runner.invoke(main, ["create", "T", "--tasks-dir", str(tasks_dir)])
+    assert result.exit_code == 2
+    assert "Either --repo or --no-repo" in result.output
+
+
+def test_create_rejects_repo_with_no_repo(runner: CliRunner, tmp_path: Path) -> None:
+    tasks_dir = tmp_path / "tasks"
+    tasks_dir.mkdir()
+    result = runner.invoke(
+        main,
+        [
+            "create",
+            "T",
+            "--no-repo",
+            "--repo",
+            "https://github.com/a/b.git",
+            "--tasks-dir",
+            str(tasks_dir),
+        ],
+    )
+    assert result.exit_code == 2
 
 
 def test_repos_help() -> None:

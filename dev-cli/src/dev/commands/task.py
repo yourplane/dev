@@ -162,9 +162,17 @@ def _repo_name_from_url(repo_url: str) -> str:
     "--repo",
     "-r",
     "repo_url",
-    required=True,
+    required=False,
+    default=None,
     type=str,
-    help="Git repository URL or shorthand (e.g. desk) from config (~/.config/dev/repos.json).",
+    help="Git repository URL or shorthand (e.g. desk) from config (~/.config/dev/repos.json). "
+    "Do not pass with --no-repo.",
+)
+@click.option(
+    "--no-repo",
+    "no_repo",
+    is_flag=True,
+    help="Create the task without cloning a repository.",
 )
 @click.option(
     "--comment",
@@ -183,16 +191,25 @@ def _repo_name_from_url(repo_url: str) -> str:
 )
 def start_task(
     title: str,
-    repo_url: str,
+    repo_url: str | None,
     comment: str | None,
+    no_repo: bool,
     tasks_dir: Path,
 ) -> None:
     """Create a new task: create directory, comms dir, agent chat, and clone repo."""
-    try:
-        repo_url = resolve_repo(repo_url)
-    except ValueError as e:
-        click.echo(str(e), err=True)
-        raise SystemExit(1)
+    if no_repo and repo_url:
+        click.echo("Do not pass --repo with --no-repo.", err=True)
+        raise SystemExit(2)
+    if not no_repo and not repo_url:
+        click.echo("Either --repo or --no-repo is required.", err=True)
+        raise SystemExit(2)
+    resolved_url = ""
+    if not no_repo:
+        try:
+            resolved_url = resolve_repo(repo_url or "")
+        except ValueError as e:
+            click.echo(str(e), err=True)
+            raise SystemExit(1)
     name = _slugify(title)
     manager = TaskManager(tasks_root=tasks_dir)
     try:
@@ -200,15 +217,18 @@ def start_task(
             title=title,
             task_name=name,
             comment=comment,
-            repo_url=repo_url,
+            repo_url=None if no_repo else resolved_url,
             on_progress=click.echo,
         )
         task_dir = tasks_dir / name
-        repo_dir = _repo_name_from_url(repo_url)
         click.echo(f"Task created: {task_dir}")
         click.echo(f"  Comms: {comms_dir(task_dir)}")
         click.echo(f"  Chat ID file: {task_dir / AGENT_CHAT_ID_FILE}")
-        click.echo(f"  Repo cloned into: {task_dir / repo_dir}")
+        if no_repo:
+            click.echo("  No repository cloned (--no-repo).")
+        else:
+            repo_dir = _repo_name_from_url(resolved_url)
+            click.echo(f"  Repo cloned into: {task_dir / repo_dir}")
     except Exception as e:
         click.echo(f"Error: {e}", err=True)
         raise SystemExit(1)

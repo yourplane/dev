@@ -342,6 +342,29 @@
   font-size: 0.95rem;
 }
 
+.create-form-checkbox-row {
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 0.55rem;
+}
+
+.create-form-checkbox-row input[type='checkbox'] {
+  width: auto;
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+
+.task-repo-meta {
+  margin: 0.25rem 0 0;
+  font-size: 0.9rem;
+  color: #444;
+}
+
+.task-repo-meta code {
+  font-size: 0.85em;
+  word-break: break-all;
+}
+
 .required {
   color: #b00;
 }
@@ -567,7 +590,12 @@
   margin-bottom: 0.5rem;
 }
 
-.task-comms-header h2 {
+.task-comms-header-title {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.task-comms-header-title h2 {
   margin: 0;
   font-size: 1.15rem;
 }

@@ -24,6 +24,7 @@ class ArchivedTaskEntry(NamedTuple):
     archived_at: str
     last_modified_at: str
 
+
 logger = logging.getLogger("dev_sdk")
 
 ProgressCallback = Callable[[str], None]
@@ -43,14 +44,20 @@ class TaskManager:
         title: str,
         task_name: str,
         comment: str | None,
-        repo_url: str,
+        repo_url: str | None,
         on_progress: ProgressCallback | None = None,
     ) -> None:
-        """Create task dir, comms dir (and optional first user comment), agent chat, and clone repo."""
+        """Create task dir, comms dir (and optional first user comment), agent chat, and clone repo.
+
+        When ``repo_url`` is missing or blank after stripping, skip cloning, feature branch
+        checkout, and the ``git-workspace.mdc`` rule.
+        """
+        will_clone = repo_url is not None and bool(repo_url.strip())
         logger.debug(
-            "start_task: task_name=%s repo_url=%s task_dir=%s",
+            "start_task: task_name=%s repo_url=%s will_clone=%s task_dir=%s",
             task_name,
             repo_url,
+            will_clone,
             self.tasks_root / task_name,
         )
         task_dir = self.tasks_root / task_name
@@ -72,13 +79,19 @@ class TaskManager:
         if on_progress:
             on_progress("Agent chat created.")
         self._write_chat_id_file(task_dir, chat_id)
+        if not will_clone:
+            if on_progress:
+                on_progress("Task ready (no repository cloned).")
+            logger.debug("start_task: completed task_name=%s (no clone)", task_name)
+            return
+        clone_url = repo_url.strip()
         self._write_cursor_rules(task_dir)
         if on_progress:
             on_progress("Cloning repository…")
-        self._clone_repo(task_dir, repo_url)
+        self._clone_repo(task_dir, clone_url)
         if on_progress:
             on_progress("Repository cloned.")
-        self._checkout_feature_branch(task_dir, repo_url, task_name, on_progress=on_progress)
+        self._checkout_feature_branch(task_dir, clone_url, task_name, on_progress=on_progress)
         logger.debug("start_task: completed task_name=%s", task_name)
 
     def _ensure_comms_dir(self, task_dir: Path) -> None:
@@ -193,6 +206,47 @@ class TaskManager:
             raise
         if on_progress:
             on_progress("Feature branch created.")
+
+    @staticmethod
+    def _direct_child_git_clone_dirs(task_dir: Path) -> list[Path]:
+        """List direct child directories that look like a normal clone (contains .git/)."""
+        found: list[Path] = []
+        for child in task_dir.iterdir():
+            if (
+                child.is_dir()
+                and not child.name.startswith(".")
+                and (child / ".git").is_dir()
+            ):
+                found.append(child)
+        return sorted(found, key=lambda p: p.name)
+
+    @staticmethod
+    def describe_clone_layout(task_dir: Path) -> str | None:
+        """Label for the cloned repo under a task root, or ``None`` if there is none.
+
+        Multiple direct git children are summarized as a fixed phrase so callers can still
+        treat a non-``None`` return as “has at least one nested repo”.
+        """
+        clones = TaskManager._direct_child_git_clone_dirs(task_dir)
+        if not clones:
+            return None
+        if len(clones) > 1:
+            return "Multiple repositories"
+        repo_path = clones[0]
+        try:
+            result = subprocess.run(
+                ["git", "remote", "get-url", "origin"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                check=True,
+            )
+            url = result.stdout.strip()
+            if url:
+                return url
+        except (subprocess.CalledProcessError, OSError):
+            pass
+        return repo_path.name
 
     @staticmethod
     def _repo_name_from_url(repo_url: str) -> str:
@@ -352,7 +406,6 @@ class TaskManager:
             (dest / ".cursor").mkdir(parents=True, exist_ok=True)
             shutil.copytree(src_rules, dest / ".cursor" / "rules")
         else:
-            self._write_cursor_rules(dest)
             self._ensure_comms_dir(dest)
         # Copy any cloned repo dirs (directories containing .git, excluding comms and .cursor)
         for p in src.iterdir():
@@ -366,8 +419,8 @@ class TaskManager:
         # New agent chat for the new task
         chat_id = self._create_agent_chat()
         self._write_chat_id_file(dest, chat_id)
-        # Ensure cursor rules exist if we only had partial copy
-        if not (dest / ".cursor" / "rules" / "git-workspace.mdc").exists():
+        # git-workspace rule only when a nested clone exists (not for no-repo task archives)
+        if self._direct_child_git_clone_dirs(dest) and not (dest / ".cursor" / "rules" / "git-workspace.mdc").exists():
             self._write_cursor_rules(dest)
         if not (dest / ".cursor" / "rules" / "task-comms.mdc").exists():
             self._ensure_comms_dir(dest)
