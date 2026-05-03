@@ -948,6 +948,11 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
                 detail="prompt is required for bash command (shell command text)",
             )
     task_dir = _task_dir(task_name)
+    if body.command == "implement" and TaskManager.describe_clone_layout(task_dir) is None:
+        raise HTTPException(
+            status_code=400,
+            detail="This task has no cloned repository under the task root; the Implement command is not available.",
+        )
     if body.command == "do":
         set_task_comment_draft(_tasks_root(), task_name, "")
     if "DEV_TASKS_DIR" not in os.environ:
