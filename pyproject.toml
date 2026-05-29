@@ -16,4 +16,4 @@ dev = { workspace = true }
 dev-server = { workspace = true }
 
 [tool.uv.workspace]
-members = ["dev-sdk", "dev-cli", "dev-server"]
+members = ["dev-sdk", "dev-cli", "dev-server", "pr-comments"]
