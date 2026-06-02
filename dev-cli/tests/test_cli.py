@@ -182,7 +182,7 @@ def test_interact_launches_with_chat_id(runner: CliRunner, tmp_path: Path) -> No
         (Path.cwd() / "agent-chat-id").write_text("my-chat-uuid-123")
         with patch("dev.commands.task.os.execvp") as mock_execvp:
             mock_execvp.side_effect = SystemExit(0)
-            result = runner.invoke(main, ["interact"], catch_exceptions=True)
+            runner.invoke(main, ["interact"], catch_exceptions=True)
     assert mock_execvp.called
     call_args = mock_execvp.call_args[0]
     assert call_args[0] == "cursor"

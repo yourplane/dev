@@ -46,7 +46,7 @@ Output is in `dist/`. Serve with any static host or mount under dev-server if de
 npm run lint
 ```
 
-Uses ESLint with TypeScript and React hooks rules. **Convention:** In each component, declare all `useCallback`/`useMemo` that are used in `useEffect` above those effects to avoid "Cannot access before initialization" errors.
+Uses ESLint with TypeScript and React hooks rules. **Convention:** Keep all `import`/`export` statements at the top of the file (enforced by `import/first`). In each component, declare all `useCallback`/`useMemo` that are used in `useEffect` above those effects to avoid "Cannot access before initialization" errors.
 
 ## Test
 

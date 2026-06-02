@@ -107,14 +107,22 @@ Then open http://localhost:5173. See `dev-daemon/README.md` for run options and 
 
 ## Development
 
-Run tests:
+Run tests and lint (from repo root):
 
 ```bash
 tox
 ```
 
+Lint only (Python ruff + frontend ESLint):
+
+```bash
+tox -e lint,frontend-lint
+```
+
+Python lint uses [ruff](https://docs.astral.sh/ruff/) with **E402** (no imports in the middle of a file). Frontend lint enforces the same via ESLint `import/first`; `npm run build` in `dev-frontend/` runs lint before TypeScript compile.
+
 Test a single Python version:
 
 ```bash
-tox -e py311
+tox -e py312
 ```
