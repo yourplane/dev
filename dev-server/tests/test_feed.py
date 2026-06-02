@@ -11,7 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dev_sdk.feed import LOGS_DIR
-from dev_sdk.comms import add_comms, comms_dir, index_path
+from dev_sdk.comms import comms_dir, index_path
 
 from dev_server.main import app
 

@@ -51,7 +51,7 @@ from dev_sdk.create_pr import (
     pull_pr_comments,
 )
 from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repos
-from dev_sdk.task_manager import ArchivedTaskEntry, TaskManager
+from dev_sdk.task_manager import TaskManager
 
 SUPPORTED_COMMANDS = ("plan-implement", "implement", "do", "bash")
 logger = logging.getLogger("dev_server")

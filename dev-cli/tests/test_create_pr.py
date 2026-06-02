@@ -128,7 +128,6 @@ def test_create_pr_sets_upstream_when_no_upstream(
     }
 
     def run(*args, **kwargs):
-        cmd = args[0] if args else kwargs.get("args", [])
         return subprocess_run_mock(
             repo_root=repo_dir,
             branch="feature",
@@ -174,7 +173,6 @@ def test_create_pr_pushes_when_out_of_sync(
     }
 
     def run(*args, **kwargs):
-        cmd = args[0] if args else kwargs.get("args", [])
         return subprocess_run_mock(
             repo_root=repo_dir,
             branch="feature",
@@ -268,7 +266,6 @@ def test_create_pr_success(runner: CliRunner, tmp_path: Path) -> None:
     }
 
     def run(*args, **kwargs):
-        cmd = args[0] if args else kwargs.get("args", [])
         return subprocess_run_mock(
             repo_root=repo_dir,
             branch="feature",

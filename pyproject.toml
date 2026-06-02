@@ -17,3 +17,7 @@ dev-server = { workspace = true }
 
 [tool.uv.workspace]
 members = ["dev-sdk", "dev-cli", "dev-server", "pr-comments"]
+
+[tool.ruff.lint]
+# E402: module-level import not at top of file (no mid-file imports).
+select = ["E4", "E7", "E9", "F"]

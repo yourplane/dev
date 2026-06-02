@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from dev_sdk.comms import add_comms, comms_dir, index_path
+from dev_sdk.comms import add_comms, index_path
 from dev_sdk.feed import read_feed
 
 
@@ -54,7 +54,6 @@ def test_read_feed_comms_and_logs_sorted_by_created_at(task_dir: Path) -> None:
     entries = read_feed(task_dir)
     assert len(entries) >= 3
     types = [e.type for e in entries]
-    ids = [e.id for e in entries]
     assert "comms" in types and "log" in types
     # Should be sorted by created_at
     for i in range(len(entries) - 1):

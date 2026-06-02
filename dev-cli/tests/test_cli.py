@@ -182,7 +182,7 @@ def test_interact_launches_with_chat_id(runner: CliRunner, tmp_path: Path) -> No
         (Path.cwd() / "agent-chat-id").write_text("my-chat-uuid-123")
         with patch("dev.commands.task.os.execvp") as mock_execvp:
             mock_execvp.side_effect = SystemExit(0)
-            result = runner.invoke(main, ["interact"], catch_exceptions=True)
+            runner.invoke(main, ["interact"], catch_exceptions=True)
     assert mock_execvp.called
     call_args = mock_execvp.call_args[0]
     assert call_args[0] == "cursor"
@@ -200,8 +200,12 @@ def test_plan_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) 
         cwd = Path.cwd()
         (cwd / "comms").mkdir()
         (cwd / "comms" / "index.txt").write_text("")
-        # Simulate stream-json output: one NDJSON line with content field
-        streamed_line = '{"content": "# Detailed Plan\\n\\nStep 1.\\nStep 2."}\n'
+        # Simulate stream-json output: assistant section with plan text
+        streamed_line = (
+            '{"type": "assistant", "message": {"content": [{"type": "text", '
+            '"text": "# Detailed Plan\\n\\nStep 1.\\nStep 2."}]}, '
+            '"model_call_id": "call-1"}\n'
+        )
         mock_proc = MagicMock()
         mock_proc.stdout = iter([streamed_line])
         mock_proc.stderr.read.return_value = ""

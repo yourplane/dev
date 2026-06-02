@@ -1,6 +1,5 @@
 """Tests for dev-sdk pull_pr_comments adapter."""
 
-import json
 import os
 import subprocess
 from pathlib import Path

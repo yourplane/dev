@@ -2,7 +2,7 @@ import json
 from pathlib import Path
 
 from pr_comments.errors import PrCommentsError
-from pr_comments.models import Provider, WorkspaceConfig
+from pr_comments.models import WorkspaceConfig
 from pr_comments.parse import parse_pr_url
 
 CONFIG_FILENAME = "pr-comments.json"
