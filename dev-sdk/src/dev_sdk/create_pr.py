@@ -16,7 +16,9 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from dev_sdk.comms import comms_dir
+from dev_sdk.comms import add_comms, comms_dir
+from pr_comments.errors import PrCommentsError as PrLibError
+from pr_comments.pull import pull_comments as lib_pull_comments
 
 
 class CreatePRError(Exception):
@@ -532,17 +534,13 @@ def find_existing_pull_request(task_root: Path) -> str | None:
         raise CreatePRError("GitHub PR response did not include html_url")
     return pr_url
 
+
 def pull_pr_comments(task_root: Path) -> tuple[str, int, str | None]:
     """
     Pull new comments from an existing PR into comms.
 
     Returns (pr_url, new_count, new_comms_filename).
     """
-    from pr_comments.errors import PrCommentsError as PrLibError
-    from pr_comments.pull import pull_comments as lib_pull_comments
-
-    from dev_sdk.comms import add_comms
-
     task_root = task_root.resolve()
     _validate_task_root(task_root)
     repo_root = _find_single_git_repo_under(task_root)
