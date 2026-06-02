@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from dev_sdk.comms import add_comms, comms_dir, index_path, read_index
+from dev_sdk.comms import add_comms, comms_dir, read_index
 from dev_sdk.feed import LOGS_DIR
 
 from dev_server.main import app

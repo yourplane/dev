@@ -6,7 +6,7 @@
   "scripts": {
     "predev": "npm install --no-audit --no-fund",
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "npm run lint && tsc -b && vite build",
     "preview": "vite preview",
     "lint": "eslint src --ext .ts,.tsx",
     "test": "vitest run"
@@ -26,6 +26,7 @@
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.3",
     "eslint": "^9.15.0",
+    "eslint-plugin-import": "^2.32.0",
     "eslint-plugin-react-hooks": "^5.0.0",
     "jsdom": "^25.0.1",
     "typescript": "~5.6.2",
