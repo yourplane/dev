@@ -11,6 +11,7 @@ from dev.commands import (
     comms_group,
     copy_from_archive_cmd,
     create_pr,
+    daemon_group,
     implement_cmd,
     launch_interact,
     list_tasks,
@@ -52,3 +53,4 @@ main.add_command(implement_cmd)
 main.add_command(create_pr)
 main.add_command(comms_group)
 main.add_command(repos_group)
+main.add_command(daemon_group)

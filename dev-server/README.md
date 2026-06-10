@@ -56,4 +56,4 @@ cd dev-server && uv run uvicorn dev_server.main:app --reload --host 127.0.0.1
 
 ## Logs
 
-The server logs to **stdout/stderr** in the terminal where uvicorn runs; there is no default log file. If you start the full stack with **systemd** (`dev-daemon`), use `journalctl --user -u dev-daemon.service -f`. For **dev-sdk** debug logs (e.g. from CLI code paths), see [dev-sdk/README.md](../dev-sdk/README.md#debugging) (`~/.local/share/dev/sdk-debug.log`, or `DEV_SDK_LOG`).
+The server logs to **stdout/stderr** in the terminal where uvicorn runs; there is no default log file. If you run the stack under **systemd**, follow `journalctl --user -u <your-unit>.service -f` for that unit’s stdout/stderr. With **`dev daemon start`**, per-instance logs also live under `~/.local/share/dev/daemon/logs/<id>/`. For **dev-sdk** debug logs (e.g. from CLI code paths), see [dev-sdk/README.md](../dev-sdk/README.md#debugging) (`~/.local/share/dev/sdk-debug.log`, or `DEV_SDK_LOG`).

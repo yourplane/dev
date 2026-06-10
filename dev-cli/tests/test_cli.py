@@ -23,6 +23,26 @@ def test_main_help() -> None:
     assert "create" in result.output
     assert "interact" in result.output
     assert "copy-from-archive" in result.output
+    assert "daemon" in result.output
+
+
+def test_daemon_group_help() -> None:
+    result = CliRunner().invoke(main, ["daemon", "--help"])
+    assert result.exit_code == 0
+    assert "start" in result.output
+    assert "stop" in result.output
+    assert "list" in result.output
+
+
+def test_daemon_stop_requires_single_selector(runner: CliRunner) -> None:
+    result = runner.invoke(main, ["daemon", "stop"])
+    assert result.exit_code != 0
+    assert "exactly one" in result.output.lower()
+
+
+def test_daemon_stop_mutually_exclusive_flags(runner: CliRunner) -> None:
+    result = runner.invoke(main, ["daemon", "stop", "--all", "--id", "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"])
+    assert result.exit_code != 0
 
 
 def test_create_help() -> None:
