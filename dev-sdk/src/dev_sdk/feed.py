@@ -5,7 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from dev_sdk.comms import agent_logs_cutoff_epoch_secs, comms_dir, comms_file_removable, read_index
+from dev_sdk.comms import (
+    agent_logs_cutoff_epoch_secs,
+    comms_dir,
+    comms_file_removable_at_cutoff,
+    read_index,
+)
 
 LOGS_DIR = ".logs"
 
@@ -60,7 +65,7 @@ def _collect_feed_entries(task_dir: Path) -> list[FeedEntry]:
                         type="comms",
                         id=filename,
                         created_at=_file_created_at(path),
-                        deletable=comms_file_removable(task_dir, path, logs_cutoff=logs_cutoff),
+                        deletable=comms_file_removable_at_cutoff(path, logs_cutoff),
                     )
                 )
     logs_dir = task_dir / LOGS_DIR
@@ -91,7 +96,7 @@ def read_comms_deletable_map(task_dir: Path) -> dict[str, bool]:
     for filename in read_index(task_dir):
         path = cdir / filename
         if path.is_file():
-            result[filename] = comms_file_removable(task_dir, path, logs_cutoff=logs_cutoff)
+            result[filename] = comms_file_removable_at_cutoff(path, logs_cutoff)
     return result
 
 
