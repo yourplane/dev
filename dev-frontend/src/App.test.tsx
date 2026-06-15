@@ -17,6 +17,7 @@ vi.mock('./api', () => ({
     copyFromArchive: vi.fn(),
     getTaskCommsList: vi.fn(),
     getTaskFeed: vi.fn(),
+    getTaskFeedDeletable: vi.fn(),
     getTaskWorkspace: vi.fn(),
     getTaskCommentDraft: vi.fn(),
     setTaskCommentDraft: vi.fn(),
@@ -48,7 +49,13 @@ describe('App', () => {
     vi.mocked(api.unarchiveTask).mockResolvedValue({ restored_task_name: 'restored-task' })
     vi.mocked(api.copyFromArchive).mockResolvedValue({ task_name: 'copied-task', task_dir: '/tmp/copied-task' })
     vi.mocked(api.getTaskCommsList).mockResolvedValue({ files: [] })
-    vi.mocked(api.getTaskFeed).mockResolvedValue({ entries: [] })
+    vi.mocked(api.getTaskFeed).mockResolvedValue({
+      entries: [],
+      total: 0,
+      has_older: false,
+      oldest_cursor: null,
+    })
+    vi.mocked(api.getTaskFeedDeletable).mockResolvedValue({})
     vi.mocked(api.getTaskWorkspace).mockResolvedValue({
       repo_label: 'https://github.com/acme/repo.git',
     })
@@ -388,6 +395,27 @@ describe('App', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: '001-user.md' })).toHaveAttribute('aria-expanded', 'true')
       expect(screen.getByRole('button', { name: /Agent log: agent\.jsonl/ })).toHaveAttribute('aria-expanded', 'false')
+    })
+  })
+
+  it('shows Load older when the feed outline has older pages', async () => {
+    const noop = () => {}
+    const { api } = await import('./api')
+    vi.mocked(api.getTaskFeed).mockResolvedValue({
+      entries: [{ type: 'comms', id: '051-user.md', created_at: 51, deletable: true }],
+      total: 100,
+      has_older: true,
+      oldest_cursor: { created_at: 51, id: '051-user.md' },
+    })
+
+    render(
+      <MemoryRouter>
+        <TaskCommsPageContent taskName="test-task" navigate={noop} />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Load older \(1\/100\)/ })).toBeInTheDocument()
     })
   })
 })

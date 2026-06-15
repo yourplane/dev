@@ -64,6 +64,7 @@ RestartSec=5
 Environment=HOME=%h
 Environment=DEV_DAEMON_UV=$UV_PATH
 Environment=DEV_DAEMON_NPM=$NPM_PATH
+Environment=DEV_DAEMON_FRONTEND=preview
 
 [Install]
 WantedBy=default.target

@@ -15,7 +15,8 @@ FastAPI server for dev task management: create, list, archive.
 - `POST /tasks/{task_name}/comms` — append a user comment (body: `content`); returns `{ "filename": "…" }` (201)
 - `GET /tasks/{task_name}/comms/{filename}` — raw content of one comms file (plain text)
 - `DELETE /tasks/{task_name}/comms/{filename}` — remove a comms file and its index entry. Returns 204 when allowed. Returns 400 when agent logs exist and the comm is not strictly after the last agent log event.
-- `GET /tasks/{task_name}/feed` — list feed entries (comms + agent logs) sorted by creation date
+- `GET /tasks/{task_name}/feed` — list feed entries (comms + agent logs) sorted by creation date; supports `limit`, `before_created_at`/`before_id` pagination and `after` for incremental updates
+- `GET /tasks/{task_name}/feed/deletable` — deletable flags for all comms files
 - `GET /tasks/{task_name}/logs/{filename}` — raw content of one agent log file (plain text)
 - `GET /tasks/{task_name}/logs/stream` — stream the **active** log file via Server-Sent Events (404 if no command is running)
 - `GET /tasks/{task_name}/commands` — command status: `active`, `command`, and when active, `active_log_filename` (agent log file being written; null while a shell command runs) and `active_bash_comms_filename` (the `*-user-bash.md` file currently receiving streamed output; null for agent commands)

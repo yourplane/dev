@@ -187,7 +187,7 @@ def _log_end_epoch_secs(log_path: Path) -> float:
     return _comms_file_created_epoch_secs(log_path)
 
 
-def _agent_logs_cutoff_epoch_secs(task_dir: Path) -> float | None:
+def agent_logs_cutoff_epoch_secs(task_dir: Path) -> float | None:
     """Latest log-end time among .logs/*.log, or None if there are no log files."""
     logs_dir = task_dir / LOGS_DIR
     if not logs_dir.is_dir():
@@ -198,14 +198,18 @@ def _agent_logs_cutoff_epoch_secs(task_dir: Path) -> float | None:
     return max(_log_end_epoch_secs(p) for p in log_files)
 
 
-def comms_file_removable(task_dir: Path, comm_path: Path) -> bool:
-    """True if an existing comms file at comm_path may be removed (same rules as remove_comms)."""
-    cutoff = _agent_logs_cutoff_epoch_secs(task_dir)
-    if cutoff is None:
+def comms_file_removable_at_cutoff(comm_path: Path, logs_cutoff: float | None) -> bool:
+    """True if comm_path may be removed given a pre-computed agent-logs cutoff."""
+    if logs_cutoff is None:
         return True
     if not comm_path.is_file():
         return True
-    return _comms_file_created_epoch_secs(comm_path) > cutoff
+    return _comms_file_created_epoch_secs(comm_path) > logs_cutoff
+
+
+def comms_file_removable(task_dir: Path, comm_path: Path) -> bool:
+    """True if an existing comms file at comm_path may be removed (same rules as remove_comms)."""
+    return comms_file_removable_at_cutoff(comm_path, agent_logs_cutoff_epoch_secs(task_dir))
 
 
 def remove_comms(task_dir: Path, filename: str) -> None:

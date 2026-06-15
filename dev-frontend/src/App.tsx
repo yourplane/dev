@@ -24,6 +24,7 @@ function MarkdownText({ children }: { children: string }) {
 }
 
 const FEED_POLL_INTERVAL_MS = 15000
+const FEED_PAGE_SIZE = 50
 const ARCHIVE_PAGE_SIZE = 50
 
 export function Layout() {
@@ -1336,6 +1337,42 @@ function createInitialFeedCollapseState(): FeedCollapseState {
   }
 }
 
+type FeedOutlineEntry = {
+  type: string
+  id: string
+  created_at: number
+  deletable?: boolean | null
+}
+
+type FeedOutlineCache = {
+  entries: FeedOutlineEntry[]
+  feedTotal: number
+  hasOlder: boolean
+  oldestCursor: { created_at: number; id: string } | null
+}
+
+function feedOutlineCacheKey(taskName: string) {
+  return `dev_feed_outline_${taskName}`
+}
+
+function readFeedOutlineCache(taskName: string): FeedOutlineCache | null {
+  try {
+    const raw = sessionStorage.getItem(feedOutlineCacheKey(taskName))
+    if (!raw) return null
+    return JSON.parse(raw) as FeedOutlineCache
+  } catch {
+    return null
+  }
+}
+
+function writeFeedOutlineCache(taskName: string, cache: FeedOutlineCache) {
+  try {
+    sessionStorage.setItem(feedOutlineCacheKey(taskName), JSON.stringify(cache))
+  } catch {
+    // ignore quota errors
+  }
+}
+
 export function TaskCommsPageContent({
   taskName,
   navigate,
@@ -1343,11 +1380,14 @@ export function TaskCommsPageContent({
   taskName: string
   navigate: (to: string) => void
 }) {
-  const [feedEntries, setFeedEntries] = useState<
-    Array<{ type: string; id: string; created_at: number; deletable?: boolean | null }>
-  >([])
+  const [feedEntries, setFeedEntries] = useState<FeedOutlineEntry[]>([])
+  const [feedTotal, setFeedTotal] = useState(0)
+  const [hasOlder, setHasOlder] = useState(false)
+  const [oldestCursor, setOldestCursor] = useState<{ created_at: number; id: string } | null>(null)
   const [contents, setContents] = useState<Record<string, string>>({})
-  const [loading, setLoading] = useState(true)
+  const [feedReady, setFeedReady] = useState(false)
+  const [feedRefreshing, setFeedRefreshing] = useState(false)
+  const [loadingOlder, setLoadingOlder] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [entryMode, setEntryMode] = useState<'prompt' | 'bash'>('prompt')
   const [commentText, setCommentText] = useState('')
@@ -1376,6 +1416,7 @@ export function TaskCommsPageContent({
   const activeLogFilenameRef = useRef(activeLogFilename)
   activeLogFilenameRef.current = activeLogFilename
   const hasScrolledInitialRef = useRef(false)
+  const prevActiveCommandRef = useRef<string | null>(null)
   const [archiving, setArchiving] = useState(false)
   const [archiveError, setArchiveError] = useState<string | null>(null)
   const [downloadingCommsZip, setDownloadingCommsZip] = useState(false)
@@ -1393,6 +1434,13 @@ export function TaskCommsPageContent({
   const [bashHistoryPicker, setBashHistoryPicker] = useState('')
   const [activeBashCommsFilename, setActiveBashCommsFilename] = useState<string | null>(null)
   const [workspaceInfo, setWorkspaceInfo] = useState<TaskWorkspaceInfo | null>(null)
+  const tabVisibleRef = useRef(!document.hidden)
+  const oldestCursorRef = useRef(oldestCursor)
+  oldestCursorRef.current = oldestCursor
+  const feedTotalRef = useRef(feedTotal)
+  feedTotalRef.current = feedTotal
+  const hasOlderRef = useRef(hasOlder)
+  hasOlderRef.current = hasOlder
 
   const bashHistory = useMemo(() => {
     const cmds: string[] = []
@@ -1559,90 +1607,163 @@ export function TaskCommsPageContent({
     [taskName, activeLogFilename]
   )
 
-  const loadFeed = useCallback(
-    async (opts?: { incremental?: boolean; prefetchNew?: boolean }) => {
+  const applyFeedPage = useCallback(
+    (
+      res: {
+        entries: FeedOutlineEntry[]
+        total?: number | null
+        has_older?: boolean | null
+        oldest_cursor?: { created_at: number; id: string } | null
+      },
+      mode: 'replace' | 'prepend',
+    ) => {
+      const total = res.total ?? res.entries.length
+      const nextHasOlder = res.has_older ?? false
+      const nextOldest = res.oldest_cursor ?? null
+      setFeedTotal(total)
+      setHasOlder(nextHasOlder)
+      setOldestCursor(nextOldest)
+      setFeedEntries((prev) => {
+        let next: FeedOutlineEntry[]
+        if (mode === 'replace') {
+          next = res.entries
+        } else {
+          const keys = new Set(prev.map((e) => `${e.type}:${e.id}`))
+          const toPrepend = res.entries.filter((e) => !keys.has(`${e.type}:${e.id}`))
+          next = toPrepend.length ? [...toPrepend, ...prev] : prev
+        }
+        writeFeedOutlineCache(taskName, {
+          entries: next,
+          feedTotal: total,
+          hasOlder: nextHasOlder,
+          oldestCursor: nextOldest,
+        })
+        return next
+      })
+    },
+    [taskName],
+  )
+
+  const patchCommsDeletable = useCallback(async () => {
+    try {
+      const deletable = await api.getTaskFeedDeletable(taskName)
+      setFeedEntries((prev) => {
+        const next = prev.map((e) =>
+          e.type === 'comms' && deletable[e.id] !== undefined ? { ...e, deletable: deletable[e.id] } : e,
+        )
+        writeFeedOutlineCache(taskName, {
+          entries: next,
+          feedTotal: feedTotalRef.current,
+          hasOlder: hasOlderRef.current,
+          oldestCursor: oldestCursorRef.current,
+        })
+        return next
+      })
+    } catch {
+      // non-fatal; deletable flags may be stale until next full load
+    }
+  }, [taskName])
+
+  const loadFeedTail = useCallback(async () => {
+    const hasVisibleEntries = feedEntriesRef.current.length > 0
+    if (!hasVisibleEntries) setFeedRefreshing(true)
+    setError(null)
+    try {
+      const res = await api.getTaskFeed(taskName, { limit: FEED_PAGE_SIZE })
+      applyFeedPage(res, 'replace')
+      setContents((prev) => {
+        const next: Record<string, string> = {}
+        res.entries.forEach((e) => {
+          if (prev[e.id] !== undefined) next[e.id] = prev[e.id]
+        })
+        const activeLog = activeLogFilenameRef.current
+        if (activeLog && (prev[activeLog] ?? '').length > 0) {
+          next[activeLog] = prev[activeLog]
+        }
+        return next
+      })
+    } catch (e) {
+      if (!hasVisibleEntries) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
+    } finally {
+      setFeedRefreshing(false)
+      setFeedReady(true)
+    }
+  }, [taskName, applyFeedPage])
+
+  const loadOlderFeed = useCallback(async () => {
+    const cursor = oldestCursorRef.current
+    if (!cursor || loadingOlder) return
+    setLoadingOlder(true)
+    setError(null)
+    try {
+      const res = await api.getTaskFeed(taskName, { limit: FEED_PAGE_SIZE, before: cursor })
+      applyFeedPage(res, 'prepend')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoadingOlder(false)
+    }
+  }, [taskName, applyFeedPage, loadingOlder])
+
+  const pollFeedIncremental = useCallback(
+    async (opts?: { prefetchNew?: boolean }) => {
       const current = feedEntriesRef.current
-      const isIncremental = opts?.incremental && current.length > 0
-      if (!isIncremental) {
-        setError(null)
-        if (current.length === 0) setLoading(true)
+      if (current.length === 0) {
+        await loadFeedTail()
+        return
       }
       try {
-        if (isIncremental) {
-          const after = Math.max(...current.map((e) => e.created_at))
-          const res = await api.getTaskFeed(taskName, { after })
-          const existingKeys = new Set(current.map((e) => `${e.type}:${e.id}`))
-          const newEntries = res.entries.filter((e) => !existingKeys.has(`${e.type}:${e.id}`))
-          if (newEntries.length === 0) return
-          // New log files change the removal cutoff; refresh the full feed so comms `deletable` updates.
-          if (newEntries.some((e) => e.type === 'log')) {
-            const full = await api.getTaskFeed(taskName)
-            setFeedEntries(full.entries)
-            setContents((prev) => {
-              const next: Record<string, string> = {}
-              full.entries.forEach((e) => {
-                if (prev[e.id] !== undefined) next[e.id] = prev[e.id]
-              })
-              const activeLog = activeLogFilenameRef.current
-              if (activeLog && (prev[activeLog] ?? '').length > 0) {
-                next[activeLog] = prev[activeLog]
-              }
-              return next
-            })
-            return
-          }
-          setFeedEntries((prev) => {
-            const keys = new Set(prev.map((e) => `${e.type}:${e.id}`))
-            const toAdd = newEntries.filter((e) => !keys.has(`${e.type}:${e.id}`))
-            return toAdd.length ? [...prev, ...toAdd] : prev
+        const after = Math.max(...current.map((e) => e.created_at))
+        const res = await api.getTaskFeed(taskName, { after })
+        const existingKeys = new Set(current.map((e) => `${e.type}:${e.id}`))
+        const newEntries = res.entries.filter((e) => !existingKeys.has(`${e.type}:${e.id}`))
+        if (newEntries.length === 0) return
+        if (newEntries.some((e) => e.type === 'log')) {
+          await patchCommsDeletable()
+        }
+        setFeedEntries((prev) => {
+          const keys = new Set(prev.map((e) => `${e.type}:${e.id}`))
+          const toAdd = newEntries.filter((e) => !keys.has(`${e.type}:${e.id}`))
+          if (!toAdd.length) return prev
+          const next = [...prev, ...toAdd]
+          writeFeedOutlineCache(taskName, {
+            entries: next,
+            feedTotal: Math.max(feedTotalRef.current, next.length),
+            hasOlder: hasOlderRef.current,
+            oldestCursor: oldestCursorRef.current,
           })
-          if (opts?.prefetchNew && newEntries.length > 0) {
-            const activeLog = activeLogFilenameRef.current
-            const toFetch = newEntries.filter(
-              (entry) => !(entry.type === 'log' && entry.id === activeLog)
-            )
-            const texts = await Promise.all(
-              toFetch.map((entry) =>
-                entry.type === 'comms'
-                  ? api.getTaskCommsFile(taskName, entry.id)
-                  : api.getTaskLogFile(taskName, entry.id)
-              )
-            )
-            setContents((prev) => {
-              const next = { ...prev }
-              toFetch.forEach((entry, i) => {
-                next[entry.id] = texts[i]
-              })
-              newEntries.forEach((entry) => {
-                if (entry.type === 'log' && entry.id === activeLog) {
-                  next[entry.id] = prev[entry.id] ?? ''
-                }
-              })
-              return next
-            })
-          }
-        } else {
-          const res = await api.getTaskFeed(taskName)
-          setFeedEntries(res.entries)
+          return next
+        })
+        if (opts?.prefetchNew && newEntries.length > 0) {
+          const activeLog = activeLogFilenameRef.current
+          const toFetch = newEntries.filter((entry) => !(entry.type === 'log' && entry.id === activeLog))
+          const texts = await Promise.all(
+            toFetch.map((entry) =>
+              entry.type === 'comms'
+                ? api.getTaskCommsFile(taskName, entry.id)
+                : api.getTaskLogFile(taskName, entry.id),
+            ),
+          )
           setContents((prev) => {
-            const next: Record<string, string> = {}
-            res.entries.forEach((e) => {
-              if (prev[e.id] !== undefined) next[e.id] = prev[e.id]
+            const next = { ...prev }
+            toFetch.forEach((entry, i) => {
+              next[entry.id] = texts[i]
             })
-            const activeLog = activeLogFilenameRef.current
-            if (activeLog && (prev[activeLog] ?? '').length > 0) {
-              next[activeLog] = prev[activeLog]
-            }
+            newEntries.forEach((entry) => {
+              if (entry.type === 'log' && entry.id === activeLog) {
+                next[entry.id] = prev[entry.id] ?? ''
+              }
+            })
             return next
           })
         }
-      } catch (e) {
-        setError(e instanceof Error ? e.message : String(e))
-      } finally {
-        setLoading(false)
+      } catch {
+        // ignore transient poll errors
       }
     },
-    [taskName]
+    [taskName, loadFeedTail, patchCommsDeletable],
   )
 
   const handleDeleteComms = useCallback(
@@ -1669,39 +1790,58 @@ export function TaskCommsPageContent({
   }, [loadCommandStatus])
 
   useEffect(() => {
-    const interval = setInterval(loadCommandStatus, 3000)
+    const interval = setInterval(() => {
+      if (tabVisibleRef.current) loadCommandStatus()
+    }, 3000)
     return () => clearInterval(interval)
   }, [loadCommandStatus])
 
-  const prevActiveCommandRef = useRef<string | null>(null)
   useEffect(() => {
-    if (prevActiveCommandRef.current !== null && activeCommand === null) {
-      // Command completion may remove empty logs, so reload full feed to drop stale entries.
-      loadFeed()
+    const onVisibility = () => {
+      tabVisibleRef.current = !document.hidden
     }
-    prevActiveCommandRef.current = activeCommand
-  }, [activeCommand, loadFeed])
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [])
 
   useEffect(() => {
-    const interval = setInterval(
-      () => loadFeed({ incremental: true, prefetchNew: true }),
-      FEED_POLL_INTERVAL_MS
-    )
+    if (!import.meta.env.DEV) return
+    const onPageShow = (event: PageTransitionEvent) => {
+      console.debug('[dev-ui] pageshow persisted=', event.persisted)
+    }
+    window.addEventListener('pageshow', onPageShow)
+    return () => window.removeEventListener('pageshow', onPageShow)
+  }, [])
+
+  useEffect(() => {
+    if (prevActiveCommandRef.current !== null && activeCommand === null) {
+      // Command completion may remove empty logs, so reload feed tail to drop stale entries.
+      loadFeedTail()
+    }
+    prevActiveCommandRef.current = activeCommand
+  }, [activeCommand, loadFeedTail])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (tabVisibleRef.current) {
+        pollFeedIncremental({ prefetchNew: true })
+      }
+    }, FEED_POLL_INTERVAL_MS)
     return () => clearInterval(interval)
-  }, [loadFeed])
+  }, [pollFeedIncremental])
 
   // When a command becomes active with an active log, reload feed so the new log entry appears
   useEffect(() => {
     if (activeCommand && activeLogFilename) {
-      loadFeed({ incremental: true, prefetchNew: true })
+      pollFeedIncremental({ prefetchNew: true })
     }
-  }, [activeCommand, activeLogFilename, loadFeed])
+  }, [activeCommand, activeLogFilename, pollFeedIncremental])
 
   useEffect(() => {
     if (activeCommand === 'bash' && activeBashCommsFilename) {
-      loadFeed({ incremental: true, prefetchNew: true })
+      pollFeedIncremental({ prefetchNew: true })
     }
-  }, [activeCommand, activeBashCommsFilename, loadFeed])
+  }, [activeCommand, activeBashCommsFilename, pollFeedIncremental])
 
   // Stream the active log via SSE while command is running
   useEffect(() => {
@@ -1797,7 +1937,7 @@ export function TaskCommsPageContent({
           : `Pulled ${res.new_comments_count} new PR comment${res.new_comments_count === 1 ? '' : 's'}.`
       )
       if (res.new_comments_count > 0) {
-        await loadFeed({ incremental: true, prefetchNew: true })
+        await pollFeedIncremental({ prefetchNew: true })
       }
     } catch (e) {
       setPrError(e instanceof Error ? e.message : String(e))
@@ -1831,11 +1971,32 @@ export function TaskCommsPageContent({
   }, [taskName])
 
   useEffect(() => {
-    loadFeed()
-  }, [loadFeed])
+    hasScrolledInitialRef.current = false
+    setBashHistoryBrowseIdx(null)
+    setFeedCollapse(createInitialFeedCollapseState())
+    setFeedReady(false)
+    setError(null)
+    setContents({})
+
+    const cached = readFeedOutlineCache(taskName)
+    if (cached) {
+      setFeedEntries(cached.entries)
+      setFeedTotal(cached.feedTotal)
+      setHasOlder(cached.hasOlder)
+      setOldestCursor(cached.oldestCursor)
+      setFeedReady(true)
+    } else {
+      setFeedEntries([])
+      setFeedTotal(0)
+      setHasOlder(false)
+      setOldestCursor(null)
+    }
+
+    void loadFeedTail()
+  }, [taskName, loadFeedTail])
 
   useEffect(() => {
-    if (loading || error) return
+    if (!feedReady || error) return
     commentDraftLoadedRef.current = false
     bashDraftLoadedRef.current = false
     api.getTaskCommentDraft(taskName).then((text) => {
@@ -1850,7 +2011,7 @@ export function TaskCommsPageContent({
       bashDraftLoadedRef.current = true
       setBashDraftStatus('saved')
     }).catch(() => { /* ignore */ })
-  }, [taskName, loading, error])
+  }, [taskName, feedReady, error])
 
   useEffect(() => {
     if (!commentDraftLoadedRef.current) return
@@ -1893,11 +2054,6 @@ export function TaskCommsPageContent({
   useEffect(() => {
     document.title = `Dev – ${taskName}`
     return () => { document.title = DEFAULT_TAB_TITLE }
-  }, [taskName])
-
-  useEffect(() => {
-    setBashHistoryBrowseIdx(null)
-    setFeedCollapse(createInitialFeedCollapseState())
   }, [taskName])
 
   const bashHistoryOlder = useCallback(() => {
@@ -1960,7 +2116,7 @@ export function TaskCommsPageContent({
       await api.postTaskComms(taskName, content)
       setCommentText('')
       lastSavedCommentRef.current = ''
-      await loadFeed({ incremental: true, prefetchNew: true })
+      await pollFeedIncremental({ prefetchNew: true })
       setScrollToBottomAfterLoad(true)
     } catch (err) {
       setPostError(err instanceof Error ? err.message : String(err))
@@ -1993,7 +2149,7 @@ export function TaskCommsPageContent({
   const PROGRAMMATIC_SCROLL_SMOOTH_MS = 800
 
   useEffect(() => {
-    if (!loading && feedEntries.length > 0) {
+    if (feedReady && feedEntries.length > 0) {
       if (scrollToBottomAfterLoad) {
         setScrollToBottomAfterLoad(false)
         const scrollToBottom = () => {
@@ -2014,7 +2170,7 @@ export function TaskCommsPageContent({
         hasScrolledInitialRef.current = true
       }
     }
-  }, [loading, scrollToBottomAfterLoad, feedEntries.length])
+  }, [feedReady, scrollToBottomAfterLoad, feedEntries.length])
 
   const SCROLL_NEAR_BOTTOM_PX = 80
   const SCROLL_BEHIND_THRESHOLD_PX = 24
@@ -2116,8 +2272,7 @@ export function TaskCommsPageContent({
     }, PROGRAMMATIC_SCROLL_SMOOTH_MS)
   }
 
-  if (loading) return <p className="status">Loading feed…</p>
-  if (error) {
+  if (error && feedEntries.length === 0 && feedReady) {
     return (
       <section className="task-comms">
         <p className="inline-error">{error}</p>
@@ -2172,14 +2327,25 @@ export function TaskCommsPageContent({
           </button>
         </div>
       </div>
-      {(archiveError || downloadCommsZipError || deleteCommsError) && (
-        <p className="inline-error">{archiveError ?? downloadCommsZipError ?? deleteCommsError}</p>
+      {(archiveError || downloadCommsZipError || deleteCommsError || (error && feedEntries.length > 0)) && (
+        <p className="inline-error">{archiveError ?? downloadCommsZipError ?? deleteCommsError ?? error}</p>
       )}
+      {feedRefreshing && <p className="status">Updating feed…</p>}
       <p><Link to="/">← Back to tasks</Link></p>
-      {feedEntries.length === 0 ? (
+      {feedEntries.length === 0 && feedReady ? (
         <p className="empty">No comms or agent logs yet for this task.</p>
-      ) : (
+      ) : feedEntries.length > 0 ? (
         <div className="comms-history">
+          {hasOlder && (
+            <button
+              type="button"
+              className="load-older-feed-btn"
+              onClick={() => void loadOlderFeed()}
+              disabled={loadingOlder}
+            >
+              {loadingOlder ? 'Loading…' : `Load older (${feedEntries.length}/${feedTotal})`}
+            </button>
+          )}
           {feedEntries.map((entry, i) => {
             const entryKey = `${entry.type}:${entry.id}`
             const isLast = i === feedEntries.length - 1
@@ -2201,7 +2367,9 @@ export function TaskCommsPageContent({
             )
           })}
         </div>
-      )}
+      ) : feedRefreshing ? (
+        <p className="status">Updating feed…</p>
+      ) : null}
       <div className="task-commands">
         {activeCommand ? (
           <div className="command-status-row">
