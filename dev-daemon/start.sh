@@ -10,6 +10,8 @@ FRONTEND_DIR="$REPO_ROOT/dev-frontend"
 export PATH="${HOME:?}/.local/bin:/usr/local/bin:$PATH"
 UV_CMD="${DEV_DAEMON_UV:-uv}"
 NPM_CMD="${DEV_DAEMON_NPM:-npm}"
+# preview: production build + vite preview (no HMR reloads). dev: Vite dev server with HMR.
+DEV_DAEMON_FRONTEND="${DEV_DAEMON_FRONTEND:-preview}"
 
 if [[ ! -d "$REPO_ROOT/dev-server" ]] || [[ ! -d "$FRONTEND_DIR" ]]; then
   echo "dev-daemon: repo root not found (expected dev-server and dev-frontend under $REPO_ROOT)" >&2
@@ -28,10 +30,16 @@ trap 'cleanup 130' INT
 trap 'cleanup 143' TERM
 trap 'cleanup $?' EXIT
 
+if [[ "$DEV_DAEMON_FRONTEND" == "preview" ]]; then
+  UVICORN_ARGS=(uvicorn dev_server.main:app --host 127.0.0.1)
+else
+  UVICORN_ARGS=(uvicorn dev_server.main:app --reload --host 127.0.0.1)
+fi
+
 echo "Starting dev-server (backend) on 127.0.0.1:8000..."
 (
   cd "$REPO_ROOT"
-  exec "$UV_CMD" run --project dev-server uvicorn dev_server.main:app --reload --host 127.0.0.1
+  exec "$UV_CMD" run --project dev-server "${UVICORN_ARGS[@]}"
 ) &
 BACKEND_PID=$!
 
@@ -58,8 +66,21 @@ else
   sleep 5
 fi
 
-echo "Starting dev-frontend (Vite) on http://localhost:5173..."
-(
-  cd "$FRONTEND_DIR"
-  exec "$NPM_CMD" run dev
-)
+if [[ "$DEV_DAEMON_FRONTEND" == "preview" ]]; then
+  echo "Building dev-frontend for preview mode..."
+  (
+    cd "$FRONTEND_DIR"
+    "$NPM_CMD" run build
+  )
+  echo "Starting dev-frontend (vite preview) on http://localhost:5173..."
+  (
+    cd "$FRONTEND_DIR"
+    exec "$NPM_CMD" run preview -- --host 127.0.0.1 --port 5173
+  )
+else
+  echo "Starting dev-frontend (Vite dev) on http://localhost:5173..."
+  (
+    cd "$FRONTEND_DIR"
+    exec "$NPM_CMD" run dev
+  )
+fi

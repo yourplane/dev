@@ -16,10 +16,23 @@ Or from anywhere, pointing at the repo:
 /path/to/dev/dev-daemon/start.sh
 ```
 
-- **Backend:** dev-server on `127.0.0.1:8000` (uvicorn with `--reload`).
-- **Frontend:** Vite on http://localhost:5173 (proxies `/api` to the backend).
+- **Backend:** dev-server on `127.0.0.1:8000` (uvicorn; `--reload` only in `dev` frontend mode).
+- **Frontend:** http://localhost:5173 — by default a **production build** served with `vite preview` (no HMR full-page reloads on mobile). Set `DEV_DAEMON_FRONTEND=dev` to use the Vite dev server with HMR for active frontend work.
 
 Open http://localhost:5173 to use the web UI.
+
+### Frontend mode
+
+| `DEV_DAEMON_FRONTEND` | Behavior |
+|-----------------------|----------|
+| `preview` (default) | `vite build` then `vite preview` — stable for daily use and mobile |
+| `dev` | `vite dev` with HMR — use while editing frontend code |
+
+Example:
+
+```bash
+DEV_DAEMON_FRONTEND=dev ./dev-daemon/start.sh
+```
 
 ## On startup
 

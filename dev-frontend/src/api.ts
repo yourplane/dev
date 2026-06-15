@@ -307,12 +307,30 @@ export const api = {
 
   getTaskFeed(
     taskName: string,
-    opts?: { after?: number }
+    opts?: {
+      after?: number
+      limit?: number
+      before?: { created_at: number; id: string }
+    }
   ): Promise<{
-    entries: Array<{ type: string; id: string; created_at: number; deletable?: boolean | null }>;
+    entries: Array<{ type: string; id: string; created_at: number; deletable?: boolean | null }>
+    total?: number | null
+    has_older?: boolean | null
+    oldest_cursor?: { created_at: number; id: string } | null
   }> {
-    const params = opts?.after != null ? `?after=${opts.after}` : '';
-    return request(`/tasks/${encodeURIComponent(taskName)}/feed${params}`);
+    const params = new URLSearchParams()
+    if (opts?.after != null) params.set('after', String(opts.after))
+    if (opts?.limit != null) params.set('limit', String(opts.limit))
+    if (opts?.before) {
+      params.set('before_created_at', String(opts.before.created_at))
+      params.set('before_id', opts.before.id)
+    }
+    const suffix = params.size > 0 ? `?${params.toString()}` : ''
+    return request(`/tasks/${encodeURIComponent(taskName)}/feed${suffix}`)
+  },
+
+  getTaskFeedDeletable(taskName: string): Promise<Record<string, boolean>> {
+    return request(`/tasks/${encodeURIComponent(taskName)}/feed/deletable`)
   },
 
   async getTaskLogFile(taskName: string, filename: string): Promise<string> {

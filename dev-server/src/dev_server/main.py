@@ -43,7 +43,7 @@ from dev_sdk.drafts import (
     set_task_bash_draft,
     set_task_comment_draft,
 )
-from dev_sdk.feed import LOGS_DIR, read_feed
+from dev_sdk.feed import LOGS_DIR, FeedCursor, read_comms_deletable_map, read_feed, read_feed_page
 from dev_sdk.create_pr import (
     CreatePRError,
     create_pull_request,
@@ -462,8 +462,16 @@ class FeedEntryModel(BaseModel):
     deletable: bool | None = None  # comms: DELETE allowed; logs: null
 
 
+class FeedCursorModel(BaseModel):
+    created_at: float
+    id: str
+
+
 class ListFeedResponse(BaseModel):
     entries: list[FeedEntryModel]
+    total: int | None = None
+    has_older: bool | None = None
+    oldest_cursor: FeedCursorModel | None = None
 
 
 class NewTaskDraftResponse(BaseModel):
@@ -847,20 +855,61 @@ def delete_task_comms_file(task_name: str, filename: str) -> None:
 
 
 @app.get("/tasks/{task_name}/feed", response_model=ListFeedResponse)
-def list_task_feed(task_name: str, after: float | None = None) -> ListFeedResponse:
+def list_task_feed(
+    task_name: str,
+    after: float | None = None,
+    limit: int | None = None,
+    before_created_at: float | None = None,
+    before_id: str | None = None,
+) -> ListFeedResponse:
     """List feed entries (comms + agent logs) sorted by file creation date.
-    If `after` is provided, return only entries with created_at > after (for incremental updates).
+
+    If `after` is provided, return only entries with created_at > after (incremental updates).
+    If `limit` is provided (without `after`), return a paginated page; omit `before_*` for the
+    newest page, or pass both `before_created_at` and `before_id` for older pages.
+    Without `limit`, returns all entries (backward compatible).
     """
     task_dir = _task_dir(task_name)
+    before = None
+    if before_created_at is not None and before_id is not None:
+        before = FeedCursor(created_at=before_created_at, id=before_id)
+    elif before_created_at is not None or before_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="before_created_at and before_id must both be provided",
+        )
+
+    if limit is not None or after is not None or before is not None:
+        page = read_feed_page(task_dir, limit=limit, before=before, after=after)
+        oldest = (
+            FeedCursorModel(created_at=page.oldest_cursor.created_at, id=page.oldest_cursor.id)
+            if page.oldest_cursor is not None
+            else None
+        )
+        return ListFeedResponse(
+            entries=[
+                FeedEntryModel(type=e.type, id=e.id, created_at=e.created_at, deletable=e.deletable)
+                for e in page.entries
+            ],
+            total=page.total if limit is not None else None,
+            has_older=page.has_older if limit is not None else None,
+            oldest_cursor=oldest if limit is not None else None,
+        )
+
     entries = read_feed(task_dir)
-    if after is not None:
-        entries = [e for e in entries if e.created_at > after]
     return ListFeedResponse(
         entries=[
             FeedEntryModel(type=e.type, id=e.id, created_at=e.created_at, deletable=e.deletable)
             for e in entries
         ]
     )
+
+
+@app.get("/tasks/{task_name}/feed/deletable")
+def list_task_feed_deletable(task_name: str) -> dict[str, bool]:
+    """Return deletable flags for all comms files (for patching after new agent logs)."""
+    task_dir = _task_dir(task_name)
+    return read_comms_deletable_map(task_dir)
 
 
 def _sse_format(data: str) -> str:
