@@ -3,9 +3,9 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dev-sdk"
+name = "pr-comments"
 version = "0.1.0"
-description = "SDK for dev task management: task lifecycle, comms, agent flows, and PR creation"
+description = "Standalone CLI and library for pulling PR review comments (GitHub and Bitbucket Cloud)"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { text = "MIT" }
@@ -13,11 +13,8 @@ authors = [
     { name = "Developer" }
 ]
 dependencies = [
-    "pr-comments",
+    "click>=8.0",
 ]
-
-[tool.uv.sources]
-pr-comments = { workspace = true }
 
 [project.optional-dependencies]
 dev = [
@@ -25,11 +22,11 @@ dev = [
     "pytest-cov>=4.0",
 ]
 
+[project.scripts]
+pr-comments = "pr_comments.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[tool.setuptools.package-data]
-dev_sdk = ["prompts/*.md"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
