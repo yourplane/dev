@@ -780,29 +780,31 @@ function AgentCommandSplitButton({
 
   return (
     <div className="command-split" ref={containerRef}>
-      <button
-        type="button"
-        className="command-btn command-split-main"
-        disabled={disabled}
-        onClick={() => onRunCommand(effectiveSelected)}
-      >
-        {label}
-      </button>
-      <span className="command-split-divider" aria-hidden />
-      <button
-        type="button"
-        className="command-btn command-split-toggle"
-        disabled={disabled}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-label="Choose agent command"
-        onClick={(e) => {
-          e.stopPropagation()
-          setOpen((v) => !v)
-        }}
-      >
-        <span className="command-split-chevron" aria-hidden>▾</span>
-      </button>
+      <div className="command-split-control">
+        <button
+          type="button"
+          className="command-btn command-split-main"
+          disabled={disabled}
+          onClick={() => onRunCommand(effectiveSelected)}
+        >
+          {label}
+        </button>
+        <span className="command-split-divider" aria-hidden />
+        <button
+          type="button"
+          className="command-btn command-split-toggle"
+          disabled={disabled}
+          aria-haspopup="menu"
+          aria-expanded={open}
+          aria-label="Choose agent command"
+          onClick={(e) => {
+            e.stopPropagation()
+            setOpen((v) => !v)
+          }}
+        >
+          <span className="command-split-chevron" aria-hidden>▾</span>
+        </button>
+      </div>
       {open && (
         <ul className="command-split-menu" role="menu">
           {available.map((cmd) => (

@@ -664,17 +664,22 @@
 
 .command-split {
   position: relative;
+  display: inline-block;
+}
+
+.command-split-control {
   display: inline-flex;
   align-items: stretch;
   border-radius: 6px;
+  overflow: hidden;
   background: #16a34a;
 }
 
-.command-split:hover .command-btn:not(:disabled) {
+.command-split-control:hover .command-btn:not(:disabled) {
   background: #15803d;
 }
 
-.command-split .command-btn {
+.command-split-control .command-btn {
   border-radius: 0;
   min-width: unset;
 }
@@ -682,7 +687,6 @@
 .command-split-main {
   min-width: 6.5rem;
   padding: 0.5rem 1.25rem;
-  border-radius: 6px 0 0 6px;
 }
 
 .command-split-divider {
@@ -696,7 +700,6 @@
   padding: 0 0.35rem;
   min-width: 1.4rem;
   width: 1.4rem;
-  border-radius: 0 6px 6px 0;
   display: flex;
   align-items: center;
   justify-content: center;
