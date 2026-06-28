@@ -21,8 +21,10 @@ DEV_AGENT_CMD_ENV = "DEV_AGENT_CMD"
 AGENT_CHAT_ID_FILE = "agent-chat-id"
 PLAN_LOGS_DIR = ".logs"
 TASK_PLAN_DRAFT = "task-plan-draft.md"
+TASK_QUESTION_DRAFT = "task-question-draft.md"
 
 PLAN_IMPLEMENT_STREAM_LOG_PREFIX = "dev-plan-stream-"
+QUESTION_STREAM_LOG_PREFIX = "dev-question-stream-"
 IMPLEMENT_STREAM_LOG_PREFIX = "dev-implement-stream-"
 DO_STREAM_LOG_PREFIX = "dev-do-stream-"
 
@@ -36,6 +38,7 @@ def _load_agent_prompt(name: str) -> str:
 
 
 PLAN_MODE_PROMPT = _load_agent_prompt("plan_mode.md")
+QUESTION_MODE_PROMPT = _load_agent_prompt("question_mode.md")
 IMPLEMENT_MODE_PROMPT = _load_agent_prompt("implement_mode.md")
 
 STREAM_READER_TIMEOUT_SEC = 300
@@ -327,6 +330,12 @@ class RunPlanImplementResult:
 
 
 @dataclass(frozen=True)
+class RunQuestionResult:
+    stream_log_path: Path
+    comms_path: Path
+
+
+@dataclass(frozen=True)
 class RunImplementResult:
     stream_log_path: Path
     comms_path: Path | None = None
@@ -353,6 +362,29 @@ def run_plan_implement(
     draft_path.write_text(plan_text, encoding="utf-8")
     comms_path = add_comms(task_dir, "agent", plan_text, kind="plan")
     return RunPlanImplementResult(stream_log_path=stream_log_path, comms_path=comms_path)
+
+
+def run_question_mode(
+    task_dir: Path,
+    *,
+    on_stream_line: StreamLineCallback | None = None,
+    on_start: Callable[[Path], None] | None = None,
+    cancel_event: threading.Event | None = None,
+) -> RunQuestionResult:
+    """Run agent with question-mode prompt; write stream to log, extract questions, write task-question-draft.md and add comms (question)."""
+    stream_log_path, streamed_output = _run_agent_ask_stream_json(
+        task_dir,
+        QUESTION_MODE_PROMPT,
+        QUESTION_STREAM_LOG_PREFIX,
+        on_stream_line=on_stream_line,
+        on_start=on_start,
+        cancel_event=cancel_event,
+    )
+    question_text = extract_last_assistant_section_from_stream_json(streamed_output)
+    draft_path = task_dir / TASK_QUESTION_DRAFT
+    draft_path.write_text(question_text, encoding="utf-8")
+    comms_path = add_comms(task_dir, "agent", question_text, kind="question")
+    return RunQuestionResult(stream_log_path=stream_log_path, comms_path=comms_path)
 
 
 def run_implement(

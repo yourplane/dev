@@ -96,6 +96,35 @@ def test_start_command_again_returns_409(client_with_tasks: TestClient, task_dir
     block.set()
 
 
+def test_start_question_command_returns_201(client_with_tasks: TestClient, task_dir: Path) -> None:
+    """Starting question command returns 201 and status shows active until the run finishes."""
+    block = threading.Event()
+
+    def blocking_run_question(*args: object, **kwargs: object) -> None:
+        block.wait()
+
+    with patch("dev_server.main.run_question_mode", side_effect=blocking_run_question):
+        resp = client_with_tasks.post(
+            "/tasks/mytask/commands",
+            json={"command": "question"},
+        )
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["command"] == "question"
+    assert data["status"] == "running"
+
+    resp2 = client_with_tasks.get("/tasks/mytask/commands")
+    assert resp2.status_code == 200
+    assert resp2.json()["active"] is True
+    assert resp2.json()["command"] == "question"
+
+    block.set()
+    time.sleep(0.3)
+    resp3 = client_with_tasks.get("/tasks/mytask/commands")
+    assert resp3.status_code == 200
+    assert resp3.json()["active"] is False
+
+
 def test_status_inactive_after_process_exits(client_with_tasks: TestClient, task_dir: Path) -> None:
     """After the run finishes, status becomes inactive."""
     with patch("dev_server.main.run_implement") as mock_run:

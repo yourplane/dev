@@ -705,10 +705,126 @@ function CreateTaskForm({
 }
 
 const COMMAND_LABEL: Record<string, string> = {
+  question: 'Question',
   'plan-implement': 'Plan',
   implement: 'Implement',
   do: 'Do',
   bash: 'Bash',
+}
+
+type AgentModeCommand = 'question' | 'plan-implement' | 'implement'
+
+const AGENT_MODE_DEFAULT: AgentModeCommand = 'question'
+const LAST_AGENT_CMD_STORAGE_KEY = 'dev_last_agent_command'
+
+function readLastAgentCommand(): AgentModeCommand {
+  try {
+    const stored = localStorage.getItem(LAST_AGENT_CMD_STORAGE_KEY)
+    if (stored === 'question' || stored === 'plan-implement' || stored === 'implement') {
+      return stored
+    }
+  } catch {
+    // ignore
+  }
+  return AGENT_MODE_DEFAULT
+}
+
+function writeLastAgentCommand(cmd: AgentModeCommand) {
+  try {
+    localStorage.setItem(LAST_AGENT_CMD_STORAGE_KEY, cmd)
+  } catch {
+    // ignore
+  }
+}
+
+function AgentCommandSplitButton({
+  selectedCommand,
+  onSelectCommand,
+  onRunCommand,
+  startingCommand,
+  disabled,
+  hasRepo,
+}: {
+  selectedCommand: AgentModeCommand
+  onSelectCommand: (cmd: AgentModeCommand) => void
+  onRunCommand: (cmd: AgentModeCommand) => void
+  startingCommand: string | null
+  disabled: boolean
+  hasRepo: boolean
+}) {
+  const [open, setOpen] = useState(false)
+  const containerRef = useRef<HTMLDivElement>(null)
+
+  const available: AgentModeCommand[] = hasRepo
+    ? ['question', 'plan-implement', 'implement']
+    : ['question', 'plan-implement']
+
+  const effectiveSelected = available.includes(selectedCommand)
+    ? selectedCommand
+    : AGENT_MODE_DEFAULT
+
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    return () => document.removeEventListener('mousedown', onDocClick)
+  }, [open])
+
+  const label = startingCommand === effectiveSelected
+    ? 'Starting…'
+    : (COMMAND_LABEL[effectiveSelected] ?? effectiveSelected)
+
+  return (
+    <div className="command-split" ref={containerRef}>
+      <button
+        type="button"
+        className="command-btn command-split-main"
+        disabled={disabled}
+        onClick={() => onRunCommand(effectiveSelected)}
+      >
+        {label}
+      </button>
+      <button
+        type="button"
+        className="command-btn command-split-toggle"
+        disabled={disabled}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label="Choose agent command"
+        onClick={() => setOpen((v) => !v)}
+      >
+        ▾
+      </button>
+      {open && (
+        <ul className="command-split-menu" role="menu">
+          {available.map((cmd) => (
+            <li key={cmd} role="none">
+              <button
+                type="button"
+                role="menuitem"
+                className={
+                  cmd === effectiveSelected
+                    ? 'command-split-menu-item command-split-menu-item-active'
+                    : 'command-split-menu-item'
+                }
+                onClick={() => {
+                  onSelectCommand(cmd)
+                  onRunCommand(cmd)
+                  setOpen(false)
+                }}
+              >
+                {COMMAND_LABEL[cmd]}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 function isBashCommsEntry(entryId: string): boolean {
@@ -1397,6 +1513,7 @@ export function TaskCommsPageContent({
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
   const [activeLogFilename, setActiveLogFilename] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
+  const [lastAgentCommand, setLastAgentCommand] = useState<AgentModeCommand>(readLastAgentCommand)
   const [startingCommand, setStartingCommand] = useState<string | null>(null)
   const [cancelling, setCancelling] = useState(false)
   const [creatingPr, setCreatingPr] = useState(false)
@@ -1887,6 +2004,11 @@ export function TaskCommsPageContent({
     setStartingCommand(command)
     try {
       await api.startTaskCommand(taskName, command)
+      if (command === 'question' || command === 'plan-implement' || command === 'implement') {
+        const agentCmd = command as AgentModeCommand
+        setLastAgentCommand(agentCmd)
+        writeLastAgentCommand(agentCmd)
+      }
       await loadCommandStatus()
     } catch (e) {
       setCommandError(e instanceof Error ? e.message : String(e))
@@ -2393,24 +2515,14 @@ export function TaskCommsPageContent({
           </div>
         ) : (
           <div className="command-buttons">
-            <button
-              type="button"
-              className="command-btn"
+            <AgentCommandSplitButton
+              selectedCommand={lastAgentCommand}
+              onSelectCommand={setLastAgentCommand}
+              onRunCommand={(cmd) => void handleStartCommand(cmd)}
+              startingCommand={startingCommand}
               disabled={!!startingCommand}
-              onClick={() => handleStartCommand('plan-implement')}
-            >
-              {startingCommand === 'plan-implement' ? 'Starting…' : 'Plan'}
-            </button>
-            {workspaceInfo && workspaceInfo.repo_label != null && (
-              <button
-                type="button"
-                className="command-btn"
-                disabled={!!startingCommand}
-                onClick={() => handleStartCommand('implement')}
-              >
-                {startingCommand === 'implement' ? 'Starting…' : 'Implement'}
-              </button>
-            )}
+              hasRepo={workspaceInfo?.repo_label != null}
+            />
             {(!workspaceInfo || workspaceInfo.repo_label != null) && (
               <button
                 type="button"

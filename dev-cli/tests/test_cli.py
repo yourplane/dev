@@ -236,6 +236,37 @@ def test_plan_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) 
     assert list((cwd / ".logs").glob("dev-plan-stream-*.log"))
 
 
+def test_question_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) -> None:
+    with runner.isolated_filesystem(tmp_path):
+        cwd = Path.cwd()
+        (cwd / "comms").mkdir()
+        (cwd / "comms" / "index.txt").write_text("")
+        streamed_line = (
+            '{"type": "assistant", "message": {"content": [{"type": "text", "text": "1. What scope?"}]}, '
+            '"model_call_id": "call-1"}\n'
+        )
+        mock_proc = MagicMock()
+        mock_proc.stdout = iter([streamed_line])
+        mock_proc.stderr.read.return_value = ""
+        mock_proc.returncode = 0
+        mock_proc.wait.return_value = None
+        with patch("dev_sdk.agent_run.subprocess.Popen") as mock_popen:
+            mock_popen.return_value = mock_proc
+            result = runner.invoke(main, ["question"])
+    assert result.exit_code == 0
+    argv = mock_popen.call_args[0][0]
+    assert "--mode" in argv and "ask" in argv
+    assert "--resume" not in argv
+    draft = cwd / "task-question-draft.md"
+    assert draft.exists()
+    assert draft.read_text() == "1. What scope?"
+    order = [n.strip() for n in (cwd / "comms" / "index.txt").read_text().splitlines() if n.strip()]
+    assert len(order) == 1 and "agent-question" in order[0]
+    assert "Starting question" in result.output
+    assert "Questions written to" in result.output
+    assert list((cwd / ".logs").glob("dev-question-stream-*.log"))
+
+
 def test_create_with_unknown_shorthand_exits_nonzero(
     runner: CliRunner, tmp_path: Path
 ) -> None:
@@ -474,6 +505,12 @@ def test_plan_implement_help() -> None:
     result = CliRunner().invoke(main, ["plan-implement", "--help"])
     assert result.exit_code == 0
     assert "plan-implement" in result.output.lower()
+
+
+def test_question_help() -> None:
+    result = CliRunner().invoke(main, ["question", "--help"])
+    assert result.exit_code == 0
+    assert "question" in result.output.lower()
 
 
 def test_implement_help() -> None:
