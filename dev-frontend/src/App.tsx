@@ -788,6 +788,7 @@ function AgentCommandSplitButton({
       >
         {label}
       </button>
+      <span className="command-split-divider" aria-hidden />
       <button
         type="button"
         className="command-btn command-split-toggle"
@@ -795,7 +796,10 @@ function AgentCommandSplitButton({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label="Choose agent command"
-        onClick={() => setOpen((v) => !v)}
+        onClick={(e) => {
+          e.stopPropagation()
+          setOpen((v) => !v)
+        }}
       >
         <span className="command-split-chevron" aria-hidden>▾</span>
       </button>
