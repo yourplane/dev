@@ -665,20 +665,38 @@
 .command-split {
   position: relative;
   display: inline-flex;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #16a34a;
+}
+
+.command-split:hover .command-btn:not(:disabled) {
+  background: #15803d;
+}
+
+.command-split .command-btn {
+  border-radius: 0;
+  min-width: unset;
 }
 
 .command-split-main {
-  border-top-right-radius: 0;
-  border-bottom-right-radius: 0;
   min-width: 6.5rem;
+  padding: 0.5rem 1.25rem;
 }
 
 .command-split-toggle {
-  min-width: auto;
-  padding: 0.5rem 0.65rem;
-  border-top-left-radius: 0;
-  border-bottom-left-radius: 0;
-  border-left: 1px solid rgba(255, 255, 255, 0.25);
+  padding: 0 0.4rem;
+  min-width: 1.5rem;
+  width: 1.5rem;
+  border-left: 1px solid rgba(255, 255, 255, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.command-split-chevron {
+  font-size: 0.55rem;
+  line-height: 1;
 }
 
 .command-split-menu {
