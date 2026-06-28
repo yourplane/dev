@@ -24,6 +24,7 @@ from dev_sdk.agent_run import (
     run_implement,
     run_do,
     run_plan_implement,
+    run_question_mode,
 )
 from dev_sdk.comms import (
     add_comms,
@@ -53,7 +54,7 @@ from dev_sdk.create_pr import (
 from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repos
 from dev_sdk.task_manager import TaskManager
 
-SUPPORTED_COMMANDS = ("plan-implement", "implement", "do", "bash")
+SUPPORTED_COMMANDS = ("question", "plan-implement", "implement", "do", "bash")
 logger = logging.getLogger("dev_server")
 
 _DEFAULT_BASH_MAX_OUTPUT_BYTES = 2_000_000
@@ -301,7 +302,9 @@ def _run_command_in_thread(
                 _command_registry[task_name]["active_log_filename"] = stream_log_path.name
 
     try:
-        if command_id == "plan-implement":
+        if command_id == "question":
+            run_question_mode(task_dir, on_start=on_start, cancel_event=cancel_requested)
+        elif command_id == "plan-implement":
             run_plan_implement(task_dir, on_start=on_start, cancel_event=cancel_requested)
         elif command_id == "implement":
             run_implement(task_dir, on_start=on_start, cancel_event=cancel_requested)
@@ -421,7 +424,7 @@ class PostCommsResponse(BaseModel):
 
 
 class StartCommandRequest(BaseModel):
-    command: str = Field(..., description="Command id: plan-implement, implement, do, or bash")
+    command: str = Field(..., description="Command id: question, plan-implement, implement, do, or bash")
     prompt: str | None = Field(
         None,
         description="For `do`: agent prompt. For `bash`: shell command string passed to `bash -c`.",

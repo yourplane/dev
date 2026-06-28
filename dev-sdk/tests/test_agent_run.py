@@ -4,8 +4,10 @@ import pytest
 
 from dev_sdk.agent_run import (
     AgentRunError,
+    QUESTION_STREAM_LOG_PREFIX,
     _remove_empty_log_file,
     extract_last_assistant_section_from_stream_json,
+    run_question_mode,
 )
 
 
@@ -100,3 +102,30 @@ def test_remove_empty_log_file_keeps_nonempty_file(tmp_path) -> None:
     log_path.write_text("line\n")
     _remove_empty_log_file(log_path)
     assert log_path.exists()
+
+
+def test_run_question_mode_writes_draft_and_comms(tmp_path, monkeypatch) -> None:
+    """Question mode writes draft file and agent-question comms entry."""
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+    (task_dir / "comms").mkdir()
+    (task_dir / "comms" / "index.txt").write_text("")
+
+    streamed = (
+        '{"type": "assistant", "message": {"content": [{"type": "text", "text": "1. Clarify scope?"}]}, '
+        '"model_call_id": "c1"}\n'
+    )
+
+    def fake_run(task_dir_arg, prompt, prefix, **kwargs):
+        log_path = task_dir / ".logs" / f"{prefix}test.log"
+        log_path.parent.mkdir(exist_ok=True)
+        log_path.write_text(streamed)
+        return log_path, streamed
+
+    monkeypatch.setattr("dev_sdk.agent_run._run_agent_ask_stream_json", fake_run)
+    result = run_question_mode(task_dir)
+    assert result.comms_path.name.endswith("-agent-question.md")
+    assert (task_dir / "task-question-draft.md").read_text() == "1. Clarify scope?"
+    index = (task_dir / "comms" / "index.txt").read_text()
+    assert "agent-question" in index
+    assert QUESTION_STREAM_LOG_PREFIX in result.stream_log_path.name

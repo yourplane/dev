@@ -659,6 +659,91 @@
 .command-buttons {
   display: flex;
   gap: 0.5rem;
+  align-items: stretch;
+}
+
+.command-split {
+  position: relative;
+  display: inline-block;
+}
+
+.command-split-control {
+  display: inline-flex;
+  align-items: stretch;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #16a34a;
+}
+
+.command-split-control:hover .command-btn:not(:disabled) {
+  background: #15803d;
+}
+
+.command-split-control .command-btn {
+  border-radius: 0;
+  min-width: unset;
+}
+
+.command-split-main {
+  min-width: 6.5rem;
+  padding: 0.5rem 1.25rem;
+}
+
+.command-split-divider {
+  width: 1px;
+  flex-shrink: 0;
+  background: #fff;
+  opacity: 0.9;
+}
+
+.command-split-toggle {
+  padding: 0 0.35rem;
+  min-width: 1.4rem;
+  width: 1.4rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.command-split-chevron {
+  font-size: 0.55rem;
+  line-height: 1;
+}
+
+.command-split-menu {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  z-index: 100;
+  min-width: 100%;
+  margin: 0;
+  padding: 0.25rem 0;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);
+}
+
+.command-split-menu-item {
+  display: block;
+  width: 100%;
+  padding: 0.45rem 0.85rem;
+  border: none;
+  background: transparent;
+  color: #111;
+  text-align: left;
+  font-size: 0.95rem;
+  cursor: pointer;
+}
+
+.command-split-menu-item:hover {
+  background: #f3f4f6;
+}
+
+.command-split-menu-item-active {
+  font-weight: 600;
+  background: #ecfdf5;
 }
 
 .command-btn {

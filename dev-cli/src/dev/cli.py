@@ -15,6 +15,7 @@ from dev.commands import (
     launch_interact,
     list_tasks,
     plan_implement_group,
+    question_group,
     repos_group,
     start_task,
 )
@@ -48,6 +49,7 @@ main.add_command(list_tasks)
 main.add_command(archive_task)
 main.add_command(copy_from_archive_cmd)
 main.add_command(plan_implement_group)
+main.add_command(question_group)
 main.add_command(implement_cmd)
 main.add_command(create_pr)
 main.add_command(comms_group)

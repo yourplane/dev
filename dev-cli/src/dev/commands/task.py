@@ -13,6 +13,7 @@ from dev_sdk.agent_run import (
     AgentRunError,
     run_implement,
     run_plan_implement,
+    run_question_mode,
 )
 from dev_sdk.comms import add_comms, comms_dir, read_index
 from dev_sdk.repo_config import resolve_repo
@@ -114,6 +115,24 @@ def _run_plan_implement_mode(task_path: Path | None) -> None:
         click.echo()
         click.echo()
         click.echo(click.style(f"Plan written to {result.comms_path.relative_to(task_dir)}", dim=True))
+    except AgentRunError as e:
+        click.echo(str(e), err=True)
+        raise SystemExit(1)
+
+
+def _run_question_mode(task_path: Path | None) -> None:
+    """Run agent question mode via SDK; echo progress and result."""
+    task_dir = _resolve_task_dir(task_path)
+    click.echo("Starting question mode (stream-json mode)...")
+    try:
+        result = run_question_mode(
+            task_dir,
+            on_stream_line=_make_stream_format_callback(),
+            on_start=lambda p: click.echo(f"Stream log: {p}"),
+        )
+        click.echo()
+        click.echo()
+        click.echo(click.style(f"Questions written to {result.comms_path.relative_to(task_dir)}", dim=True))
     except AgentRunError as e:
         click.echo(str(e), err=True)
         raise SystemExit(1)
@@ -433,6 +452,25 @@ def plan_implement_group(
     """Run headless plan-implement mode."""
     if ctx.invoked_subcommand is None:
         _run_plan_implement_mode(task_path=task_path)
+
+
+@click.group("question", invoke_without_command=True)
+@click.option(
+    "--task",
+    "-t",
+    "task_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Path to task directory. If not set, use current working directory.",
+)
+@click.pass_context
+def question_group(
+    ctx: click.Context,
+    task_path: Path | None,
+) -> None:
+    """Run headless question mode: conversational clarifying questions."""
+    if ctx.invoked_subcommand is None:
+        _run_question_mode(task_path=task_path)
 
 
 @click.command("implement")

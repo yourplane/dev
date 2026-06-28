@@ -128,10 +128,11 @@ describe('App', () => {
     })
   })
 
-  it('hides Implement when the task has no cloned repository', async () => {
+  it('defaults to Question in the agent command split button', async () => {
     const noop = () => {}
     const { api } = await import('./api')
     vi.mocked(api.getTaskWorkspace).mockResolvedValue({ repo_label: null })
+    localStorage.removeItem('dev_last_agent_command')
 
     render(
       <MemoryRouter>
@@ -140,10 +141,32 @@ describe('App', () => {
     )
 
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Implement' })).toBeNull()
+      const questionBtn = screen.getByRole('button', { name: 'Question' })
+      expect((questionBtn as HTMLButtonElement).disabled).toBe(false)
     })
-    const planBtn = screen.getByRole('button', { name: 'Plan' })
-    expect((planBtn as HTMLButtonElement).disabled).toBe(false)
+    expect(screen.queryByRole('button', { name: 'Plan' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Implement' })).toBeNull()
+  })
+
+  it('shows Implement in agent command menu when a repo is cloned', async () => {
+    const noop = () => {}
+    const { api } = await import('./api')
+    vi.mocked(api.getTaskWorkspace).mockResolvedValue({
+      repo_label: 'https://github.com/acme/repo.git',
+    })
+    localStorage.removeItem('dev_last_agent_command')
+
+    render(
+      <MemoryRouter>
+        <TaskCommsPageContent taskName="test-task" navigate={noop} />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Question' })).toBeTruthy()
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Choose agent command' }))
+    expect(screen.getByRole('menuitem', { name: 'Implement' })).toBeTruthy()
   })
 
   it('bash mode submits shell input and clears bash draft', async () => {
