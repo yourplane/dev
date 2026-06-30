@@ -2511,7 +2511,7 @@ export function TaskCommsPageContent({
                 lastEntryRef={lastCommsEntryRef}
                 onDeleteComms={handleDeleteComms}
                 taskName={taskName}
-                onFeedRefresh={() => void loadFeed()}
+                onFeedRefresh={() => void loadFeedTail()}
               />
             )
           })}

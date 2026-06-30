@@ -37,7 +37,10 @@ export function tryParseQuestionPayload(content: string): QuestionPayload | null
       if (!Array.isArray(item.options)) return null
       if (!item.options.every((o) => typeof o === 'string')) return null
     }
-    return normalizeQuestionIds(obj as QuestionPayload)
+    return normalizeQuestionIds({
+      intro: obj.intro,
+      questions: obj.questions as QuestionItem[],
+    })
   } catch {
     return null
   }
