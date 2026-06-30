@@ -16,6 +16,14 @@ Or from anywhere, pointing at the repo:
 /path/to/dev/dev-daemon/start.sh
 ```
 
+### Restart
+
+```bash
+./dev-daemon/restart.sh
+```
+
+If you installed the systemd user service (`install.sh`), this runs `systemctl --user restart dev-daemon.service`. Otherwise it stops processes listening on ports **8000** (backend) and **5173** (frontend), then runs `start.sh` in the foreground.
+
 - **Backend:** dev-server on `127.0.0.1:8000` (uvicorn; `--reload` only in `dev` frontend mode).
 - **Frontend:** http://localhost:5173 — by default a **production build** served with `vite preview` (no HMR full-page reloads on mobile). Set `DEV_DAEMON_FRONTEND=dev` to use the Vite dev server with HMR for active frontend work.
 
@@ -52,7 +60,9 @@ This creates `~/.config/systemd/user/dev-daemon.service` with the correct paths,
 ./dev-daemon/install.sh --now
 ```
 
-Useful commands: `systemctl --user start dev-daemon.service`, `systemctl --user stop dev-daemon.service`, `journalctl --user -u dev-daemon.service -f`, `systemctl --user disable dev-daemon.service`.
+Useful commands: `systemctl --user start dev-daemon.service`, `systemctl --user stop dev-daemon.service`, `systemctl --user restart dev-daemon.service`, `journalctl --user -u dev-daemon.service -f`, `systemctl --user disable dev-daemon.service`.
+
+Or from the repo root: `./dev-daemon/restart.sh` (uses systemd when installed).
 
 ### systemd (manual)
 
