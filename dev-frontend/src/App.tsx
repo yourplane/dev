@@ -758,9 +758,11 @@ const COMMAND_LABEL: Record<string, string> = {
   implement: 'Implement',
   do: 'Do',
   bash: 'Bash',
+  'merge-from-main': 'Merge from main',
 }
 
 type AgentModeCommand = 'question' | 'plan-implement' | 'implement'
+type AgentMenuCommand = AgentModeCommand | 'merge-from-main'
 
 const AGENT_MODE_DEFAULT: AgentModeCommand = 'question'
 const LAST_AGENT_CMD_STORAGE_KEY = 'dev_last_agent_command'
@@ -795,7 +797,7 @@ function AgentCommandSplitButton({
 }: {
   selectedCommand: AgentModeCommand
   onSelectCommand: (cmd: AgentModeCommand) => void
-  onRunCommand: (cmd: AgentModeCommand) => void
+  onRunCommand: (cmd: AgentMenuCommand) => void
   startingCommand: string | null
   disabled: boolean
   hasRepo: boolean
@@ -803,11 +805,15 @@ function AgentCommandSplitButton({
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const available: AgentModeCommand[] = hasRepo
+  const agentCommands: AgentModeCommand[] = hasRepo
     ? ['question', 'plan-implement', 'implement']
     : ['question', 'plan-implement']
 
-  const effectiveSelected = available.includes(selectedCommand)
+  const menuItems: AgentMenuCommand[] = hasRepo
+    ? [...agentCommands, 'merge-from-main']
+    : agentCommands
+
+  const effectiveSelected = agentCommands.includes(selectedCommand)
     ? selectedCommand
     : AGENT_MODE_DEFAULT
 
@@ -855,7 +861,7 @@ function AgentCommandSplitButton({
       </div>
       {open && (
         <ul className="command-split-menu" role="menu">
-          {available.map((cmd) => (
+          {menuItems.map((cmd) => (
             <li key={cmd} role="none">
               <button
                 type="button"
@@ -866,7 +872,9 @@ function AgentCommandSplitButton({
                     : 'command-split-menu-item'
                 }
                 onClick={() => {
-                  onSelectCommand(cmd)
+                  if (cmd !== 'merge-from-main') {
+                    onSelectCommand(cmd)
+                  }
                   onRunCommand(cmd)
                   setOpen(false)
                 }}
@@ -2026,7 +2034,7 @@ export function TaskCommsPageContent({
   }, [activeCommand, activeLogFilename, pollFeedIncremental])
 
   useEffect(() => {
-    if (activeCommand === 'bash' && activeBashCommsFilename) {
+    if (activeBashCommsFilename && activeCommand) {
       pollFeedIncremental({ prefetchNew: true })
     }
   }, [activeCommand, activeBashCommsFilename, pollFeedIncremental])
@@ -2051,7 +2059,8 @@ export function TaskCommsPageContent({
   }, [taskName, activeCommand, activeLogFilename])
 
   useEffect(() => {
-    if (!activeCommand || activeCommand !== 'bash' || !activeBashCommsFilename) return
+    if (!activeCommand || !activeBashCommsFilename) return
+    if (activeCommand !== 'bash' && activeCommand !== 'merge-from-main') return
     let cancelled = false
     const poll = async () => {
       try {

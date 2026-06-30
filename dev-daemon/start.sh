@@ -67,11 +67,15 @@ else
 fi
 
 if [[ "$DEV_DAEMON_FRONTEND" == "preview" ]]; then
-  echo "Building dev-frontend for preview mode..."
-  (
-    cd "$FRONTEND_DIR"
-    "$NPM_CMD" run build
-  )
+  if [[ "${DEV_DAEMON_SKIP_BUILD:-}" == "1" ]]; then
+    echo "Skipping dev-frontend build (DEV_DAEMON_SKIP_BUILD=1)."
+  else
+    echo "Building dev-frontend for preview mode..."
+    (
+      cd "$FRONTEND_DIR"
+      "$NPM_CMD" run build
+    )
+  fi
   echo "Starting dev-frontend (vite preview) on http://localhost:5173..."
   (
     cd "$FRONTEND_DIR"
