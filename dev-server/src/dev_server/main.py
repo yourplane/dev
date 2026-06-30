@@ -464,7 +464,7 @@ def _run_merge_from_main_in_thread(
             task_dir,
             task_name,
             shell_command=shell_command,
-            cwd=repo_root,
+            cwd=task_dir,
             cancel_requested=cancel_requested,
         )
         if cancel_requested.is_set() or cancelled:

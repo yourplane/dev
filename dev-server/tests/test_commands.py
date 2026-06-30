@@ -556,3 +556,37 @@ def test_start_merge_from_main_returns_201_and_status_active(
     resp3 = client_with_tasks.get("/tasks/mytask/commands")
     assert resp3.status_code == 200
     assert resp3.json()["active"] is False
+
+
+def test_merge_from_main_runs_git_bash_from_task_dir(
+    client_with_tasks: TestClient, task_dir: Path
+) -> None:
+    """Git phase runs the displayed cd command from the task root, not the nested repo."""
+    repo_root = task_dir / "myrepo"
+    seen: dict[str, object] = {}
+
+    def fake_stream(
+        task_dir_arg: Path,
+        task_name: str,
+        *,
+        shell_command: str,
+        cwd: Path,
+        cancel_requested: threading.Event,
+    ) -> tuple[int | None, bool, bool, bool]:
+        seen["task_dir"] = task_dir_arg
+        seen["cwd"] = cwd
+        seen["shell_command"] = shell_command
+        return 0, False, False, False
+
+    with patch("dev_server.main.validate_merge_from_main_can_start", return_value=repo_root):
+        with patch("dev_server.main.has_conflicted_merge_in_progress", return_value=False):
+            with patch("dev_server.main._stream_bash_command_in_cwd", side_effect=fake_stream):
+                resp = client_with_tasks.post(
+                    "/tasks/mytask/commands",
+                    json={"command": "merge-from-main"},
+                )
+    assert resp.status_code == 201
+    time.sleep(0.3)
+    assert seen["task_dir"] == task_dir
+    assert seen["cwd"] == task_dir
+    assert str(seen["shell_command"]).startswith("cd myrepo && ")

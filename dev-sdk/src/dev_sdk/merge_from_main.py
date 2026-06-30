@@ -6,6 +6,7 @@ validation failure before git steps run.
 
 from __future__ import annotations
 
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -61,10 +62,10 @@ def validate_merge_from_main_can_start(task_root: Path) -> Path:
 
 
 def merge_shell_command(repo_root: Path, task_root: Path) -> str:
-    """Shell command shown in bash-style comms and passed to bash -c (cwd is repo_root)."""
+    """Shell command for bash-style comms; run with cwd set to task_root."""
     try:
         rel = repo_root.resolve().relative_to(task_root.resolve())
-        prefix = f"cd {rel} && "
+        prefix = f"cd {shlex.quote(str(rel))} && "
     except ValueError:
         prefix = ""
     return (
