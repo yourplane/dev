@@ -204,16 +204,21 @@ class CloudStore:
     def update_task(self, task_name: str, **fields: Any) -> None:
         if not fields:
             return
-        parts = []
+        names: dict[str, str] = {}
+        parts: list[str] = []
         values: dict[str, Any] = {}
         for i, (k, v) in enumerate(fields.items()):
-            parts.append(f"{k} = :v{i}")
+            name_key = f"#k{i}"
+            names[name_key] = k
+            parts.append(f"{name_key} = :v{i}")
             values[f":v{i}"] = v
-        self._table.update_item(
-            Key={"pk": f"TASK#{task_name}", "sk": "META"},
-            UpdateExpression="SET " + ", ".join(parts),
-            ExpressionAttributeValues=_ddb(values),
-        )
+        params: dict[str, Any] = {
+            "Key": {"pk": f"TASK#{task_name}", "sk": "META"},
+            "UpdateExpression": "SET " + ", ".join(parts),
+            "ExpressionAttributeValues": _ddb(values),
+            "ExpressionAttributeNames": names,
+        }
+        self._table.update_item(**params)
 
     def _task_from_item(self, item: dict) -> TaskRecord:
         return TaskRecord(
@@ -377,17 +382,37 @@ class CloudStore:
         for fi in items:
             if fi.id == feed_id:
                 sk = f"FEED#{fi.created_at:020.6f}#{fi.id}"
-                parts = []
+                names: dict[str, str] = {}
+                parts: list[str] = []
                 values: dict[str, Any] = {}
                 for i, (k, v) in enumerate(fields.items()):
-                    parts.append(f"{k} = :v{i}")
+                    name_key = f"#k{i}"
+                    names[name_key] = k
+                    parts.append(f"{name_key} = :v{i}")
                     values[f":v{i}"] = v
                 self._table.update_item(
                     Key={"pk": f"TASK#{task_name}", "sk": sk},
                     UpdateExpression="SET " + ", ".join(parts),
-                    ExpressionAttributeValues=values,
+                    ExpressionAttributeValues=_ddb(values),
+                    ExpressionAttributeNames=names,
                 )
                 return
+
+    def delete_environment(self, environment_id: str) -> None:
+        self._table.delete_item(Key={"pk": f"ENV#{environment_id}", "sk": "META"})
+
+    def count_tasks_for_environment(self, environment_id: str) -> int:
+        resp = self._table.query(
+            IndexName="entity-index",
+            KeyConditionExpression="entity = :e",
+            ExpressionAttributeValues={":e": "task"},
+        )
+        return sum(
+            1
+            for i in resp.get("Items", [])
+            if i.get("environment_id") == environment_id
+            and i.get("status", "active") in ("active", "pending_unarchive")
+        )
 
     def delete_feed_item(self, task_name: str, feed_id: str) -> None:
         items = self.list_feed_items(task_name)

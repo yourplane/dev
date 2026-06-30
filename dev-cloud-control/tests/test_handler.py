@@ -90,3 +90,27 @@ def test_repos_crud(aws_env):
     assert resp["statusCode"] == 200
     repos = json.loads(router.dispatch(_event("GET", "/repos"))["body"])
     assert repos["dev"] == "https://github.com/o/r.git"
+
+
+def test_archive_task_updates_status(aws_env):
+    router = Router()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Archive me", "environment_id": "env-1", "repo": None},
+        )
+    )
+    create_lines = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    work = json.loads(create_lines["body"])["work"]
+    task_name = work[0]["task_name"]
+    router.dispatch(
+        _event("POST", f"/worker/tasks/{task_name}/command/complete", {"result": {}})
+    )
+    resp = router.dispatch(_event("POST", f"/tasks/{task_name}/archive"))
+    assert resp["statusCode"] == 200
+    tasks = json.loads(router.dispatch(_event("GET", "/tasks"))["body"])["tasks"]
+    assert task_name not in tasks
+    archive = json.loads(router.dispatch(_event("GET", "/archive"))["body"])
+    assert any(e["task_name"] == task_name for e in archive["entries"])

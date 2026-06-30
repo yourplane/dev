@@ -132,6 +132,8 @@ class Router:
             return self.get_environment(event, unquote(m.group(1)))
         if m and method == "PUT":
             return self.update_environment(event, unquote(m.group(1)))
+        if m and method == "DELETE":
+            return self.delete_environment(event, unquote(m.group(1)))
 
         m = re.match(r"^/repos/([^/]+)$", path)
         if m and method == "DELETE":
@@ -270,6 +272,18 @@ class Router:
         if not self.store.get_environment(environment_id):
             return _json(404, {"detail": "Environment not found"})
         self.store.update_environment_display_name(environment_id, name.strip())
+        return _no_content()
+
+    def delete_environment(self, event: dict, environment_id: str) -> dict:
+        if not self.store.get_environment(environment_id):
+            return _json(404, {"detail": "Environment not found"})
+        active_tasks = self.store.count_tasks_for_environment(environment_id)
+        if active_tasks > 0:
+            return _json(
+                409,
+                {"detail": f"Cannot delete environment with {active_tasks} active task(s)"},
+            )
+        self.store.delete_environment(environment_id)
         return _no_content()
 
     # --- repos ---

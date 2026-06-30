@@ -125,6 +125,13 @@ export const api = {
     });
   },
 
+  deleteEnvironment(environmentId: string): Promise<void> {
+    return request(`/environments/${encodeURIComponent(environmentId)}`, {
+      method: 'DELETE',
+      parseJson: false,
+    });
+  },
+
   getBots(): Promise<{ bots: Array<{ org: string; secret: string }> }> {
     return request('/config/bots');
   },

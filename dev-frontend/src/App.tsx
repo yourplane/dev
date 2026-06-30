@@ -31,6 +31,14 @@ const FEED_PAGE_SIZE = 50
 const ARCHIVE_PAGE_SIZE = 50
 
 export function Layout() {
+  const [signedIn, setSignedIn] = useState(() => Boolean(getIdToken()))
+
+  const handleSignOut = () => {
+    signOut()
+    setSignedIn(false)
+    window.location.href = '/'
+  }
+
   return (
     <div className="app">
       <header className="header">
@@ -40,6 +48,11 @@ export function Layout() {
           <Link to="/new" className="nav-link">New task</Link>
           <Link to="/archive" className="nav-link">Archive</Link>
           {isCloudMode() && <Link to="/settings" className="nav-link">Settings</Link>}
+          {isCloudMode() && signedIn && (
+            <button type="button" className="cloud-sign-out-btn" onClick={handleSignOut}>
+              Sign out
+            </button>
+          )}
         </nav>
       </header>
       <main className="main">
@@ -2784,6 +2797,11 @@ function SettingsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [addName, setAddName] = useState('')
+  const [addUrl, setAddUrl] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [removing, setRemoving] = useState<string | null>(null)
+  const [deletingEnv, setDeletingEnv] = useState<string | null>(null)
 
   useEffect(() => {
     document.title = 'Dev – Settings'
@@ -2809,6 +2827,7 @@ function SettingsPage() {
 
   const saveBots = async () => {
     setSaving(true)
+    setError(null)
     try {
       await api.setBots(bots)
     } catch (err) {
@@ -2818,51 +2837,167 @@ function SettingsPage() {
     }
   }
 
+  const handleAddRepo = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const n = addName.trim()
+    const u = addUrl.trim()
+    if (!n || !u) {
+      setError('Repo name and URL are required.')
+      return
+    }
+    setAdding(true)
+    setError(null)
+    try {
+      await api.addRepo(n, u)
+      setAddName('')
+      setAddUrl('')
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  const handleRemoveRepo = async (name: string) => {
+    if (!confirm(`Remove "${name}" from your repo list?`)) return
+    setRemoving(name)
+    setError(null)
+    try {
+      await api.removeRepo(name)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRemoving(null)
+    }
+  }
+
+  const handleDeleteEnvironment = async (env: EnvironmentInfo) => {
+    if (!confirm(`Remove environment "${env.display_name}"?`)) return
+    setDeletingEnv(env.environment_id)
+    setError(null)
+    try {
+      await api.deleteEnvironment(env.environment_id)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDeletingEnv(null)
+    }
+  }
+
   if (loading) return <p className="hint">Loading settings…</p>
 
   return (
     <section className="settings-page">
       <h2>Cloud settings</h2>
-      {error && <p className="inline-error">{error}</p>}
-      <h3>Environments</h3>
-      <ul>
-        {environments.map((env) => (
-          <li key={env.environment_id}>
-            {env.display_name} — {env.online ? 'online' : 'offline'}
-          </li>
+      {error && <p className="inline-error settings-error" role="alert">{error}</p>}
+
+      <div className="settings-section">
+        <h3>Environments</h3>
+        <p className="settings-hint">Workers register automatically when they poll the control plane.</p>
+        {environments.length === 0 ? (
+          <p className="hint">No environments registered yet.</p>
+        ) : (
+          <ul className="settings-list">
+            {environments.map((env) => (
+              <li key={env.environment_id} className="settings-list-row">
+                <div className="settings-list-main">
+                  <span className="settings-list-title">{env.display_name}</span>
+                  <span className={`settings-badge ${env.online ? 'settings-badge-online' : 'settings-badge-offline'}`}>
+                    {env.online ? 'online' : 'offline'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="settings-btn settings-btn-danger"
+                  disabled={deletingEnv !== null}
+                  onClick={() => handleDeleteEnvironment(env)}
+                >
+                  {deletingEnv === env.environment_id ? 'Removing…' : 'Remove'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="settings-section">
+        <h3>Repos</h3>
+        {Object.keys(repos).length === 0 ? (
+          <p className="hint">No repos configured.</p>
+        ) : (
+          <ul className="settings-list">
+            {Object.entries(repos).map(([name, url]) => (
+              <li key={name} className="settings-list-row">
+                <div className="settings-list-main">
+                  <span className="settings-list-title">{name}</span>
+                  <span className="settings-list-sub">{url}</span>
+                </div>
+                <button
+                  type="button"
+                  className="settings-btn settings-btn-danger"
+                  disabled={removing !== null}
+                  onClick={() => handleRemoveRepo(name)}
+                >
+                  {removing === name ? 'Removing…' : 'Remove'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form className="settings-add-form" onSubmit={handleAddRepo}>
+          <label className="settings-field">
+            <span>Shorthand</span>
+            <input value={addName} onChange={(e) => setAddName(e.target.value)} placeholder="my-repo" />
+          </label>
+          <label className="settings-field">
+            <span>URL</span>
+            <input value={addUrl} onChange={(e) => setAddUrl(e.target.value)} placeholder="https://github.com/org/repo.git" />
+          </label>
+          <button type="submit" className="settings-btn settings-btn-primary" disabled={adding}>
+            {adding ? 'Adding…' : 'Add repo'}
+          </button>
+        </form>
+      </div>
+
+      <div className="settings-section">
+        <h3>GitHub bots</h3>
+        <p className="settings-hint">Map GitHub orgs to Secrets Manager secret names for PR actions.</p>
+        {bots.map((b, i) => (
+          <div key={i} className="settings-bots-row">
+            <input
+              className="settings-input"
+              placeholder="org"
+              value={b.org}
+              onChange={(e) => {
+                const next = [...bots]
+                next[i] = { ...b, org: e.target.value }
+                setBots(next)
+              }}
+            />
+            <input
+              className="settings-input"
+              placeholder="secret name"
+              value={b.secret}
+              onChange={(e) => {
+                const next = [...bots]
+                next[i] = { ...b, secret: e.target.value }
+                setBots(next)
+              }}
+            />
+          </div>
         ))}
-      </ul>
-      <h3>Repos</h3>
-      <ul>
-        {Object.entries(repos).map(([name, url]) => (
-          <li key={name}>{name}: {url}</li>
-        ))}
-      </ul>
-      <h3>GitHub bots (Secrets Manager)</h3>
-      {bots.map((b, i) => (
-        <div key={i} className="bots-row">
-          <input
-            placeholder="org"
-            value={b.org}
-            onChange={(e) => {
-              const next = [...bots]
-              next[i] = { ...b, org: e.target.value }
-              setBots(next)
-            }}
-          />
-          <input
-            placeholder="secret name"
-            value={b.secret}
-            onChange={(e) => {
-              const next = [...bots]
-              next[i] = { ...b, secret: e.target.value }
-              setBots(next)
-            }}
-          />
+        <div className="settings-actions">
+          <button type="button" className="settings-btn settings-btn-secondary" onClick={() => setBots([...bots, { org: '', secret: '' }])}>
+            Add bot
+          </button>
+          <button type="button" className="settings-btn settings-btn-primary" onClick={saveBots} disabled={saving}>
+            {saving ? 'Saving…' : 'Save bots'}
+          </button>
         </div>
-      ))}
-      <button type="button" onClick={() => setBots([...bots, { org: '', secret: '' }])}>Add bot</button>
-      <button type="button" onClick={saveBots} disabled={saving}>{saving ? 'Saving…' : 'Save bots'}</button>
+      </div>
     </section>
   )
 }
@@ -2879,15 +3014,7 @@ function CloudLoginGate({ children }: { children: React.ReactNode }) {
 
   if (!isCloudMode()) return <>{children}</>
   if (token) {
-    return (
-      <>
-        <div className="cloud-auth-bar">
-          <span className="cloud-auth-bar-label">Signed in</span>
-          <button type="button" className="link-btn" onClick={() => { signOut(); setToken(null) }}>Sign out</button>
-        </div>
-        {children}
-      </>
-    )
+    return <>{children}</>
   }
 
   const handleLogin = async (e: React.FormEvent) => {
