@@ -1,7 +1,17 @@
 /** Base URL for API requests. Default `/api` uses Vite proxy (single-port dev). Override with VITE_DEV_SERVER_URL to talk to backend directly. */
-import { authHeaders } from './cloudAuth';
+import { authHeaders, isCloudMode } from './cloudAuth';
 
 export const apiBaseUrl = import.meta.env.VITE_DEV_SERVER_URL ?? '/api';
+
+function apiErrorMessage(httpStatus: number, detail: string): string {
+  if (isCloudMode()) {
+    if (httpStatus === 401 || httpStatus === 403) {
+      return detail || 'Not authorized. Try signing out and back in.';
+    }
+    return detail || `Cloud API error (HTTP ${httpStatus})`;
+  }
+  return `Could not reach dev-server at ${apiBaseUrl}. ${detail}`;
+}
 
 async function request<T>(
   path: string,
@@ -18,7 +28,9 @@ async function request<T>(
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(
-      `Could not reach dev-server at ${apiBaseUrl}. ${msg === 'Failed to fetch' ? 'Check that the backend is running (and that the Vite proxy target matches).' : msg}`
+      isCloudMode()
+        ? (msg === 'Failed to fetch' ? 'Could not reach the cloud API. Check your network connection.' : msg)
+        : `Could not reach dev-server at ${apiBaseUrl}. ${msg === 'Failed to fetch' ? 'Check that the backend is running (and that the Vite proxy target matches).' : msg}`
     );
   }
   const text = await res.text();
@@ -27,10 +39,11 @@ async function request<T>(
     try {
       const j = JSON.parse(text);
       if (typeof j.detail === 'string') detail = j.detail;
+      else if (typeof j.message === 'string') detail = j.message;
     } catch {
       // use raw text
     }
-    throw new Error(detail || `HTTP ${res.status}`);
+    throw new Error(apiErrorMessage(res.status, detail || `HTTP ${res.status}`));
   }
   if (!parseJson || text === '') return undefined as T;
   return JSON.parse(text) as T;
@@ -153,19 +166,22 @@ export const api = {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       throw new Error(
-        `Could not reach dev-server at ${apiBaseUrl}. ${msg === 'Failed to fetch' ? 'Check that the backend is running (and that the Vite proxy target matches).' : msg}`
+        isCloudMode()
+          ? (msg === 'Failed to fetch' ? 'Could not reach the cloud API. Check your network connection.' : msg)
+          : `Could not reach dev-server at ${apiBaseUrl}. ${msg === 'Failed to fetch' ? 'Check that the backend is running (and that the Vite proxy target matches).' : msg}`
       );
     }
     if (!res.ok) {
       const text = await res.text();
       let detail = text;
       try {
-        const j = JSON.parse(text) as { detail?: string };
+        const j = JSON.parse(text) as { detail?: string; message?: string };
         if (typeof j.detail === 'string') detail = j.detail;
+        else if (typeof j.message === 'string') detail = j.message;
       } catch {
         // use raw text
       }
-      throw new Error(detail || `HTTP ${res.status}`);
+      throw new Error(apiErrorMessage(res.status, detail || `HTTP ${res.status}`));
     }
     const reader = res.body?.getReader();
     if (!reader) {
