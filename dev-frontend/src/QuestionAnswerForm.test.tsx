@@ -35,6 +35,7 @@ describe('QuestionAnswerForm', () => {
         taskName="t"
         sourceFilename="002-agent-question.md"
         payload={payload}
+        persistedAnswers={null}
       />,
     )
     const submit = screen.getByRole('button', { name: 'Submit answers' })
@@ -61,6 +62,7 @@ describe('QuestionAnswerForm', () => {
         taskName="t"
         sourceFilename="002-agent-question.md"
         payload={payload}
+        persistedAnswers={null}
       />,
     )
     fireEvent.click(screen.getByLabelText('SQLite'))
@@ -70,5 +72,69 @@ describe('QuestionAnswerForm', () => {
     })
     const { api } = await import('./api')
     expect(api.postQuestionAnswers).toHaveBeenCalled()
+  })
+
+  it('defaults to locked summary when persisted answers exist and no draft', async () => {
+    render(
+      <QuestionAnswerForm
+        taskName="t"
+        sourceFilename="002-agent-question.md"
+        payload={payload}
+        persistedAnswers={{ selections: { q1: 'Postgres' }, freeText: {} }}
+      />,
+    )
+    await waitFor(() => {
+      expect(screen.getByText('Unlock to edit')).toBeInTheDocument()
+      expect(screen.getByText('Postgres')).toBeInTheDocument()
+    })
+    expect(screen.queryByRole('button', { name: 'Submit answers' })).not.toBeInTheDocument()
+  })
+
+  it('restores editable draft over persisted answers when editing flag is set', async () => {
+    const { api } = await import('./api')
+    vi.mocked(api.getQuestionAnswersDraft).mockResolvedValue({
+      selections: { q1: 'SQLite' },
+      freeText: {},
+      expandedFreeText: {},
+      editing: true,
+    })
+
+    render(
+      <QuestionAnswerForm
+        taskName="t"
+        sourceFilename="002-agent-question.md"
+        payload={payload}
+        persistedAnswers={{ selections: { q1: 'Postgres' }, freeText: {} }}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Submit answers' })).toBeInTheDocument()
+      expect(screen.getByLabelText('SQLite')).toBeChecked()
+    })
+    expect(screen.queryByText('Unlock to edit')).not.toBeInTheDocument()
+  })
+
+  it('unlock saves editing draft immediately', async () => {
+    const { api } = await import('./api')
+    render(
+      <QuestionAnswerForm
+        taskName="t"
+        sourceFilename="002-agent-question.md"
+        payload={payload}
+        persistedAnswers={{ selections: { q1: 'Postgres' }, freeText: {} }}
+      />,
+    )
+    await waitFor(() => {
+      expect(screen.getByText('Unlock to edit')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByText('Unlock to edit'))
+    await waitFor(() => {
+      expect(api.setQuestionAnswersDraft).toHaveBeenCalledWith(
+        't',
+        '002-agent-question.md',
+        expect.objectContaining({ editing: true, selections: { q1: 'Postgres' } }),
+      )
+    })
   })
 })

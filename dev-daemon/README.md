@@ -37,7 +37,7 @@ To update `~/dev` (or `DEV_DEPLOY_TARGET`) from a feature branch and restart:
 ./dev-daemon/deploy.sh task/my-feature /path/to/source/repo
 ```
 
-From this repo, defaults deploy `task/merge-from-main` to `~/dev`. The script fast-forwards git, runs `uv sync`, builds the frontend once, sets `DEV_DAEMON_SKIP_BUILD=1`, and calls `restart.sh`.
+From this repo, defaults deploy `task/merge-from-main` to `~/dev`. The script fast-forwards git, runs `uv sync`, builds the frontend once, sets `DEV_DAEMON_SKIP_BUILD=1`, restarts in the background (when not using systemd), and waits for the backend to respond before exiting.
 
 - **Backend:** dev-server on `127.0.0.1:8000` (uvicorn; `--reload` only in `dev` frontend mode).
 - **Frontend:** http://localhost:5173 — by default a **production build** served with `vite preview` (no HMR full-page reloads on mobile). Set `DEV_DAEMON_FRONTEND=dev` to use the Vite dev server with HMR for active frontend work.
