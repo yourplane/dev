@@ -23,6 +23,9 @@ vi.mock('./api', () => ({
     setTaskCommentDraft: vi.fn(),
     getTaskBashDraft: vi.fn(),
     setTaskBashDraft: vi.fn(),
+    getQuestionAnswersDraft: vi.fn(),
+    setQuestionAnswersDraft: vi.fn(),
+    postQuestionAnswers: vi.fn(),
     getTaskCommsFile: vi.fn(),
     getTaskLogFile: vi.fn(),
     postTaskComms: vi.fn(),
@@ -64,6 +67,13 @@ describe('App', () => {
     vi.mocked(api.setTaskCommentDraft).mockResolvedValue(undefined)
     vi.mocked(api.getTaskBashDraft).mockResolvedValue('')
     vi.mocked(api.setTaskBashDraft).mockResolvedValue(undefined)
+    vi.mocked(api.getQuestionAnswersDraft).mockResolvedValue({
+      selections: {},
+      freeText: {},
+      expandedFreeText: {},
+    })
+    vi.mocked(api.setQuestionAnswersDraft).mockResolvedValue(undefined)
+    vi.mocked(api.postQuestionAnswers).mockResolvedValue({ filename: '003-user-answers.md' })
     vi.mocked(api.getTaskCommandStatus).mockResolvedValue({
       active: false,
       command: null,

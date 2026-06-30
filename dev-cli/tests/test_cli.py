@@ -1,5 +1,6 @@
 """Tests for CLI entry point."""
 
+import json
 import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -224,8 +225,7 @@ def test_plan_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) 
     assert "--workspace" in argv
     assert "--trust" in argv
     draft = cwd / "task-plan-draft.md"
-    assert draft.exists()
-    assert draft.read_text() == "# Detailed Plan\n\nStep 1.\nStep 2."
+    assert not draft.exists()
     assert (cwd / "comms" / "index.txt").exists()
     order = [n.strip() for n in (cwd / "comms" / "index.txt").read_text().splitlines() if n.strip()]
     assert len(order) == 1 and "agent-plan" in order[0]
@@ -236,32 +236,39 @@ def test_plan_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) 
     assert list((cwd / ".logs").glob("dev-plan-stream-*.log"))
 
 
-def test_question_runs_headless_and_writes_draft(runner: CliRunner, tmp_path: Path) -> None:
+def test_question_runs_headless_and_writes_comms(runner: CliRunner, tmp_path: Path) -> None:
     with runner.isolated_filesystem(tmp_path):
         cwd = Path.cwd()
         (cwd / "comms").mkdir()
         (cwd / "comms" / "index.txt").write_text("")
-        streamed_line = (
-            '{"type": "assistant", "message": {"content": [{"type": "text", "text": "1. What scope?"}]}, '
-            '"model_call_id": "call-1"}\n'
-        )
+        valid_json = '{"intro": "Need clarity", "questions": [{"text": "What scope?", "options": ["A"]}]}'
+        assistant_text = f"```json\n{valid_json}\n```"
+        streamed_line = json.dumps(
+            {
+                "type": "assistant",
+                "message": {"content": [{"type": "text", "text": assistant_text}]},
+                "model_call_id": "call-1",
+            }
+        ) + "\n"
         mock_proc = MagicMock()
         mock_proc.stdout = iter([streamed_line])
         mock_proc.stderr.read.return_value = ""
         mock_proc.returncode = 0
         mock_proc.wait.return_value = None
-        with patch("dev_sdk.agent_run.subprocess.Popen") as mock_popen:
+        with patch("dev_sdk.agent_run._create_ephemeral_chat", return_value="chat-1"), patch(
+            "dev_sdk.agent_run.subprocess.Popen"
+        ) as mock_popen:
             mock_popen.return_value = mock_proc
             result = runner.invoke(main, ["question"])
     assert result.exit_code == 0
     argv = mock_popen.call_args[0][0]
     assert "--mode" in argv and "ask" in argv
-    assert "--resume" not in argv
-    draft = cwd / "task-question-draft.md"
-    assert draft.exists()
-    assert draft.read_text() == "1. What scope?"
+    assert "--resume" in argv
+    assert not (cwd / "task-question-draft.md").exists()
     order = [n.strip() for n in (cwd / "comms" / "index.txt").read_text().splitlines() if n.strip()]
     assert len(order) == 1 and "agent-question" in order[0]
+    comms_text = (cwd / "comms" / order[0]).read_text()
+    assert '"intro": "Need clarity"' in comms_text
     assert "Starting question" in result.output
     assert "Questions written to" in result.output
     assert list((cwd / ".logs").glob("dev-question-stream-*.log"))
