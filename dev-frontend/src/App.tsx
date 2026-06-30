@@ -5,6 +5,8 @@ import remarkGfm from 'remark-gfm'
 import { api, apiBaseUrl, type TaskWorkspaceInfo } from './api'
 import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
+import { QuestionAnswerForm } from './QuestionAnswerForm'
+import { tryParseQuestionPayload } from './questionForm'
 import './App.css'
 
 const markdownComponents: Partial<Components> = {
@@ -873,6 +875,8 @@ const FeedEntryRow = memo(function FeedEntryRow({
   isLast,
   lastEntryRef,
   onDeleteComms,
+  taskName,
+  onFeedRefresh,
 }: {
   entry: { type: string; id: string; created_at: number; deletable?: boolean | null }
   contents: Record<string, string>
@@ -885,6 +889,8 @@ const FeedEntryRow = memo(function FeedEntryRow({
   isLast: boolean
   lastEntryRef: React.RefObject<HTMLDivElement>
   onDeleteComms?: (filename: string) => void
+  taskName: string
+  onFeedRefresh?: () => void
 }) {
   useEffect(() => {
     if (!isCollapsed && contents[entry.id] === undefined && !loadingContentKeys.has(entryKey)) {
@@ -896,6 +902,12 @@ const FeedEntryRow = memo(function FeedEntryRow({
     entry.type === 'log'
       ? `Agent log: ${entry.id}${entry.id === activeLogFilename ? ' (live)' : ''}`
       : entry.id
+
+  const rawContent = contents[entry.id] ?? '(loading…)'
+  const questionPayload =
+    entry.type === 'comms' && entry.id.endsWith('-agent-question.md') && rawContent !== '(loading…)'
+      ? tryParseQuestionPayload(rawContent)
+      : null
 
   return (
     <div
@@ -931,9 +943,16 @@ const FeedEntryRow = memo(function FeedEntryRow({
           {entry.type === 'log' ? (
             <ParsedLogView raw={contents[entry.id] ?? ''} />
           ) : isBashCommsEntry(entry.id) ? (
-            <BashCommsFeedBody text={contents[entry.id] ?? '(loading…)'} />
+            <BashCommsFeedBody text={rawContent} />
+          ) : questionPayload ? (
+            <QuestionAnswerForm
+              taskName={taskName}
+              sourceFilename={entry.id}
+              payload={questionPayload}
+              onSubmitted={onFeedRefresh}
+            />
           ) : (
-            <MarkdownText>{contents[entry.id] ?? '(loading…)'}</MarkdownText>
+            <MarkdownText>{rawContent}</MarkdownText>
           )}
         </div>
       )}
@@ -2491,6 +2510,8 @@ export function TaskCommsPageContent({
                 isLast={isLast}
                 lastEntryRef={lastCommsEntryRef}
                 onDeleteComms={handleDeleteComms}
+                taskName={taskName}
+                onFeedRefresh={() => void loadFeed()}
               />
             )
           })}

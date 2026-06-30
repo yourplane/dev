@@ -37,14 +37,18 @@ from dev_sdk.comms import (
 )
 from dev_sdk.drafts import (
     delete_new_task_draft,
+    delete_task_question_answers_draft,
     get_new_task_draft,
     get_task_bash_draft,
     get_task_comment_draft,
+    get_task_question_answers_draft,
     set_new_task_draft,
     set_task_bash_draft,
     set_task_comment_draft,
+    set_task_question_answers_draft,
 )
 from dev_sdk.feed import LOGS_DIR, FeedCursor, read_comms_deletable_map, read_feed, read_feed_page
+from dev_sdk.question_answers import AnswerItem, build_answers_markdown
 from dev_sdk.create_pr import (
     CreatePRError,
     create_pull_request,
@@ -497,6 +501,34 @@ class TaskCommentDraftRequest(BaseModel):
     content: str = ""
 
 
+class QuestionAnswerItemRequest(BaseModel):
+    id: str = ""
+    text: str = ""
+    selected: str = ""
+    free_text: str = ""
+
+
+class PostQuestionAnswersRequest(BaseModel):
+    source: str = Field(..., min_length=1, description="Source *-agent-question.md filename")
+    answers: list[QuestionAnswerItemRequest] = Field(default_factory=list)
+
+
+class PostQuestionAnswersResponse(BaseModel):
+    filename: str
+
+
+class QuestionAnswersDraftRequest(BaseModel):
+    selections: dict[str, str] = Field(default_factory=dict)
+    freeText: dict[str, str] = Field(default_factory=dict)
+    expandedFreeText: dict[str, bool] = Field(default_factory=dict)
+
+
+class QuestionAnswersDraftResponse(BaseModel):
+    selections: dict[str, str] = Field(default_factory=dict)
+    freeText: dict[str, str] = Field(default_factory=dict)
+    expandedFreeText: dict[str, bool] = Field(default_factory=dict)
+
+
 def _task_dir(task_name: str) -> Path:
     """Return task directory path. Raises HTTPException 404 if task does not exist or path is invalid."""
     if not task_name or "/" in task_name or "\\" in task_name or task_name in (".", ".."):
@@ -506,6 +538,13 @@ def _task_dir(task_name: str) -> Path:
     if not task_dir.is_dir() or (root not in task_dir.parents and task_dir != root):
         raise HTTPException(status_code=404, detail=f"Task not found: {task_name}")
     return task_dir
+
+
+def _validate_comms_filename(filename: str) -> str:
+    """Validate a comms filename (no path components)."""
+    if not filename or "/" in filename or "\\" in filename or filename.strip() in ("", ".", ".."):
+        raise HTTPException(status_code=404, detail="Invalid filename")
+    return filename.strip()
 
 
 # --- Endpoints ---
@@ -622,6 +661,39 @@ def put_task_bash_draft_endpoint(task_name: str, body: TaskCommentDraftRequest) 
     """Save or clear the bash-input draft. Empty content clears it."""
     _task_dir(task_name)
     set_task_bash_draft(_tasks_root(), task_name, body.content or "")
+
+
+@app.get("/tasks/{task_name}/drafts/question-answers/{comms_filename}", response_model=QuestionAnswersDraftResponse)
+def get_task_question_answers_draft_endpoint(task_name: str, comms_filename: str) -> QuestionAnswersDraftResponse:
+    """Return in-progress question-answer selections for a specific agent-question comms entry."""
+    _task_dir(task_name)
+    comms_filename = _validate_comms_filename(comms_filename)
+    draft = get_task_question_answers_draft(_tasks_root(), task_name, comms_filename)
+    if draft is None:
+        return QuestionAnswersDraftResponse()
+    return QuestionAnswersDraftResponse(
+        selections=draft.get("selections") if isinstance(draft.get("selections"), dict) else {},
+        freeText=draft.get("freeText") if isinstance(draft.get("freeText"), dict) else {},
+        expandedFreeText=draft.get("expandedFreeText") if isinstance(draft.get("expandedFreeText"), dict) else {},
+    )
+
+
+@app.put("/tasks/{task_name}/drafts/question-answers/{comms_filename}", status_code=204)
+def put_task_question_answers_draft_endpoint(
+    task_name: str, comms_filename: str, body: QuestionAnswersDraftRequest
+) -> None:
+    """Save or clear question-answer draft for a specific agent-question comms entry."""
+    _task_dir(task_name)
+    comms_filename = _validate_comms_filename(comms_filename)
+    data = {
+        "selections": body.selections,
+        "freeText": body.freeText,
+        "expandedFreeText": body.expandedFreeText,
+    }
+    if not body.selections and not body.freeText and not body.expandedFreeText:
+        delete_task_question_answers_draft(_tasks_root(), task_name, comms_filename)
+    else:
+        set_task_question_answers_draft(_tasks_root(), task_name, comms_filename, data)
 
 
 @app.get("/tasks", response_model=ListTasksResponse)
@@ -800,6 +872,31 @@ def post_task_comms(task_name: str, body: PostCommsRequest) -> PostCommsResponse
     path = add_comms(task_dir, "user", body.content.strip())
     set_task_comment_draft(_tasks_root(), task_name, "")
     return PostCommsResponse(filename=path.name)
+
+
+@app.post("/tasks/{task_name}/comms/question-answers", response_model=PostQuestionAnswersResponse, status_code=201)
+def post_task_question_answers(task_name: str, body: PostQuestionAnswersRequest) -> PostQuestionAnswersResponse:
+    """Submit answers to structured agent questions; creates *-user-answers.md comms entry."""
+    task_dir = _task_dir(task_name)
+    source = _validate_comms_filename(body.source)
+    if not source.endswith("-agent-question.md"):
+        raise HTTPException(status_code=400, detail="Source must be an agent-question comms file")
+    source_path = comms_dir(task_dir) / source
+    if not source_path.is_file():
+        raise HTTPException(status_code=404, detail="Source comms file not found")
+    answer_items: list[AnswerItem] = [
+        {
+            "id": a.id,
+            "text": a.text,
+            "selected": a.selected,
+            "free_text": a.free_text,
+        }
+        for a in body.answers
+    ]
+    markdown = build_answers_markdown(source, answer_items)
+    path = add_comms(task_dir, "user", markdown, kind="answers")
+    delete_task_question_answers_draft(_tasks_root(), task_name, source)
+    return PostQuestionAnswersResponse(filename=path.name)
 
 
 @app.get("/tasks/{task_name}/comms/download", response_class=Response)
