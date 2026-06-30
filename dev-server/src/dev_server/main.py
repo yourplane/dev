@@ -23,6 +23,7 @@ from dev_sdk.agent_run import (
     AgentRunError,
     run_implement,
     run_do,
+    run_merge_conflict_resolution,
     run_plan_implement,
     run_question_mode,
 )
@@ -51,10 +52,16 @@ from dev_sdk.create_pr import (
     find_existing_pull_request,
     pull_pr_comments,
 )
+from dev_sdk.merge_from_main import (
+    MergeFromMainError,
+    has_conflicted_merge_in_progress,
+    merge_shell_command,
+    validate_merge_from_main_can_start,
+)
 from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repos
 from dev_sdk.task_manager import TaskManager
 
-SUPPORTED_COMMANDS = ("question", "plan-implement", "implement", "do", "bash")
+SUPPORTED_COMMANDS = ("question", "plan-implement", "implement", "do", "bash", "merge-from-main")
 logger = logging.getLogger("dev_server")
 
 _DEFAULT_BASH_MAX_OUTPUT_BYTES = 2_000_000
@@ -281,6 +288,205 @@ def _run_bash_in_thread(
         with _command_registry_lock:
             _command_registry.pop(task_name, None)
 
+
+def _stream_bash_command_in_cwd(
+    task_dir: Path,
+    task_name: str,
+    *,
+    shell_command: str,
+    cwd: Path,
+    cancel_requested: threading.Event,
+) -> tuple[int | None, bool, bool, bool]:
+    """
+    Run bash -c with streaming comms in task_dir. Updates active_bash_comms_filename on registry.
+
+    Returns (exit_code, cancelled, timed_out, truncated).
+    """
+    try:
+        max_bytes = int(os.environ.get("DEV_BASH_MAX_OUTPUT_BYTES", str(_DEFAULT_BASH_MAX_OUTPUT_BYTES)))
+    except ValueError:
+        max_bytes = _DEFAULT_BASH_MAX_OUTPUT_BYTES
+    try:
+        timeout_sec = float(os.environ.get("DEV_BASH_TIMEOUT_SEC", str(_DEFAULT_BASH_TIMEOUT_SEC)))
+    except ValueError:
+        timeout_sec = _DEFAULT_BASH_TIMEOUT_SEC
+
+    try:
+        proc = _popen_bash_for_streaming(shell_command, cwd=str(cwd))
+    except OSError as exc:
+        logger.warning("bash spawn failed for task %s: %s", task_name, exc)
+        add_comms(
+            task_dir,
+            "user",
+            f"{bash_comms_input_header(shell_command)}\n---\nFailed to start process: {exc}\n",
+            kind="bash",
+        )
+        return None, False, False, False
+
+    path: Path | None = None
+    footer_written = False
+    truncated = False
+    cancelled = False
+    timed_out = False
+    start = time.monotonic()
+    trunc_cell: list[bool] = [False]
+    stdout = proc.stdout
+    assert stdout is not None
+
+    try:
+        path = begin_streaming_bash_comms(task_dir, shell_command)
+        with _command_registry_lock:
+            if task_name in _command_registry:
+                _command_registry[task_name]["active_bash_comms_filename"] = path.name
+
+        collected = bytearray()
+
+        def read_stdout() -> None:
+            while True:
+                chunk = stdout.read(4096)
+                if not chunk:
+                    break
+                room = max_bytes - len(collected)
+                if room <= 0:
+                    trunc_cell[0] = True
+                    break
+                take = min(len(chunk), room)
+                portion = chunk[:take]
+                collected.extend(portion)
+                _append_bytes_to_bash_comms(path, portion)
+                if take < len(chunk):
+                    trunc_cell[0] = True
+                    break
+
+        reader = threading.Thread(target=read_stdout, daemon=True)
+        reader.start()
+
+        try:
+            while proc.poll() is None:
+                if cancel_requested.is_set():
+                    cancelled = True
+                    _terminate_process_group(proc, use_kill=False)
+                    break
+                if timeout_sec > 0 and (time.monotonic() - start) > timeout_sec:
+                    timed_out = True
+                    _terminate_process_group(proc, use_kill=True)
+                    break
+                if trunc_cell[0] or len(collected) >= max_bytes:
+                    truncated = True
+                    _terminate_process_group(proc, use_kill=True)
+                    break
+                time.sleep(0.1)
+            reader.join(timeout=30.0)
+            if proc.poll() is None:
+                _terminate_process_group(proc, use_kill=True)
+                proc.wait(timeout=15)
+            else:
+                proc.wait(timeout=15)
+        finally:
+            try:
+                stdout.close()
+            except OSError:
+                pass
+
+        truncated = truncated or trunc_cell[0]
+        exit_code = proc.returncode
+        _append_bash_comms_footer(
+            path,
+            truncated=truncated,
+            cancelled=cancelled,
+            timed_out=timed_out,
+            exit_code=exit_code,
+            timeout_sec=timeout_sec,
+        )
+        footer_written = True
+        return exit_code, cancelled, timed_out, truncated
+    except Exception:
+        logger.exception("bash run failed for task %s", task_name)
+        if path is not None and not footer_written:
+            try:
+                _append_bash_comms_footer(
+                    path,
+                    truncated=False,
+                    cancelled=False,
+                    timed_out=False,
+                    exit_code=None,
+                    timeout_sec=timeout_sec,
+                    interrupted=True,
+                )
+            except OSError:
+                logger.exception("failed to write bash interrupted footer for task %s", task_name)
+        return None, cancelled, timed_out, truncated
+    finally:
+        if path is not None and not footer_written:
+            try:
+                _append_bash_comms_footer(
+                    path,
+                    truncated=False,
+                    cancelled=False,
+                    timed_out=False,
+                    exit_code=None,
+                    timeout_sec=timeout_sec,
+                    interrupted=True,
+                )
+            except OSError:
+                logger.exception("failed to finalize bash comms for task %s", task_name)
+
+
+def _run_merge_from_main_in_thread(
+    task_name: str,
+    task_dir: Path,
+    cancel_requested: threading.Event,
+) -> None:
+    """Fetch/merge/push origin/main, or resume conflict resolution via agent."""
+    try:
+        repo_root = validate_merge_from_main_can_start(task_dir)
+
+        def on_agent_start(stream_log_path: Path) -> None:
+            with _command_registry_lock:
+                if task_name in _command_registry:
+                    _command_registry[task_name]["active_log_filename"] = stream_log_path.name
+                    _command_registry[task_name]["active_bash_comms_filename"] = None
+
+        if has_conflicted_merge_in_progress(repo_root):
+            run_merge_conflict_resolution(
+                task_dir,
+                on_start=on_agent_start,
+                cancel_event=cancel_requested,
+            )
+            return
+
+        shell_command = merge_shell_command(repo_root, task_dir)
+        exit_code, cancelled, _timed_out, _truncated = _stream_bash_command_in_cwd(
+            task_dir,
+            task_name,
+            shell_command=shell_command,
+            cwd=repo_root,
+            cancel_requested=cancel_requested,
+        )
+        if cancel_requested.is_set() or cancelled:
+            return
+        if exit_code == 0 and not has_conflicted_merge_in_progress(repo_root):
+            return
+        if has_conflicted_merge_in_progress(repo_root):
+            run_merge_conflict_resolution(
+                task_dir,
+                on_start=on_agent_start,
+                cancel_event=cancel_requested,
+            )
+    except MergeFromMainError as e:
+        with _command_registry_lock:
+            _last_command_error[task_name] = str(e)
+    except AgentRunError as e:
+        with _command_registry_lock:
+            _last_command_error[task_name] = str(e)
+    else:
+        with _command_registry_lock:
+            _last_command_error.pop(task_name, None)
+    finally:
+        with _command_registry_lock:
+            _command_registry.pop(task_name, None)
+
+
 # In-memory registry: task_name -> { "command_id", "thread" }
 _command_registry: dict[str, dict] = {}
 _command_registry_lock = threading.Lock()
@@ -424,7 +630,7 @@ class PostCommsResponse(BaseModel):
 
 
 class StartCommandRequest(BaseModel):
-    command: str = Field(..., description="Command id: question, plan-implement, implement, do, or bash")
+    command: str = Field(..., description="Command id: question, plan-implement, implement, do, bash, or merge-from-main")
     prompt: str | None = Field(
         None,
         description="For `do`: agent prompt. For `bash`: shell command string passed to `bash -c`.",
@@ -1005,6 +1211,16 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
             status_code=400,
             detail="This task has no cloned repository under the task root; the Implement command is not available.",
         )
+    if body.command == "merge-from-main":
+        if TaskManager.describe_clone_layout(task_dir) is None:
+            raise HTTPException(
+                status_code=400,
+                detail="This task has no cloned repository under the task root; Merge from main is not available.",
+            )
+        try:
+            validate_merge_from_main_can_start(task_dir)
+        except MergeFromMainError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from e
     if body.command == "do":
         set_task_comment_draft(_tasks_root(), task_name, "")
     if "DEV_TASKS_DIR" not in os.environ:
@@ -1020,6 +1236,12 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
             thread = threading.Thread(
                 target=_run_bash_in_thread,
                 args=(task_name, task_dir, cancel_requested, body.prompt.strip()),
+                daemon=True,
+            )
+        elif body.command == "merge-from-main":
+            thread = threading.Thread(
+                target=_run_merge_from_main_in_thread,
+                args=(task_name, task_dir, cancel_requested),
                 daemon=True,
             )
         else:

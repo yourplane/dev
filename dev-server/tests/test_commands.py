@@ -492,3 +492,67 @@ def test_cancel_bash_writes_partial_transcript(client_with_tasks: TestClient, ta
     text = bash_files[-1].read_text(encoding="utf-8")
     assert "sleep 120" in text
     assert "Cancelled by user" in text
+
+
+def test_start_merge_from_main_without_nested_repo_returns_400(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Merge from main is rejected when the task has no cloned repository."""
+    root = tmp_path / "tasks-root"
+    root.mkdir()
+    t = root / "ops-only"
+    t.mkdir()
+    (t / "agent-chat-id").write_text("fake-chat-id")
+    monkeypatch.setenv("DEV_TASKS_DIR", str(root))
+    with TestClient(app) as client:
+        resp = client.post("/tasks/ops-only/commands", json={"command": "merge-from-main"})
+    assert resp.status_code == 400
+    detail = str(resp.json().get("detail", "")).lower()
+    assert "no cloned repository" in detail
+
+
+def test_start_merge_from_main_dirty_tree_returns_422(
+    client_with_tasks: TestClient, task_dir: Path
+) -> None:
+    """Merge from main rejects a dirty nested repo before starting."""
+    from dev_sdk.merge_from_main import MergeFromMainError
+
+    with patch(
+        "dev_server.main.validate_merge_from_main_can_start",
+        side_effect=MergeFromMainError("Uncommitted changes; commit or stash before merging."),
+    ):
+        resp = client_with_tasks.post("/tasks/mytask/commands", json={"command": "merge-from-main"})
+    assert resp.status_code == 422
+    assert "Uncommitted changes" in resp.json()["detail"]
+
+
+def test_start_merge_from_main_returns_201_and_status_active(
+    client_with_tasks: TestClient, task_dir: Path
+) -> None:
+    """Starting merge-from-main returns 201 and GET status shows active while blocking."""
+    block = threading.Event()
+    repo_root = task_dir / "myrepo"
+
+    def blocking_agent(*args: object, **kwargs: object) -> None:
+        block.wait()
+
+    with patch("dev_server.main.validate_merge_from_main_can_start", return_value=repo_root):
+        with patch("dev_server.main.has_conflicted_merge_in_progress", return_value=True):
+            with patch("dev_server.main.run_merge_conflict_resolution", side_effect=blocking_agent):
+                resp = client_with_tasks.post(
+                    "/tasks/mytask/commands",
+                    json={"command": "merge-from-main"},
+                )
+    assert resp.status_code == 201
+    assert resp.json()["command"] == "merge-from-main"
+
+    resp2 = client_with_tasks.get("/tasks/mytask/commands")
+    assert resp2.status_code == 200
+    assert resp2.json()["active"] is True
+    assert resp2.json()["command"] == "merge-from-main"
+
+    block.set()
+    time.sleep(0.3)
+    resp3 = client_with_tasks.get("/tasks/mytask/commands")
+    assert resp3.status_code == 200
+    assert resp3.json()["active"] is False

@@ -710,6 +710,7 @@ const COMMAND_LABEL: Record<string, string> = {
   implement: 'Implement',
   do: 'Do',
   bash: 'Bash',
+  'merge-from-main': 'Merge from main',
 }
 
 type AgentModeCommand = 'question' | 'plan-implement' | 'implement'
@@ -1961,7 +1962,7 @@ export function TaskCommsPageContent({
   }, [activeCommand, activeLogFilename, pollFeedIncremental])
 
   useEffect(() => {
-    if (activeCommand === 'bash' && activeBashCommsFilename) {
+    if (activeBashCommsFilename && activeCommand) {
       pollFeedIncremental({ prefetchNew: true })
     }
   }, [activeCommand, activeBashCommsFilename, pollFeedIncremental])
@@ -1986,7 +1987,8 @@ export function TaskCommsPageContent({
   }, [taskName, activeCommand, activeLogFilename])
 
   useEffect(() => {
-    if (!activeCommand || activeCommand !== 'bash' || !activeBashCommsFilename) return
+    if (!activeCommand || !activeBashCommsFilename) return
+    if (activeCommand !== 'bash' && activeCommand !== 'merge-from-main') return
     let cancelled = false
     const poll = async () => {
       try {
@@ -2530,17 +2532,27 @@ export function TaskCommsPageContent({
               hasRepo={workspaceInfo?.repo_label != null}
             />
             {(!workspaceInfo || workspaceInfo.repo_label != null) && (
-              <button
-                type="button"
-                className="command-btn"
-                disabled={!!startingCommand || creatingPr || pullingPrComments}
-                onClick={prUrl ? handlePullPrComments : handleCreatePr}
-                aria-busy={creatingPr || pullingPrComments}
-              >
-                {prUrl
-                  ? (pullingPrComments ? 'Pulling comments…' : 'Pull Comments')
-                  : (creatingPr ? 'Creating PR…' : 'Create PR')}
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="command-btn"
+                  disabled={!!startingCommand || creatingPr || pullingPrComments}
+                  onClick={prUrl ? handlePullPrComments : handleCreatePr}
+                  aria-busy={creatingPr || pullingPrComments}
+                >
+                  {prUrl
+                    ? (pullingPrComments ? 'Pulling comments…' : 'Pull Comments')
+                    : (creatingPr ? 'Creating PR…' : 'Create PR')}
+                </button>
+                <button
+                  type="button"
+                  className="command-btn"
+                  disabled={!!startingCommand}
+                  onClick={() => void handleStartCommand('merge-from-main')}
+                >
+                  {startingCommand === 'merge-from-main' ? 'Starting…' : 'Merge from main'}
+                </button>
+              </>
             )}
           </div>
         )}

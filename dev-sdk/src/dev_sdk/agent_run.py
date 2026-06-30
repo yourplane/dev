@@ -27,6 +27,7 @@ PLAN_IMPLEMENT_STREAM_LOG_PREFIX = "dev-plan-stream-"
 QUESTION_STREAM_LOG_PREFIX = "dev-question-stream-"
 IMPLEMENT_STREAM_LOG_PREFIX = "dev-implement-stream-"
 DO_STREAM_LOG_PREFIX = "dev-do-stream-"
+MERGE_FROM_MAIN_STREAM_LOG_PREFIX = "dev-merge-from-main-stream-"
 
 _PROMPTS_DIR = Path(__file__).resolve().parent / "prompts"
 
@@ -40,6 +41,7 @@ def _load_agent_prompt(name: str) -> str:
 PLAN_MODE_PROMPT = _load_agent_prompt("plan_mode.md")
 QUESTION_MODE_PROMPT = _load_agent_prompt("question_mode.md")
 IMPLEMENT_MODE_PROMPT = _load_agent_prompt("implement_mode.md")
+MERGE_CONFLICT_MODE_PROMPT = _load_agent_prompt("merge_conflict_mode.md")
 
 STREAM_READER_TIMEOUT_SEC = 300
 PROC_WAIT_TIMEOUT_SEC = 5
@@ -599,3 +601,112 @@ def run_do(
         raise AgentRunError(msg)
 
     return RunImplementResult(stream_log_path=stream_log_path)
+
+
+def run_merge_conflict_resolution(
+    task_dir: Path,
+    *,
+    on_stream_line: StreamLineCallback | None = None,
+    on_start: Callable[[Path], None] | None = None,
+    cancel_event: threading.Event | None = None,
+) -> RunImplementResult:
+    """Run agent to resolve merge conflicts; log stream; add comms from last assistant section."""
+    chat_id = _read_chat_id(task_dir)
+    agent_cmd = _agent_cmd()
+    logs_dir = task_dir / PLAN_LOGS_DIR
+    logs_dir.mkdir(exist_ok=True)
+    stream_log_name = (
+        f"{MERGE_FROM_MAIN_STREAM_LOG_PREFIX}{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}.log"
+    )
+    stream_log_path = logs_dir / stream_log_name
+    if on_start:
+        on_start(stream_log_path)
+    argv = [
+        agent_cmd,
+        "agent",
+        "--print",
+        "--force",
+        "--sandbox",
+        "disabled",
+        "--output-format",
+        "stream-json",
+        "--stream-partial-output",
+        "--resume",
+        chat_id,
+        "--workspace",
+        str(task_dir),
+        "--trust",
+        MERGE_CONFLICT_MODE_PROMPT,
+    ]
+    buffer: list[str] = []
+    read_error: list[BaseException | None] = [None]
+
+    def read_stdout(proc: subprocess.Popen[str]) -> None:
+        try:
+            assert proc.stdout is not None
+            with open(stream_log_path, "w", encoding="utf-8") as log:
+                for line in proc.stdout:
+                    decoded = line if isinstance(line, str) else line.decode("utf-8", errors="replace")
+                    log.write(decoded)
+                    if decoded and not decoded.endswith("\n"):
+                        log.write("\n")
+                    log.flush()
+                    if on_stream_line:
+                        on_stream_line(decoded)
+                    buffer.append(decoded)
+        except Exception as e:
+            read_error[0] = e
+
+    try:
+        proc = subprocess.Popen(
+            argv,
+            cwd=str(task_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+    except FileNotFoundError as e:
+        raise AgentRunError(f"Agent command not found: {agent_cmd}") from e
+
+    def cancel_watcher() -> None:
+        if cancel_event is None:
+            return
+        cancel_event.wait()
+        proc.terminate()
+        time.sleep(CANCEL_TERMINATE_TIMEOUT_SEC)
+        if proc.poll() is None:
+            proc.kill()
+        try:
+            proc.wait(timeout=PROC_WAIT_TIMEOUT_SEC)
+        except subprocess.TimeoutExpired:
+            pass
+
+    watcher: threading.Thread | None = None
+    if cancel_event is not None:
+        watcher = threading.Thread(target=cancel_watcher, daemon=True)
+        watcher.start()
+
+    read_stdout(proc)
+    proc.wait()
+
+    if cancel_event is not None and cancel_event.is_set():
+        raise AgentRunError("Cancelled.")
+
+    stderr_output = ""
+    if proc.stderr:
+        stderr_output = proc.stderr.read()
+
+    if read_error[0] is not None:
+        raise AgentRunError(str(read_error[0])) from read_error[0]
+
+    _remove_empty_log_file(stream_log_path)
+
+    if proc.returncode != 0:
+        msg = stderr_output if stderr_output else f"Agent exited with code {proc.returncode} (no output)."
+        raise AgentRunError(msg)
+
+    streamed_output = "".join(buffer)
+    summary_text = extract_last_assistant_section_from_stream_json(streamed_output)
+    comms_path = add_comms(task_dir, "agent", summary_text, kind="merge-from-main")
+    return RunImplementResult(stream_log_path=stream_log_path, comms_path=comms_path)
