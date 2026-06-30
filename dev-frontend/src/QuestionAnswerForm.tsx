@@ -5,6 +5,8 @@ import { api } from './api'
 import {
   draftIndicatesEditing,
   hasAnyAnswer,
+  submittedAnswersEqual,
+  submittedAnswersSignature,
   type QuestionAnswersDraft,
   type QuestionItem,
   type QuestionPayload,
@@ -56,6 +58,7 @@ export function QuestionAnswerForm({
   const draftLoadedRef = useRef(false)
   const lockStateAppliedRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const persistedAnswersSignatureValue = submittedAnswersSignature(persistedAnswers)
 
   useEffect(() => {
     draftLoadedRef.current = false
@@ -86,34 +89,22 @@ export function QuestionAnswerForm({
       editing,
     }
     const showEditable = draftIndicatesEditing(draft, questions)
+    const nextLocked = !showEditable && !!persistedAnswers
+    const nextSubmitted = persistedAnswers ?? null
 
     if (!lockStateAppliedRef.current) {
       lockStateAppliedRef.current = true
-      if (showEditable) {
-        setLocked(false)
-      } else if (persistedAnswers) {
-        setLastSubmitted(persistedAnswers)
-        setLocked(true)
-      } else {
-        setLastSubmitted(null)
-        setLocked(false)
-      }
+      setLocked(nextLocked)
+      setLastSubmitted(nextSubmitted)
       return
     }
 
-    if (showEditable) {
-      setLocked(false)
-      return
-    }
-
-    if (persistedAnswers) {
-      setLastSubmitted(persistedAnswers)
-      setLocked(true)
-    } else {
-      setLastSubmitted(null)
-      setLocked(false)
-    }
+    setLocked((prev) => (prev === nextLocked ? prev : nextLocked))
+    setLastSubmitted((prev) => (
+      submittedAnswersEqual(prev, nextSubmitted) ? prev : nextSubmitted
+    ))
   }, [
+    persistedAnswersSignatureValue,
     persistedAnswers,
     selections,
     freeText,

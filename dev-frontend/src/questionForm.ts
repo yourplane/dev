@@ -75,6 +75,34 @@ export function getPersistedAnswersForSource(
   return latest
 }
 
+/** Stable fingerprint of user-answers comms content for memoization. */
+export function userAnswersContentsKey(
+  feedEntries: Array<{ type: string; id: string }>,
+  contents: Record<string, string>,
+): string {
+  const parts: string[] = []
+  for (const entry of feedEntries) {
+    if (entry.type !== 'comms' || !entry.id.endsWith('-user-answers.md')) continue
+    parts.push(`${entry.id}\0${contents[entry.id] ?? '\x01missing'}`)
+  }
+  return parts.join('\n')
+}
+
+export function submittedAnswersSignature(
+  answers: SubmittedAnswers | null | undefined,
+): string {
+  if (answers === undefined) return '\x00loading'
+  if (answers === null) return '\x00none'
+  return JSON.stringify(answers)
+}
+
+export function submittedAnswersEqual(
+  a: SubmittedAnswers | null,
+  b: SubmittedAnswers | null,
+): boolean {
+  return submittedAnswersSignature(a) === submittedAnswersSignature(b)
+}
+
 export function normalizeQuestionIds(payload: QuestionPayload): QuestionPayload {
   const questions = payload.questions.map((q, i) => ({
     ...q,

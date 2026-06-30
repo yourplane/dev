@@ -5,7 +5,10 @@ import {
   hasAnyAnswer,
   normalizeQuestionIds,
   parseAnswersMarkdown,
+  submittedAnswersEqual,
+  submittedAnswersSignature,
   tryParseQuestionPayload,
+  userAnswersContentsKey,
 } from './questionForm'
 
 describe('questionForm', () => {
@@ -85,5 +88,22 @@ Need pooling
     expect(draftIndicatesEditing({ selections: {}, freeText: {}, expandedFreeText: {} }, questions)).toBe(false)
     expect(draftIndicatesEditing({ selections: {}, freeText: {}, expandedFreeText: {}, editing: true }, questions)).toBe(true)
     expect(draftIndicatesEditing({ selections: { q1: 'A' }, freeText: {}, expandedFreeText: {} }, questions)).toBe(true)
+  })
+
+  it('userAnswersContentsKey ignores unrelated comms content changes', () => {
+    const feed = [{ type: 'comms', id: '004-user-answers.md' }]
+    const key1 = userAnswersContentsKey(feed, { '004-user-answers.md': 'answers' })
+    const key2 = userAnswersContentsKey(feed, {
+      '004-user-answers.md': 'answers',
+      'agent.jsonl': 'streaming log line',
+    })
+    expect(key1).toBe(key2)
+  })
+
+  it('submittedAnswersSignature is stable for equal answers', () => {
+    const a = { selections: { q1: 'A' }, freeText: {} }
+    const b = { selections: { q1: 'A' }, freeText: {} }
+    expect(submittedAnswersSignature(a)).toBe(submittedAnswersSignature(b))
+    expect(submittedAnswersEqual(a, b)).toBe(true)
   })
 })

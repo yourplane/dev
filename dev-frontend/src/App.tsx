@@ -6,7 +6,7 @@ import { api, apiBaseUrl, type TaskWorkspaceInfo } from './api'
 import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import { QuestionAnswerForm } from './QuestionAnswerForm'
-import { getPersistedAnswersForSource, tryParseQuestionPayload, type SubmittedAnswers } from './questionForm'
+import { getPersistedAnswersForSource, tryParseQuestionPayload, userAnswersContentsKey, type SubmittedAnswers } from './questionForm'
 import './App.css'
 
 const markdownComponents: Partial<Components> = {
@@ -1760,13 +1760,31 @@ export function TaskCommsPageContent({
     [taskName, activeLogFilename]
   )
 
+  const prefetchedUserAnswersRef = useRef<Set<string>>(new Set())
+
+  useEffect(() => {
+    prefetchedUserAnswersRef.current = new Set()
+  }, [taskName])
+
+  const answersContentsKey = userAnswersContentsKey(feedEntries, contents)
+
+  const persistedAnswersBySource = useMemo(() => {
+    const out: Record<string, SubmittedAnswers | null | undefined> = {}
+    for (const entry of feedEntries) {
+      if (entry.type !== 'comms' || !entry.id.endsWith('-agent-question.md')) continue
+      out[entry.id] = getPersistedAnswersForSource(entry.id, feedEntries, contents)
+    }
+    return out
+  }, [feedEntries, answersContentsKey])
+
   useEffect(() => {
     for (const entry of feedEntries) {
       if (entry.type !== 'comms' || !entry.id.endsWith('-user-answers.md')) continue
-      if (contents[entry.id] !== undefined) continue
+      if (contents[entry.id] !== undefined || prefetchedUserAnswersRef.current.has(entry.id)) continue
+      prefetchedUserAnswersRef.current.add(entry.id)
       void loadEntryContent(entry.id, 'comms')
     }
-  }, [feedEntries, contents, loadEntryContent])
+  }, [feedEntries, loadEntryContent])
 
   const applyFeedPage = useCallback(
     (
@@ -2518,7 +2536,7 @@ export function TaskCommsPageContent({
             const isLast = i === feedEntries.length - 1
             const persistedAnswers =
               entry.type === 'comms' && entry.id.endsWith('-agent-question.md')
-                ? getPersistedAnswersForSource(entry.id, feedEntries, contents)
+                ? persistedAnswersBySource[entry.id]
                 : undefined
             return (
               <FeedEntryRow
