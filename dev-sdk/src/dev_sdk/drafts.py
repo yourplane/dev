@@ -7,6 +7,7 @@ DRAFTS_DIR = ".drafts"
 NEW_TASK_DRAFT_FILE = "new-task.json"
 COMMENT_DRAFT_PREFIX = "comment-"
 BASH_DRAFT_PREFIX = "bash-"
+QUESTION_ANSWERS_DRAFT_PREFIX = "question-answers-"
 
 
 def _drafts_dir(tasks_root: Path) -> Path:
@@ -22,6 +23,12 @@ def _safe_comment_filename(task_name: str) -> str:
 def _safe_bash_filename(task_name: str) -> str:
     r"""Safe filename for task bash-input draft."""
     return f"{BASH_DRAFT_PREFIX}{task_name}"
+
+
+def _safe_question_answers_filename(task_name: str, comms_filename: str) -> str:
+    r"""Safe filename for per-comms question-answers draft."""
+    safe_comms = comms_filename.replace("/", "_").replace("\\", "_")
+    return f"{QUESTION_ANSWERS_DRAFT_PREFIX}{task_name}-{safe_comms}"
 
 
 def get_new_task_draft(tasks_root: Path) -> dict | None:
@@ -117,3 +124,41 @@ def set_task_bash_draft(tasks_root: Path, task_name: str, content: str) -> None:
         return
     d.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
+
+
+def get_task_question_answers_draft(
+    tasks_root: Path, task_name: str, comms_filename: str
+) -> dict | None:
+    """Read question-answers draft for a specific agent-question comms file."""
+    d = _drafts_dir(tasks_root)
+    path = d / _safe_question_answers_filename(task_name, comms_filename)
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return None
+        return data
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def set_task_question_answers_draft(
+    tasks_root: Path, task_name: str, comms_filename: str, data: dict
+) -> None:
+    """Write question-answers draft. Empty dict removes the file."""
+    d = _drafts_dir(tasks_root)
+    path = d / _safe_question_answers_filename(task_name, comms_filename)
+    if not data:
+        if path.exists():
+            path.unlink()
+        return
+    d.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def delete_task_question_answers_draft(
+    tasks_root: Path, task_name: str, comms_filename: str
+) -> None:
+    """Remove question-answers draft for a comms file."""
+    set_task_question_answers_draft(tasks_root, task_name, comms_filename, {})

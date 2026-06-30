@@ -1,5 +1,7 @@
 """Tests for agent_run module."""
 
+import json
+
 import pytest
 
 from dev_sdk.agent_run import (
@@ -104,17 +106,22 @@ def test_remove_empty_log_file_keeps_nonempty_file(tmp_path) -> None:
     assert log_path.exists()
 
 
-def test_run_question_mode_writes_draft_and_comms(tmp_path, monkeypatch) -> None:
-    """Question mode writes draft file and agent-question comms entry."""
+def test_run_question_mode_writes_comms_with_json(tmp_path, monkeypatch) -> None:
+    """Question mode writes canonical JSON to agent-question comms on successful parse."""
     task_dir = tmp_path / "task"
     task_dir.mkdir()
     (task_dir / "comms").mkdir()
     (task_dir / "comms" / "index.txt").write_text("")
 
-    streamed = (
-        '{"type": "assistant", "message": {"content": [{"type": "text", "text": "1. Clarify scope?"}]}, '
-        '"model_call_id": "c1"}\n'
-    )
+    valid_json = '{"intro": "Need clarity", "questions": [{"text": "What scope?", "options": ["A", "B"]}]}'
+    assistant_text = f"```json\n{valid_json}\n```"
+    streamed = json.dumps(
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": assistant_text}]},
+            "model_call_id": "c1",
+        }
+    ) + "\n"
 
     def fake_run(task_dir_arg, prompt, prefix, **kwargs):
         log_path = task_dir / ".logs" / f"{prefix}test.log"
@@ -122,10 +129,81 @@ def test_run_question_mode_writes_draft_and_comms(tmp_path, monkeypatch) -> None
         log_path.write_text(streamed)
         return log_path, streamed
 
+    monkeypatch.setattr("dev_sdk.agent_run._create_ephemeral_chat", lambda: "ephemeral-chat-id")
     monkeypatch.setattr("dev_sdk.agent_run._run_agent_ask_stream_json", fake_run)
     result = run_question_mode(task_dir)
     assert result.comms_path.name.endswith("-agent-question.md")
-    assert (task_dir / "task-question-draft.md").read_text() == "1. Clarify scope?"
+    comms_text = result.comms_path.read_text(encoding="utf-8")
+    assert '"intro": "Need clarity"' in comms_text
+    assert '"id": "q1"' in comms_text
+    assert not (task_dir / "task-question-draft.md").exists()
     index = (task_dir / "comms" / "index.txt").read_text()
     assert "agent-question" in index
     assert QUESTION_STREAM_LOG_PREFIX in result.stream_log_path.name
+
+
+def test_run_question_mode_retries_then_succeeds(tmp_path, monkeypatch) -> None:
+    """Question mode retries on parse failure and writes comms only after success."""
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+    (task_dir / "comms").mkdir()
+    (task_dir / "comms" / "index.txt").write_text("")
+
+    invalid = json.dumps(
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "not json"}]},
+            "model_call_id": "c1",
+        }
+    ) + "\n"
+    valid_json = '{"intro": "", "questions": []}'
+    valid = json.dumps(
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": f"```json\n{valid_json}\n```"}]},
+            "model_call_id": "c2",
+        }
+    ) + "\n"
+    calls: list[str] = []
+
+    def fake_run(task_dir_arg, prompt, prefix, **kwargs):
+        calls.append(prompt)
+        log_path = task_dir / ".logs" / f"{prefix}{len(calls)}.log"
+        log_path.parent.mkdir(exist_ok=True)
+        body = invalid if len(calls) == 1 else valid
+        log_path.write_text(body)
+        return log_path, body
+
+    monkeypatch.setattr("dev_sdk.agent_run._create_ephemeral_chat", lambda: "ephemeral-chat-id")
+    monkeypatch.setattr("dev_sdk.agent_run._run_agent_ask_stream_json", fake_run)
+    result = run_question_mode(task_dir)
+    assert len(calls) == 2
+    assert "Validation errors" in calls[1]
+    assert '"questions": []' in result.comms_path.read_text(encoding="utf-8")
+
+
+def test_run_question_mode_failure_writes_raw_output(tmp_path, monkeypatch) -> None:
+    """After 3 failed parses, comms contains raw last-run output."""
+    task_dir = tmp_path / "task"
+    task_dir.mkdir()
+    (task_dir / "comms").mkdir()
+    (task_dir / "comms" / "index.txt").write_text("")
+
+    invalid = json.dumps(
+        {
+            "type": "assistant",
+            "message": {"content": [{"type": "text", "text": "bad output"}]},
+            "model_call_id": "c1",
+        }
+    ) + "\n"
+
+    def fake_run(task_dir_arg, prompt, prefix, **kwargs):
+        log_path = task_dir / ".logs" / f"{prefix}test.log"
+        log_path.parent.mkdir(exist_ok=True)
+        log_path.write_text(invalid)
+        return log_path, invalid
+
+    monkeypatch.setattr("dev_sdk.agent_run._create_ephemeral_chat", lambda: "ephemeral-chat-id")
+    monkeypatch.setattr("dev_sdk.agent_run._run_agent_ask_stream_json", fake_run)
+    result = run_question_mode(task_dir)
+    assert result.comms_path.read_text(encoding="utf-8").strip() == "bad output"
