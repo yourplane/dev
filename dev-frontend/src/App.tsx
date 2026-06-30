@@ -716,6 +716,7 @@ const COMMAND_LABEL: Record<string, string> = {
 }
 
 type AgentModeCommand = 'question' | 'plan-implement' | 'implement'
+type AgentMenuCommand = AgentModeCommand | 'merge-from-main'
 
 const AGENT_MODE_DEFAULT: AgentModeCommand = 'question'
 const LAST_AGENT_CMD_STORAGE_KEY = 'dev_last_agent_command'
@@ -750,7 +751,7 @@ function AgentCommandSplitButton({
 }: {
   selectedCommand: AgentModeCommand
   onSelectCommand: (cmd: AgentModeCommand) => void
-  onRunCommand: (cmd: AgentModeCommand) => void
+  onRunCommand: (cmd: AgentMenuCommand) => void
   startingCommand: string | null
   disabled: boolean
   hasRepo: boolean
@@ -758,11 +759,15 @@ function AgentCommandSplitButton({
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
 
-  const available: AgentModeCommand[] = hasRepo
+  const agentCommands: AgentModeCommand[] = hasRepo
     ? ['question', 'plan-implement', 'implement']
     : ['question', 'plan-implement']
 
-  const effectiveSelected = available.includes(selectedCommand)
+  const menuItems: AgentMenuCommand[] = hasRepo
+    ? [...agentCommands, 'merge-from-main']
+    : agentCommands
+
+  const effectiveSelected = agentCommands.includes(selectedCommand)
     ? selectedCommand
     : AGENT_MODE_DEFAULT
 
@@ -810,7 +815,7 @@ function AgentCommandSplitButton({
       </div>
       {open && (
         <ul className="command-split-menu" role="menu">
-          {available.map((cmd) => (
+          {menuItems.map((cmd) => (
             <li key={cmd} role="none">
               <button
                 type="button"
@@ -821,7 +826,9 @@ function AgentCommandSplitButton({
                     : 'command-split-menu-item'
                 }
                 onClick={() => {
-                  onSelectCommand(cmd)
+                  if (cmd !== 'merge-from-main') {
+                    onSelectCommand(cmd)
+                  }
                   onRunCommand(cmd)
                   setOpen(false)
                 }}
@@ -2553,27 +2560,17 @@ export function TaskCommsPageContent({
               hasRepo={workspaceInfo?.repo_label != null}
             />
             {(!workspaceInfo || workspaceInfo.repo_label != null) && (
-              <>
-                <button
-                  type="button"
-                  className="command-btn"
-                  disabled={!!startingCommand || creatingPr || pullingPrComments}
-                  onClick={prUrl ? handlePullPrComments : handleCreatePr}
-                  aria-busy={creatingPr || pullingPrComments}
-                >
-                  {prUrl
-                    ? (pullingPrComments ? 'Pulling comments…' : 'Pull Comments')
-                    : (creatingPr ? 'Creating PR…' : 'Create PR')}
-                </button>
-                <button
-                  type="button"
-                  className="command-btn"
-                  disabled={!!startingCommand}
-                  onClick={() => void handleStartCommand('merge-from-main')}
-                >
-                  {startingCommand === 'merge-from-main' ? 'Starting…' : 'Merge from main'}
-                </button>
-              </>
+              <button
+                type="button"
+                className="command-btn"
+                disabled={!!startingCommand || creatingPr || pullingPrComments}
+                onClick={prUrl ? handlePullPrComments : handleCreatePr}
+                aria-busy={creatingPr || pullingPrComments}
+              >
+                {prUrl
+                  ? (pullingPrComments ? 'Pulling comments…' : 'Pull Comments')
+                  : (creatingPr ? 'Creating PR…' : 'Create PR')}
+              </button>
             )}
           </div>
         )}
