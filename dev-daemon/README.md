@@ -22,7 +22,10 @@ Or from anywhere, pointing at the repo:
 ./dev-daemon/restart.sh
 ```
 
-If you installed the systemd user service (`install.sh`), this runs `systemctl --user restart dev-daemon.service`. Otherwise it stops processes listening on ports **8000** (backend) and **5173** (frontend), then runs `start.sh` in the foreground.
+If you installed the systemd user service (`install.sh`), this runs `systemctl --user restart dev-daemon.service`. Otherwise:
+
+- **From a terminal:** stops processes on ports **8000** and **5173**, then runs `start.sh` in the foreground.
+- **From dev-server bash** (in-app): schedules restart after 2 seconds so the bash command can finish before the backend is stopped; logs go to `/tmp/dev-daemon-restart.log`.
 
 - **Backend:** dev-server on `127.0.0.1:8000` (uvicorn; `--reload` only in `dev` frontend mode).
 - **Frontend:** http://localhost:5173 — by default a **production build** served with `vite preview` (no HMR full-page reloads on mobile). Set `DEV_DAEMON_FRONTEND=dev` to use the Vite dev server with HMR for active frontend work.

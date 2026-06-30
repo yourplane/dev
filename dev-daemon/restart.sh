@@ -56,7 +56,25 @@ stop_port() {
   fi
 }
 
-echo "No systemd service found; stopping listeners on 8000 and 5173..."
+RESTART_LOG="${TMPDIR:-/tmp}/dev-daemon-restart.log"
+
+# When invoked from dev-server bash (stdout is not a tty), defer stop/start so this
+# shell can exit before we kill the backend on port 8000.
+if [[ ! -t 1 ]]; then
+  echo "Scheduling dev stack restart in 2s (deferred; safe for in-app bash)..."
+  (
+    sleep 2
+    stop_port 8000
+    stop_port 5173
+    sleep 0.5
+    exec "$SCRIPT_DIR/start.sh"
+  ) >>"$RESTART_LOG" 2>&1 &
+  echo "Restart scheduled. UI may be briefly unavailable."
+  echo "Logs: $RESTART_LOG"
+  exit 0
+fi
+
+echo "Stopping listeners on 8000 and 5173..."
 stop_port 8000
 stop_port 5173
 sleep 0.5
