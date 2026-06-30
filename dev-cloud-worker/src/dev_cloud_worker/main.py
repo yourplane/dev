@@ -1,0 +1,341 @@
+"""Environment worker: polls control plane and executes commands locally."""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import signal
+import subprocess
+import sys
+import threading
+import time
+import uuid
+from pathlib import Path
+
+import requests
+
+from dev_sdk.agent_run import (
+    AgentRunError,
+    run_do,
+    run_implement,
+    run_plan_implement,
+    run_question_mode,
+)
+from dev_sdk.comms import (
+    add_comms,
+    bash_comms_input_header,
+    begin_streaming_bash_comms,
+    comms_dir,
+    read_index,
+)
+from dev_sdk.task_manager import TaskManager
+
+logger = logging.getLogger("dev_cloud_worker")
+POLL_INTERVAL_SEC = float(os.environ.get("DEV_CLOUD_POLL_INTERVAL", "5"))
+CONFIG_DIR = Path.home() / ".config" / "dev-cloud"
+ENV_ID_FILE = CONFIG_DIR / "environment_id"
+DISPLAY_NAME_FILE = CONFIG_DIR / "display_name"
+
+
+def _control_plane_url() -> str:
+    url = os.environ.get("CONTROL_PLANE_URL", "").rstrip("/")
+    if not url:
+        raise RuntimeError("CONTROL_PLANE_URL environment variable required")
+    return url
+
+
+def _tasks_root() -> Path:
+    root = os.environ.get("DEV_TASKS_ROOT", str(Path.home() / "tasks"))
+    return Path(root)
+
+
+def _load_environment_id() -> str:
+    if ENV_ID_FILE.is_file():
+        return ENV_ID_FILE.read_text(encoding="utf-8").strip()
+    env_id = str(uuid.uuid4())
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    ENV_ID_FILE.write_text(env_id, encoding="utf-8")
+    return env_id
+
+
+def _load_display_name() -> str | None:
+    if DISPLAY_NAME_FILE.is_file():
+        name = DISPLAY_NAME_FILE.read_text(encoding="utf-8").strip()
+        return name or None
+    return None
+
+
+class WorkerClient:
+    def __init__(self) -> None:
+        self.base = _control_plane_url()
+        self.env_id = _load_environment_id()
+        self.session = requests.Session()
+        self.session.headers["Content-Type"] = "application/json"
+
+    def poll(self) -> dict:
+        resp = self.session.post(
+            f"{self.base}/worker/poll",
+            json={"environment_id": self.env_id, "display_name": _load_display_name()},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("environment_id"):
+            self.env_id = data["environment_id"]
+            CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+            ENV_ID_FILE.write_text(self.env_id, encoding="utf-8")
+        return data
+
+    def complete_command(self, task_name: str, *, error: str | None = None, result: dict | None = None) -> None:
+        self.session.post(
+            f"{self.base}/worker/tasks/{task_name}/command/complete",
+            json={"error": error, "result": result or {}},
+            timeout=30,
+        ).raise_for_status()
+
+    def progress(self, task_name: str, message: str) -> None:
+        self.session.post(
+            f"{self.base}/worker/tasks/{task_name}/command/progress",
+            json={"message": message},
+            timeout=10,
+        )
+
+    def sync_push(self, task_name: str, items: list[dict]) -> list[dict]:
+        resp = self.session.post(
+            f"{self.base}/worker/tasks/{task_name}/sync",
+            json={"push": items},
+            timeout=60,
+        )
+        resp.raise_for_status()
+        return resp.json().get("pull", [])
+
+    def upload_log_chunk(self, task_name: str, filename: str, chunk: bytes) -> None:
+        import base64
+
+        self.session.post(
+            f"{self.base}/worker/tasks/{task_name}/logs",
+            json={"filename": filename, "chunk_b64": base64.b64encode(chunk).decode("ascii")},
+            timeout=30,
+        ).raise_for_status()
+
+    def ack_deletion(self, task_name: str, filename: str) -> None:
+        self.session.post(
+            f"{self.base}/worker/deletions/ack",
+            json={"task_name": task_name, "filename": filename},
+            timeout=30,
+        ).raise_for_status()
+
+    def git_token(self, owner: str) -> str:
+        resp = self.session.post(
+            f"{self.base}/worker/git-token",
+            json={"owner": owner},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        return resp.json()["token"]
+
+
+class CommandExecutor:
+    def __init__(self, client: WorkerClient) -> None:
+        self.client = client
+        self.tasks_root = _tasks_root()
+        self.manager = TaskManager(self.tasks_root)
+        self._cancel = threading.Event()
+
+    def execute(self, task_name: str, command: dict) -> None:
+        cmd = command.get("command")
+        payload = command.get("payload") or {}
+        try:
+            if cmd == "create-task":
+                self._create_task(task_name, payload)
+            elif cmd == "archive":
+                self._archive(task_name, payload)
+            elif cmd == "unarchive":
+                self._unarchive(task_name, payload)
+            elif cmd == "copy-from-archive":
+                self._copy_from_archive(task_name, payload)
+            elif cmd == "cancel":
+                self._cancel.set()
+                return
+            elif cmd in ("question", "plan-implement", "implement", "do"):
+                self._run_agent(task_name, cmd, payload.get("prompt"))
+            elif cmd == "bash":
+                self._run_bash(task_name, payload.get("prompt", ""))
+            else:
+                raise RuntimeError(f"Unknown command: {cmd}")
+            self.client.complete_command(task_name, result=self._task_result(task_name))
+        except Exception as e:
+            logger.exception("Command failed for %s: %s", task_name, e)
+            self.client.complete_command(task_name, error=str(e))
+        finally:
+            self._cancel.clear()
+            self._sync_comms(task_name)
+
+    def _task_result(self, task_name: str) -> dict:
+        task_dir = self.tasks_root / task_name
+        out: dict = {}
+        for child in task_dir.iterdir() if task_dir.is_dir() else []:
+            if child.is_dir() and not child.name.startswith("."):
+                try:
+                    r = subprocess.run(
+                        ["git", "remote", "get-url", "origin"],
+                        cwd=child,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+                    url = r.stdout.strip()
+                    from dev_sdk.create_pr import _parse_owner_repo
+
+                    owner, repo_name = _parse_owner_repo(url)
+                    out["owner"] = owner
+                    out["repo_name"] = repo_name
+                    br = subprocess.run(
+                        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                        cwd=child,
+                        capture_output=True,
+                        text=True,
+                        check=True,
+                    )
+                    out["branch"] = br.stdout.strip()
+                except Exception:
+                    pass
+                break
+        return out
+
+    def _create_task(self, task_name: str, payload: dict) -> None:
+        def on_progress(msg: str) -> None:
+            self.client.progress(task_name, msg)
+
+        self.manager.start_task(
+            payload.get("title", task_name),
+            task_name,
+            payload.get("comment"),
+            payload.get("repo_url"),
+            on_progress=on_progress,
+        )
+
+    def _archive(self, task_name: str, payload: dict) -> None:
+        self.manager.archive_task(task_name)
+
+    def _unarchive(self, task_name: str, payload: dict) -> None:
+        archived_name = payload["archived_name"]
+        self.manager.unarchive_task(archived_name)
+
+    def _copy_from_archive(self, task_name: str, payload: dict) -> None:
+        archived_name = payload["archived_name"]
+        self.manager.copy_task_from_archive(archived_name, task_name_override=task_name)
+
+    def _run_agent(self, task_name: str, command: str, prompt: str | None) -> None:
+        task_dir = self.tasks_root / task_name
+        log_name = f"dev-{command}-stream.log"
+        log_path = task_dir / ".logs" / log_name
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        def tail_log() -> None:
+            last_size = 0
+            while not self._cancel.is_set():
+                if log_path.is_file():
+                    data = log_path.read_bytes()
+                    if len(data) > last_size:
+                        self.client.upload_log_chunk(task_name, log_name, data[last_size:])
+                        last_size = len(data)
+                time.sleep(1)
+
+        t = threading.Thread(target=tail_log, daemon=True)
+        t.start()
+        runners = {
+            "plan-implement": run_plan_implement,
+            "implement": run_implement,
+            "do": run_do,
+            "question": run_question_mode,
+        }
+        try:
+            runners[command](task_dir, prompt=prompt)
+        except AgentRunError as e:
+            raise RuntimeError(str(e)) from e
+        finally:
+            self._cancel.set()
+            t.join(timeout=2)
+            if log_path.is_file():
+                self.client.upload_log_chunk(task_name, log_name, log_path.read_bytes())
+
+    def _run_bash(self, task_name: str, shell_command: str) -> None:
+        task_dir = self.tasks_root / task_name
+        path = begin_streaming_bash_comms(task_dir, shell_command)
+        proc = subprocess.Popen(
+            ["bash", "-c", shell_command],
+            cwd=str(task_dir),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            start_new_session=True,
+        )
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            with open(path, "ab") as f:
+                f.write(line)
+        proc.wait()
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(f"\n---\nExit code: {proc.returncode}\n")
+        self._sync_comms(task_name)
+
+    def _sync_comms(self, task_name: str) -> None:
+        task_dir = self.tasks_root / task_name
+        if not task_dir.is_dir():
+            return
+        push: list[dict] = []
+        cdir = comms_dir(task_dir)
+        if cdir.is_dir():
+            for filename in read_index(task_dir):
+                fp = cdir / filename
+                if fp.is_file():
+                    push.append(
+                        {
+                            "filename": filename,
+                            "content": fp.read_text(encoding="utf-8", errors="replace"),
+                            "origin": "worker",
+                            "created_at": fp.stat().st_mtime,
+                            "deletable": None,
+                        }
+                    )
+        pull = self.client.sync_push(task_name, push)
+        for item in pull:
+            fp = cdir / item["filename"]
+            fp.parent.mkdir(parents=True, exist_ok=True)
+            fp.write_text(item["content"], encoding="utf-8")
+
+
+def run_loop() -> None:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    client = WorkerClient()
+    executor = CommandExecutor(client)
+    logger.info("Worker started env=%s tasks_root=%s", client.env_id, _tasks_root())
+    while True:
+        try:
+            data = client.poll()
+            for d in data.get("deletions", []):
+                task_name = d["task_name"]
+                filename = d["filename"]
+                fp = comms_dir(_tasks_root() / task_name) / filename
+                if fp.is_file():
+                    fp.unlink()
+                client.ack_deletion(task_name, filename)
+            for item in data.get("work", []):
+                task_name = item["task_name"]
+                command = item["command"]
+                if command.get("command") == "cancel":
+                    executor._cancel.set()
+                    continue
+                executor.execute(task_name, command)
+        except Exception:
+            logger.exception("Poll loop error")
+        time.sleep(POLL_INTERVAL_SEC)
+
+
+def main() -> None:
+    run_loop()
+
+
+if __name__ == "__main__":
+    main()

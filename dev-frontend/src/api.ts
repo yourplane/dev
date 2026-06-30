@@ -1,4 +1,6 @@
 /** Base URL for API requests. Default `/api` uses Vite proxy (single-port dev). Override with VITE_DEV_SERVER_URL to talk to backend directly. */
+import { authHeaders } from './cloudAuth';
+
 export const apiBaseUrl = import.meta.env.VITE_DEV_SERVER_URL ?? '/api';
 
 async function request<T>(
@@ -10,7 +12,7 @@ async function request<T>(
   let res: Response;
   try {
     res = await fetch(url, {
-      headers: { 'Content-Type': 'application/json', ...init.headers },
+      headers: { 'Content-Type': 'application/json', ...authHeaders(), ...init.headers },
       ...init,
     });
   } catch (e) {
@@ -38,6 +40,15 @@ export interface CreateTaskBody {
   title: string;
   repo?: string | null;
   comment?: string | null;
+  environment_id?: string | null;
+}
+
+export interface EnvironmentInfo {
+  environment_id: string;
+  display_name: string;
+  online: boolean;
+  last_heartbeat: number;
+  registered_at: number;
 }
 
 export interface TaskWorkspaceInfo {
@@ -89,6 +100,30 @@ export const api = {
     return request('/repos');
   },
 
+  getEnvironments(): Promise<{ environments: EnvironmentInfo[] }> {
+    return request('/environments');
+  },
+
+  updateEnvironment(environmentId: string, displayName: string): Promise<void> {
+    return request(`/environments/${encodeURIComponent(environmentId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ display_name: displayName }),
+      parseJson: false,
+    });
+  },
+
+  getBots(): Promise<{ bots: Array<{ org: string; secret: string }> }> {
+    return request('/config/bots');
+  },
+
+  setBots(bots: Array<{ org: string; secret: string }>): Promise<void> {
+    return request('/config/bots', {
+      method: 'PUT',
+      body: JSON.stringify({ bots }),
+      parseJson: false,
+    });
+  },
+
   addRepo(name: string, url: string): Promise<Record<string, string>> {
     return request('/repos', {
       method: 'POST',
@@ -112,7 +147,7 @@ export const api = {
     try {
       res = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify(body),
       });
     } catch (e) {

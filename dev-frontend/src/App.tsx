@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api, apiBaseUrl, type TaskWorkspaceInfo } from './api'
+import { api, apiBaseUrl, type TaskWorkspaceInfo, type EnvironmentInfo } from './api'
 import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
+import { isCloudMode, getIdToken, signIn, signOut } from './cloudAuth'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import { QuestionAnswerForm } from './QuestionAnswerForm'
 import { tryParseQuestionPayload } from './questionForm'
@@ -38,6 +39,7 @@ export function Layout() {
           <Link to="/" className="nav-link">Tasks</Link>
           <Link to="/new" className="nav-link">New task</Link>
           <Link to="/archive" className="nav-link">Archive</Link>
+          {isCloudMode() && <Link to="/settings" className="nav-link">Settings</Link>}
         </nav>
       </header>
       <main className="main">
@@ -45,6 +47,7 @@ export function Layout() {
           <Route index element={<TaskListPage />} />
           <Route path="new" element={<CreateTaskPage />} />
           <Route path="archive" element={<ArchivePage />} />
+          {isCloudMode() && <Route path="settings" element={<SettingsPage />} />}
           <Route path="task/:taskName" element={<TaskCommsPage />} />
         </Routes>
       </main>
@@ -418,6 +421,8 @@ function CreateTaskForm({
   onCancel: () => void
 }) {
   const [repos, setRepos] = useState<Record<string, string>>({})
+  const [environments, setEnvironments] = useState<EnvironmentInfo[]>([])
+  const [environmentId, setEnvironmentId] = useState('')
   const [reposLoading, setReposLoading] = useState(true)
   const [title, setTitle] = useState('')
   const [repo, setRepo] = useState('')
@@ -445,9 +450,19 @@ function CreateTaskForm({
 
   useEffect(() => {
     let cancelled = false
-    api.getRepos().then((r) => {
-      if (!cancelled) setRepos(r)
-    }).finally(() => {
+    const loads: Promise<unknown>[] = [api.getRepos().then((r) => { if (!cancelled) setRepos(r) })]
+    if (isCloudMode()) {
+      loads.push(
+        api.getEnvironments().then((r) => {
+          if (cancelled) return
+          setEnvironments(r.environments)
+          const online = r.environments.find((e) => e.online)
+          if (online) setEnvironmentId(online.environment_id)
+          else if (r.environments[0]) setEnvironmentId(r.environments[0].environment_id)
+        }),
+      )
+    }
+    Promise.all(loads).finally(() => {
       if (!cancelled) setReposLoading(false)
     })
     return () => { cancelled = true }
@@ -550,6 +565,7 @@ function CreateTaskForm({
     setError(null)
     if (!title.trim()) { setError('Title is required'); return }
     if (repo !== CREATE_TASK_NO_REPO && !repo.trim()) { setError('Select a repo'); return }
+    if (isCloudMode() && !environmentId) { setError('Select an environment'); return }
     setCreateStatusMessage(null)
     setSubmitting(true)
     try {
@@ -558,6 +574,7 @@ function CreateTaskForm({
           title: title.trim(),
           repo: repo === CREATE_TASK_NO_REPO ? null : repo.trim(),
           comment: comment.trim() || undefined,
+          environment_id: isCloudMode() ? environmentId : undefined,
         },
         (msg) => setCreateStatusMessage(msg),
       )
@@ -580,6 +597,22 @@ function CreateTaskForm({
       </div>
       <form onSubmit={handleSubmit}>
         {error && <p className="inline-error">{error}</p>}
+        {isCloudMode() && (
+          <label>
+            <span>Environment <span className="required">*</span></span>
+            {environments.length === 0 ? (
+              <span className="hint">No environments registered yet. Start a worker on your server.</span>
+            ) : (
+              <select value={environmentId} onChange={(e) => setEnvironmentId(e.target.value)} required>
+                {environments.map((env) => (
+                  <option key={env.environment_id} value={env.environment_id}>
+                    {env.display_name} {env.online ? '(online)' : '(offline)'}
+                  </option>
+                ))}
+              </select>
+            )}
+          </label>
+        )}
         <label>
           <span>Title <span className="required">*</span></span>
           <input
@@ -2744,10 +2777,146 @@ export function TaskCommsPageContent({
   )
 }
 
+}
+
+function SettingsPage() {
+  const [repos, setRepos] = useState<Record<string, string>>({})
+  const [bots, setBots] = useState<Array<{ org: string; secret: string }>>([])
+  const [environments, setEnvironments] = useState<EnvironmentInfo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => {
+    document.title = 'Dev – Settings'
+    return () => { document.title = DEFAULT_TAB_TITLE }
+  }, [])
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const [r, b, e] = await Promise.all([api.getRepos(), api.getBots(), api.getEnvironments()])
+      setRepos(r)
+      setBots(b.bots)
+      setEnvironments(e.environments)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const saveBots = async () => {
+    setSaving(true)
+    try {
+      await api.setBots(bots)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (loading) return <p className="hint">Loading settings…</p>
+
+  return (
+    <section className="settings-page">
+      <h2>Cloud settings</h2>
+      {error && <p className="inline-error">{error}</p>}
+      <h3>Environments</h3>
+      <ul>
+        {environments.map((env) => (
+          <li key={env.environment_id}>
+            {env.display_name} — {env.online ? 'online' : 'offline'}
+          </li>
+        ))}
+      </ul>
+      <h3>Repos</h3>
+      <ul>
+        {Object.entries(repos).map(([name, url]) => (
+          <li key={name}>{name}: {url}</li>
+        ))}
+      </ul>
+      <h3>GitHub bots (Secrets Manager)</h3>
+      {bots.map((b, i) => (
+        <div key={i} className="bots-row">
+          <input
+            placeholder="org"
+            value={b.org}
+            onChange={(e) => {
+              const next = [...bots]
+              next[i] = { ...b, org: e.target.value }
+              setBots(next)
+            }}
+          />
+          <input
+            placeholder="secret name"
+            value={b.secret}
+            onChange={(e) => {
+              const next = [...bots]
+              next[i] = { ...b, secret: e.target.value }
+              setBots(next)
+            }}
+          />
+        </div>
+      ))}
+      <button type="button" onClick={() => setBots([...bots, { org: '', secret: '' }])}>Add bot</button>
+      <button type="button" onClick={saveBots} disabled={saving}>{saving ? 'Saving…' : 'Save bots'}</button>
+    </section>
+  )
+}
+
+function CloudLoginGate({ children }: { children: React.ReactNode }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [token, setToken] = useState(getIdToken)
+
+  if (!isCloudMode()) return <>{children}</>
+  if (token) {
+    return (
+      <>
+        <div className="cloud-auth-bar">
+          <button type="button" className="link-btn" onClick={() => { signOut(); setToken(null) }}>Sign out</button>
+        </div>
+        {children}
+      </>
+    )
+  }
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    try {
+      await signIn(email, password)
+      setToken(getIdToken())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    }
+  }
+
+  return (
+    <section className="cloud-login">
+      <h2>Sign in</h2>
+      <form onSubmit={handleLogin}>
+        {error && <p className="inline-error">{error}</p>}
+        <label>Email <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
+        <label>Password <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+  )
+}
+
 export default function App() {
   return (
     <BrowserRouter>
-      <Layout />
+      <CloudLoginGate>
+        <Layout />
+      </CloudLoginGate>
     </BrowserRouter>
   )
 }
