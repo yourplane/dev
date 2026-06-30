@@ -22,10 +22,22 @@ Or from anywhere, pointing at the repo:
 ./dev-daemon/restart.sh
 ```
 
-If you installed the systemd user service (`install.sh`), this runs `systemctl --user restart dev-daemon.service`. Otherwise:
+If you installed the systemd user service (`install.sh`), this **stops** the service, clears ports **8000** and **5173**, then **starts** it again (avoiding a blocking `systemctl restart` while preview mode rebuilds the frontend). When `DEV_DAEMON_SKIP_BUILD=1` is set (see deploy below), startup skips the redundant frontend build.
+
+Otherwise:
 
 - **From a terminal:** stops processes on ports **8000** and **5173**, then runs `start.sh` in the foreground.
 - **From dev-server bash** (in-app): schedules restart after 2 seconds so the bash command can finish before the backend is stopped; logs go to `/tmp/dev-daemon-restart.log`.
+
+### Deploy locally
+
+To update `~/dev` (or `DEV_DEPLOY_TARGET`) from a feature branch and restart:
+
+```bash
+./dev-daemon/deploy.sh task/my-feature /path/to/source/repo
+```
+
+From this repo, defaults deploy `task/merge-from-main` to `~/dev`. The script fast-forwards git, runs `uv sync`, builds the frontend once, sets `DEV_DAEMON_SKIP_BUILD=1`, and calls `restart.sh`.
 
 - **Backend:** dev-server on `127.0.0.1:8000` (uvicorn; `--reload` only in `dev` frontend mode).
 - **Frontend:** http://localhost:5173 — by default a **production build** served with `vite preview` (no HMR full-page reloads on mobile). Set `DEV_DAEMON_FRONTEND=dev` to use the Vite dev server with HMR for active frontend work.
@@ -38,6 +50,8 @@ Open http://localhost:5173 to use the web UI.
 |-----------------------|----------|
 | `preview` (default) | `vite build` then `vite preview` — stable for daily use and mobile |
 | `dev` | `vite dev` with HMR — use while editing frontend code |
+
+Set `DEV_DAEMON_SKIP_BUILD=1` to skip the preview-mode frontend build on startup (used by `deploy.sh` after it builds once).
 
 Example:
 
