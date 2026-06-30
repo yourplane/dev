@@ -61,11 +61,32 @@ echo "Building frontend..."
 )
 
 export DEV_DAEMON_SKIP_BUILD=1
-if command -v systemctl >/dev/null 2>&1 && [[ -f "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/dev-daemon.service" ]]; then
+export DEV_DAEMON_RESTART_BACKGROUND=1
+SERVICE_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/dev-daemon.service"
+if command -v systemctl >/dev/null 2>&1 \
+    && [[ -f "$SERVICE_FILE" ]] \
+    && systemctl --user show-environment >/dev/null 2>&1; then
+  unset DEV_DAEMON_RESTART_BACKGROUND
   systemctl --user set-environment DEV_DAEMON_SKIP_BUILD=1
 fi
 
 echo "Restarting dev daemon..."
 "$TARGET/dev-daemon/restart.sh"
+
+if [[ "${DEV_DAEMON_RESTART_BACKGROUND:-}" == "1" ]]; then
+  echo "Waiting for backend..."
+  ready=0
+  for _ in {1..60}; do
+    if curl -sf -o /dev/null "http://127.0.0.1:8000/" 2>/dev/null; then
+      ready=1
+      break
+    fi
+    sleep 0.5
+  done
+  if [[ "$ready" != "1" ]]; then
+    echo "deploy.sh: backend did not become ready; see ${TMPDIR:-/tmp}/dev-daemon-restart.log" >&2
+    exit 1
+  fi
+fi
 
 echo "Deploy complete. UI: http://localhost:5173"

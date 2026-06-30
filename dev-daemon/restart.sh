@@ -53,6 +53,12 @@ stop_port() {
   fi
 }
 
+systemd_user_available() {
+  [[ -f "$SERVICE_FILE" ]] \
+    && command -v systemctl >/dev/null 2>&1 \
+    && systemctl --user show-environment >/dev/null 2>&1
+}
+
 restart_systemd_service() {
   systemctl --user stop dev-daemon.service 2>/dev/null || true
   stop_port 8000
@@ -61,7 +67,25 @@ restart_systemd_service() {
   systemctl --user start dev-daemon.service
 }
 
-if [[ -f "$SERVICE_FILE" ]] && command -v systemctl >/dev/null 2>&1; then
+start_stack_in_background() {
+  local delay="${1:-0}"
+  if [[ "$delay" != "0" ]]; then
+    echo "Scheduling dev stack restart in ${delay}s..."
+  else
+    echo "Starting dev stack in background..."
+  fi
+  (
+    [[ "$delay" != "0" ]] && sleep "$delay"
+    stop_port 8000
+    stop_port 5173
+    sleep 0.5
+    exec "$SCRIPT_DIR/start.sh"
+  ) >>"$RESTART_LOG" 2>&1 &
+  echo "Restart scheduled. UI may be briefly unavailable."
+  echo "Logs: $RESTART_LOG"
+}
+
+if systemd_user_available; then
   # When invoked from dev-server bash (stdout is not a tty), defer so the caller can
   # finish before we stop the backend on port 8000.
   if [[ ! -t 1 ]]; then
@@ -79,19 +103,16 @@ if [[ -f "$SERVICE_FILE" ]] && command -v systemctl >/dev/null 2>&1; then
   exit 0
 fi
 
+# When invoked from deploy.sh or dev-server bash (non-interactive / background restart).
+if [[ "${DEV_DAEMON_RESTART_BACKGROUND:-}" == "1" ]]; then
+  start_stack_in_background 0
+  exit 0
+fi
+
 # When invoked from dev-server bash (stdout is not a tty), defer stop/start so this
 # shell can exit before we kill the backend on port 8000.
 if [[ ! -t 1 ]]; then
-  echo "Scheduling dev stack restart in 2s (deferred; safe for in-app bash)..."
-  (
-    sleep 2
-    stop_port 8000
-    stop_port 5173
-    sleep 0.5
-    exec "$SCRIPT_DIR/start.sh"
-  ) >>"$RESTART_LOG" 2>&1 &
-  echo "Restart scheduled. UI may be briefly unavailable."
-  echo "Logs: $RESTART_LOG"
+  start_stack_in_background 2
   exit 0
 fi
 
