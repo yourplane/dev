@@ -177,6 +177,34 @@ describe('App', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Choose agent command' }))
     expect(screen.getByRole('menuitem', { name: 'Implement' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: 'Merge from main' })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Merge from main' })).toBeNull()
+  })
+
+  it('starts merge-from-main from the agent command menu', async () => {
+    const noop = () => {}
+    const { api } = await import('./api')
+    vi.mocked(api.getTaskWorkspace).mockResolvedValue({
+      repo_label: 'https://github.com/acme/repo.git',
+    })
+    vi.mocked(api.startTaskCommand).mockResolvedValue({ command: 'merge-from-main', status: 'running' })
+    localStorage.removeItem('dev_last_agent_command')
+
+    render(
+      <MemoryRouter>
+        <TaskCommsPageContent taskName="test-task" navigate={noop} />
+      </MemoryRouter>,
+    )
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Choose agent command' })).toBeTruthy()
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Choose agent command' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Merge from main' }))
+
+    await waitFor(() => {
+      expect(vi.mocked(api.startTaskCommand)).toHaveBeenCalledWith('test-task', 'merge-from-main')
+    })
   })
 
   it('bash mode submits shell input and clears bash draft', async () => {
