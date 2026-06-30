@@ -12,7 +12,9 @@ license = { text = "MIT" }
 authors = [
     { name = "Developer" }
 ]
-dependencies = []
+dependencies = [
+    "pydantic>=2.0",
+]
 
 [project.optional-dependencies]
 dev = [

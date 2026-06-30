@@ -13,6 +13,8 @@ from pathlib import Path
 from typing import Callable
 
 from dev_sdk.comms import add_comms
+from dev_sdk.question_schema import format_question_payload_json, parse_question_output
+from dev_sdk.task_manager import TaskManager
 
 # Agent command: constant or from env (SDK chooses; no parameter from CLI).
 AGENT_CMD_DEFAULT = "cursor"
@@ -20,8 +22,6 @@ DEV_AGENT_CMD_ENV = "DEV_AGENT_CMD"
 
 AGENT_CHAT_ID_FILE = "agent-chat-id"
 PLAN_LOGS_DIR = ".logs"
-TASK_PLAN_DRAFT = "task-plan-draft.md"
-TASK_QUESTION_DRAFT = "task-question-draft.md"
 
 PLAN_IMPLEMENT_STREAM_LOG_PREFIX = "dev-plan-stream-"
 QUESTION_STREAM_LOG_PREFIX = "dev-question-stream-"
@@ -40,6 +40,8 @@ def _load_agent_prompt(name: str) -> str:
 PLAN_MODE_PROMPT = _load_agent_prompt("plan_mode.md")
 QUESTION_MODE_PROMPT = _load_agent_prompt("question_mode.md")
 IMPLEMENT_MODE_PROMPT = _load_agent_prompt("implement_mode.md")
+
+QUESTION_MODE_MAX_ATTEMPTS = 3
 
 STREAM_READER_TIMEOUT_SEC = 300
 PROC_WAIT_TIMEOUT_SEC = 5
@@ -306,6 +308,22 @@ def _run_agent_ask_stream_json(
     return stream_log_path, streamed_output
 
 
+def _create_ephemeral_chat() -> str:
+    """Create a new agent chat (not persisted to agent-chat-id)."""
+    return TaskManager(Path("."))._create_agent_chat()
+
+
+def _question_retry_prompt(errors: list[str]) -> str:
+    """Follow-up prompt after a failed question JSON parse."""
+    bullet_list = "\n".join(f"- {e}" for e in errors)
+    return (
+        "Your previous output could not be parsed as valid question JSON. "
+        "Fix the issues below and respond with ONLY a ```json fenced block "
+        "containing the corrected schema (no other text).\n\n"
+        f"Validation errors:\n{bullet_list}"
+    )
+
+
 def _read_chat_id(task_dir: Path) -> str:
     """Read chat ID from task_dir/AGENT_CHAT_ID_FILE. Raises AgentRunError if missing or empty."""
     chat_id_path = task_dir / AGENT_CHAT_ID_FILE
@@ -348,7 +366,7 @@ def run_plan_implement(
     on_start: Callable[[Path], None] | None = None,
     cancel_event: threading.Event | None = None,
 ) -> RunPlanImplementResult:
-    """Run agent with plan-mode prompt; write stream to log, extract plan, write task-plan-draft.md and add comms (plan)."""
+    """Run agent with plan-mode prompt; write stream to log, extract plan, add comms (plan)."""
     stream_log_path, streamed_output = _run_agent_ask_stream_json(
         task_dir,
         PLAN_MODE_PROMPT,
@@ -358,8 +376,6 @@ def run_plan_implement(
         cancel_event=cancel_event,
     )
     plan_text = extract_last_assistant_section_from_stream_json(streamed_output)
-    draft_path = task_dir / TASK_PLAN_DRAFT
-    draft_path.write_text(plan_text, encoding="utf-8")
     comms_path = add_comms(task_dir, "agent", plan_text, kind="plan")
     return RunPlanImplementResult(stream_log_path=stream_log_path, comms_path=comms_path)
 
@@ -371,20 +387,41 @@ def run_question_mode(
     on_start: Callable[[Path], None] | None = None,
     cancel_event: threading.Event | None = None,
 ) -> RunQuestionResult:
-    """Run agent with question-mode prompt; write stream to log, extract questions, write task-question-draft.md and add comms (question)."""
-    stream_log_path, streamed_output = _run_agent_ask_stream_json(
-        task_dir,
-        QUESTION_MODE_PROMPT,
-        QUESTION_STREAM_LOG_PREFIX,
-        on_stream_line=on_stream_line,
-        on_start=on_start,
-        cancel_event=cancel_event,
-    )
-    question_text = extract_last_assistant_section_from_stream_json(streamed_output)
-    draft_path = task_dir / TASK_QUESTION_DRAFT
-    draft_path.write_text(question_text, encoding="utf-8")
-    comms_path = add_comms(task_dir, "agent", question_text, kind="question")
-    return RunQuestionResult(stream_log_path=stream_log_path, comms_path=comms_path)
+    """Run agent with question-mode prompt; parse JSON with retries; write comms when complete."""
+    chat_id = _create_ephemeral_chat()
+    last_stream_log_path: Path | None = None
+    last_output = ""
+    parsed_payload = None
+
+    for attempt in range(QUESTION_MODE_MAX_ATTEMPTS):
+        if cancel_event is not None and cancel_event.is_set():
+            raise AgentRunError("Cancelled.")
+        prompt = QUESTION_MODE_PROMPT if attempt == 0 else _question_retry_prompt(parse_errors)
+        stream_log_path, streamed_output = _run_agent_ask_stream_json(
+            task_dir,
+            prompt,
+            QUESTION_STREAM_LOG_PREFIX,
+            chat_id=chat_id,
+            on_stream_line=on_stream_line,
+            on_start=on_start,
+            cancel_event=cancel_event,
+        )
+        last_stream_log_path = stream_log_path
+        last_output = extract_last_assistant_section_from_stream_json(streamed_output)
+        parsed_payload, parse_errors = parse_question_output(last_output)
+        if parsed_payload is not None:
+            break
+
+    if last_stream_log_path is None:
+        raise AgentRunError("Question mode produced no output.")
+
+    if parsed_payload is not None:
+        comms_content = format_question_payload_json(parsed_payload)
+    else:
+        comms_content = last_output
+
+    comms_path = add_comms(task_dir, "agent", comms_content, kind="question")
+    return RunQuestionResult(stream_log_path=last_stream_log_path, comms_path=comms_path)
 
 
 def run_implement(

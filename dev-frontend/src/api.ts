@@ -263,6 +263,51 @@ export const api = {
     });
   },
 
+  getQuestionAnswersDraft(
+    taskName: string,
+    commsFilename: string,
+  ): Promise<{
+    selections: Record<string, string>
+    freeText: Record<string, string>
+    expandedFreeText: Record<string, boolean>
+  }> {
+    return request(
+      `/tasks/${encodeURIComponent(taskName)}/drafts/question-answers/${encodeURIComponent(commsFilename)}`,
+    );
+  },
+
+  setQuestionAnswersDraft(
+    taskName: string,
+    commsFilename: string,
+    data: {
+      selections: Record<string, string>
+      freeText: Record<string, string>
+      expandedFreeText: Record<string, boolean>
+    },
+  ): Promise<void> {
+    return request(
+      `/tasks/${encodeURIComponent(taskName)}/drafts/question-answers/${encodeURIComponent(commsFilename)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(data),
+        parseJson: false,
+      },
+    );
+  },
+
+  postQuestionAnswers(
+    taskName: string,
+    body: {
+      source: string
+      answers: Array<{ id: string; text: string; selected: string; free_text: string }>
+    },
+  ): Promise<{ filename: string }> {
+    return request(`/tasks/${encodeURIComponent(taskName)}/comms/question-answers`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    });
+  },
+
   archiveTask(taskName: string): Promise<ArchiveTaskResponse> {
     return request(`/tasks/${encodeURIComponent(taskName)}/archive`, {
       method: 'POST',
