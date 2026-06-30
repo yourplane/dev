@@ -35,3 +35,7 @@ env/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Cloud deploy artifacts
+dev-cloud-infra/.deploy-outputs.json
+dev-cloud-infra/cdk.out/

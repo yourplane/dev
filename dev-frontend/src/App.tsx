@@ -2777,8 +2777,6 @@ export function TaskCommsPageContent({
   )
 }
 
-}
-
 function SettingsPage() {
   const [repos, setRepos] = useState<Record<string, string>>({})
   const [bots, setBots] = useState<Array<{ org: string; secret: string }>>([])

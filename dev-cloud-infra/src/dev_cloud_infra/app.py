@@ -12,13 +12,13 @@ from aws_cdk import (
     Stack,
     aws_apigatewayv2 as apigwv2,
     aws_apigatewayv2_integrations as apigwv2_integrations,
+    aws_apigatewayv2_authorizers as apigwv2_auth,
     aws_cognito as cognito,
     aws_dynamodb as dynamodb,
     aws_iam as iam,
     aws_lambda as lambda_,
     aws_logs as logs,
     aws_s3 as s3,
-    aws_s3_deployment as s3deploy,
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as origins,
 )
@@ -75,7 +75,7 @@ class DevCloudStack(Stack):
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="dev_cloud_control.lambda_entry.lambda_handler",
             code=lambda_.Code.from_asset(
-                os.path.join(os.path.dirname(__file__), "..", "..", "..", "dist", "lambda"),
+                os.path.join(os.path.dirname(__file__), "..", "..", "dist", "lambda"),
             ),
             timeout=Duration.seconds(30),
             memory_size=512,
@@ -111,17 +111,10 @@ class DevCloudStack(Stack):
             ),
         )
 
-        authorizer = apigwv2.CfnAuthorizer(
-            self,
-            "CognitoAuthorizer",
-            api_id=http_api.api_id,
-            authorizer_type="JWT",
-            identity_source=["$request.header.Authorization"],
-            name="cognito",
-            jwt_configuration=apigwv2.CfnAuthorizer.JWTConfigurationProperty(
-                audience=[user_pool_client.user_pool_client_id],
-                issuer=f"https://cognito-idp.{self.region}.amazonaws.com/{user_pool.user_pool_id}",
-            ),
+        jwt_authorizer = apigwv2_auth.HttpJwtAuthorizer(
+            "CognitoJwtAuthorizer",
+            jwt_issuer=f"https://cognito-idp.{self.region}.amazonaws.com/{user_pool.user_pool_id}",
+            jwt_audience=[user_pool_client.user_pool_client_id],
         )
 
         integration = apigwv2_integrations.HttpLambdaIntegration("LambdaIntegration", api_fn)
@@ -129,12 +122,7 @@ class DevCloudStack(Stack):
             path="/{proxy+}",
             methods=[apigwv2.HttpMethod.ANY],
             integration=integration,
-            authorizer=apigwv2.HttpRouteAuthorizer(
-                bind=lambda _, __: apigwv2.HttpRouteAuthorizerConfig(
-                    authorizer_id=authorizer.ref,
-                    authorization_type=apigwv2.HttpAuthorizerType.JWT,
-                )
-            ),
+            authorizer=jwt_authorizer,
         )
         http_api.add_routes(
             path="/worker/{proxy+}",
@@ -202,6 +190,7 @@ class DevCloudStack(Stack):
         CfnOutput(self, "UserPoolClientId", value=user_pool_client.user_pool_client_id)
         CfnOutput(self, "ApiUrl", value=http_api.url or "")
         CfnOutput(self, "CloudFrontUrl", value=f"https://{distribution.distribution_domain_name}")
+        CfnOutput(self, "CloudFrontDistributionId", value=distribution.distribution_id)
         CfnOutput(self, "SpaBucketName", value=spa_bucket.bucket_name)
         CfnOutput(self, "WorkerRoleArn", value=worker_role.role_arn)
         CfnOutput(self, "DataBucketName", value=bucket.bucket_name)

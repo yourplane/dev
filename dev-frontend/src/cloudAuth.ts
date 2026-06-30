@@ -7,7 +7,6 @@ export interface CloudAuthConfig {
 }
 
 const TOKEN_KEY = 'dev_cloud_id_token';
-const CONFIG_KEY = 'dev_cloud_auth_config';
 
 export function isCloudMode(): boolean {
   return import.meta.env.VITE_CLOUD_MODE === 'true';
