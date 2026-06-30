@@ -28,7 +28,25 @@ Stack outputs are saved to `dev-cloud-infra/.deploy-outputs.json` (gitignored).
 
 ### After first deploy
 
-Create a Cognito user manually (admin-only signup). Install the worker on EC2:
+**Cognito users** — Admin-created users with a temporary password must set a new password on first sign-in (the UI handles this automatically). Invitation emails use Cognito’s built-in sender (limited deliverability); if email doesn’t arrive, create the user with a known password via CLI:
+
+```bash
+aws cognito-idp admin-create-user \
+  --user-pool-id <UserPoolId> \
+  --username YOU@example.com \
+  --user-attributes Name=email,Value=YOU@example.com Name=email_verified,Value=true \
+  --temporary-password 'ChangeMeNow123!' \
+  --message-action SUPPRESS
+aws cognito-idp admin-set-user-password \
+  --user-pool-id <UserPoolId> \
+  --username YOU@example.com \
+  --password 'YourSecurePassword12!' \
+  --permanent
+```
+
+Or skip the second command and sign in with the temporary password — the UI will prompt for a new permanent password.
+
+Install the worker on EC2:
 
 ```bash
 export CONTROL_PLANE_URL=https://YOUR_CLOUDFRONT_DOMAIN/api

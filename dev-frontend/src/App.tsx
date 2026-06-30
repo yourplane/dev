@@ -4,7 +4,7 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, apiBaseUrl, type TaskWorkspaceInfo, type EnvironmentInfo } from './api'
 import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
-import { isCloudMode, getIdToken, signIn, signOut } from './cloudAuth'
+import { isCloudMode, getIdToken, signIn, signOut, completeNewPassword } from './cloudAuth'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import { QuestionAnswerForm } from './QuestionAnswerForm'
 import { tryParseQuestionPayload } from './questionForm'
@@ -2870,7 +2870,11 @@ function SettingsPage() {
 function CloudLoginGate({ children }: { children: React.ReactNode }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [challengeSession, setChallengeSession] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const [token, setToken] = useState(getIdToken)
 
   if (!isCloudMode()) return <>{children}</>
@@ -2878,6 +2882,7 @@ function CloudLoginGate({ children }: { children: React.ReactNode }) {
     return (
       <>
         <div className="cloud-auth-bar">
+          <span className="cloud-auth-bar-label">Signed in</span>
           <button type="button" className="link-btn" onClick={() => { signOut(); setToken(null) }}>Sign out</button>
         </div>
         {children}
@@ -2888,24 +2893,137 @@ function CloudLoginGate({ children }: { children: React.ReactNode }) {
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
+    setSubmitting(true)
     try {
-      await signIn(email, password)
+      const result = await signIn(email, password)
+      if (result.type === 'new_password_required') {
+        setChallengeSession(result.session)
+        setNewPassword('')
+        setConfirmPassword('')
+        return
+      }
       setToken(getIdToken())
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleNewPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    if (newPassword.length < 12) {
+      setError('Password must be at least 12 characters.')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match.')
+      return
+    }
+    if (!challengeSession) {
+      setError('Session expired. Sign in again.')
+      return
+    }
+    setSubmitting(true)
+    try {
+      await completeNewPassword(challengeSession, email, newPassword)
+      setToken(getIdToken())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSubmitting(false)
     }
   }
 
   return (
-    <section className="cloud-login">
-      <h2>Sign in</h2>
-      <form onSubmit={handleLogin}>
-        {error && <p className="inline-error">{error}</p>}
-        <label>Email <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} required /></label>
-        <label>Password <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required /></label>
-        <button type="submit">Sign in</button>
-      </form>
-    </section>
+    <div className="cloud-login-page">
+      <div className="cloud-login-card">
+        <div className="cloud-login-brand">
+          <h1 className="cloud-login-title">Dev</h1>
+          <p className="cloud-login-subtitle">Cloud task management</p>
+        </div>
+
+        {challengeSession ? (
+          <form className="cloud-login-form" onSubmit={handleNewPassword}>
+            <h2 className="cloud-login-heading">Set a new password</h2>
+            <p className="cloud-login-hint">
+              Your account requires a permanent password before you can continue.
+            </p>
+            {error && <p className="inline-error cloud-login-error" role="alert">{error}</p>}
+            <label className="cloud-login-field">
+              <span>New password</span>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                autoComplete="new-password"
+                minLength={12}
+                required
+              />
+            </label>
+            <label className="cloud-login-field">
+              <span>Confirm password</span>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                autoComplete="new-password"
+                minLength={12}
+                required
+              />
+            </label>
+            <button type="submit" className="cloud-login-submit" disabled={submitting}>
+              {submitting ? 'Saving…' : 'Continue'}
+            </button>
+            <button
+              type="button"
+              className="cloud-login-back"
+              onClick={() => {
+                setChallengeSession(null)
+                setError(null)
+                setNewPassword('')
+                setConfirmPassword('')
+              }}
+            >
+              Back to sign in
+            </button>
+          </form>
+        ) : (
+          <form className="cloud-login-form" onSubmit={handleLogin}>
+            <h2 className="cloud-login-heading">Sign in</h2>
+            <p className="cloud-login-hint">
+              Use the email and password from your Cognito account.
+            </p>
+            {error && <p className="inline-error cloud-login-error" role="alert">{error}</p>}
+            <label className="cloud-login-field">
+              <span>Email</span>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="username"
+                placeholder="you@example.com"
+                required
+              />
+            </label>
+            <label className="cloud-login-field">
+              <span>Password</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+              />
+            </label>
+            <button type="submit" className="cloud-login-submit" disabled={submitting}>
+              {submitting ? 'Signing in…' : 'Sign in'}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
   )
 }
 

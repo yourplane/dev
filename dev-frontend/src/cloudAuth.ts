@@ -6,7 +6,19 @@ export interface CloudAuthConfig {
   region?: string;
 }
 
+export type SignInResult =
+  | { type: 'success' }
+  | { type: 'new_password_required'; session: string; email: string };
+
 const TOKEN_KEY = 'dev_cloud_id_token';
+
+type CognitoAuthResponse = {
+  AuthenticationResult?: { IdToken?: string };
+  ChallengeName?: string;
+  Session?: string;
+  message?: string;
+  __type?: string;
+};
 
 export function isCloudMode(): boolean {
   return import.meta.env.VITE_CLOUD_MODE === 'true';
@@ -32,33 +44,78 @@ export function setIdToken(token: string | null): void {
   else sessionStorage.removeItem(TOKEN_KEY);
 }
 
-export async function signIn(email: string, password: string): Promise<void> {
-  const cfg = getCloudAuthConfig();
-  if (!cfg) throw new Error('Cloud auth not configured');
-  const region = cfg.region ?? 'us-east-1';
+async function cognitoRequest<T>(region: string, target: string, body: Record<string, unknown>): Promise<T> {
   const resp = await fetch(`https://cognito-idp.${region}.amazonaws.com/`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-amz-json-1.1',
-      'X-Amz-Target': 'AWSCognitoIdentityProviderService.InitiateAuth',
+      'X-Amz-Target': target,
     },
-    body: JSON.stringify({
+    body: JSON.stringify(body),
+  });
+  const data = (await resp.json()) as T & { message?: string; __type?: string };
+  if (!resp.ok) {
+    throw new Error(data.message ?? 'Authentication failed');
+  }
+  return data;
+}
+
+function storeIdTokenFromAuth(data: CognitoAuthResponse): void {
+  const token = data.AuthenticationResult?.IdToken;
+  if (!token) {
+    if (data.ChallengeName) {
+      throw new Error(`Unexpected auth challenge: ${data.ChallengeName}`);
+    }
+    throw new Error('No IdToken in response');
+  }
+  setIdToken(token);
+}
+
+export async function signIn(email: string, password: string): Promise<SignInResult> {
+  const cfg = getCloudAuthConfig();
+  if (!cfg) throw new Error('Cloud auth not configured');
+  const region = cfg.region ?? 'us-east-1';
+  const data = await cognitoRequest<CognitoAuthResponse>(
+    region,
+    'AWSCognitoIdentityProviderService.InitiateAuth',
+    {
       AuthFlow: 'USER_PASSWORD_AUTH',
       ClientId: cfg.clientId,
-      AuthParameters: { USERNAME: email, PASSWORD: password },
-    }),
-  });
-  const data = (await resp.json()) as {
-    AuthenticationResult?: { IdToken?: string };
-    message?: string;
-    __type?: string;
-  };
-  if (!resp.ok) {
-    throw new Error(data.message ?? 'Sign in failed');
+      AuthParameters: { USERNAME: email.trim(), PASSWORD: password },
+    },
+  );
+
+  if (data.ChallengeName === 'NEW_PASSWORD_REQUIRED') {
+    if (!data.Session) throw new Error('Password change required but session missing');
+    return { type: 'new_password_required', session: data.Session, email: email.trim() };
   }
-  const token = data.AuthenticationResult?.IdToken;
-  if (!token) throw new Error('No IdToken in response');
-  setIdToken(token);
+
+  storeIdTokenFromAuth(data);
+  return { type: 'success' };
+}
+
+export async function completeNewPassword(
+  session: string,
+  email: string,
+  newPassword: string,
+): Promise<void> {
+  const cfg = getCloudAuthConfig();
+  if (!cfg) throw new Error('Cloud auth not configured');
+  const region = cfg.region ?? 'us-east-1';
+  const data = await cognitoRequest<CognitoAuthResponse>(
+    region,
+    'AWSCognitoIdentityProviderService.RespondToAuthChallenge',
+    {
+      ChallengeName: 'NEW_PASSWORD_REQUIRED',
+      ClientId: cfg.clientId,
+      Session: session,
+      ChallengeResponses: {
+        USERNAME: email.trim(),
+        NEW_PASSWORD: newPassword,
+      },
+    },
+  );
+  storeIdTokenFromAuth(data);
 }
 
 export function signOut(): void {
