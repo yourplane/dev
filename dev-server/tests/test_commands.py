@@ -580,7 +580,7 @@ def test_merge_from_main_runs_git_bash_from_task_dir(
 
     with patch("dev_server.main.validate_merge_from_main_can_start", return_value=repo_root):
         with patch("dev_server.main.has_conflicted_merge_in_progress", return_value=False):
-            with patch("dev_server.main._stream_bash_command_in_cwd", side_effect=fake_stream):
+            with patch("dev_server.main._stream_bash_command", side_effect=fake_stream):
                 resp = client_with_tasks.post(
                     "/tasks/mytask/commands",
                     json={"command": "merge-from-main"},

@@ -63,9 +63,10 @@ from dev_sdk.merge_from_main import (
     validate_merge_from_main_can_start,
 )
 from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repos
+from dev_sdk.task_commands import TaskCommand
 from dev_sdk.task_manager import TaskManager
 
-SUPPORTED_COMMANDS = ("question", "plan-implement", "implement", "do", "bash", "merge-from-main")
+SUPPORTED_COMMANDS = tuple(cmd.value for cmd in TaskCommand)
 logger = logging.getLogger("dev_server")
 
 _DEFAULT_BASH_MAX_OUTPUT_BYTES = 2_000_000
@@ -157,143 +158,21 @@ def _run_bash_in_thread(
 ) -> None:
     """Run bash -c in task_dir; stream stdout into comms file; append footer; clear registry when done."""
     try:
-        max_bytes = int(os.environ.get("DEV_BASH_MAX_OUTPUT_BYTES", str(_DEFAULT_BASH_MAX_OUTPUT_BYTES)))
-    except ValueError:
-        max_bytes = _DEFAULT_BASH_MAX_OUTPUT_BYTES
-    try:
-        timeout_sec = float(os.environ.get("DEV_BASH_TIMEOUT_SEC", str(_DEFAULT_BASH_TIMEOUT_SEC)))
-    except ValueError:
-        timeout_sec = _DEFAULT_BASH_TIMEOUT_SEC
-
-    try:
-        proc = _popen_bash_for_streaming(shell_command, cwd=str(task_dir))
-    except OSError as exc:
-        logger.warning("bash spawn failed for task %s: %s", task_name, exc)
-        try:
-            add_comms(
-                task_dir,
-                "user",
-                f"{bash_comms_input_header(shell_command)}\n---\nFailed to start process: {exc}\n",
-                kind="bash",
-            )
-        except OSError:
-            logger.exception("failed to write bash error comms for task %s", task_name)
-        finally:
-            with _command_registry_lock:
-                _command_registry.pop(task_name, None)
-        return
-
-    path: Path | None = None
-    footer_written = False
-    truncated = False
-    cancelled = False
-    timed_out = False
-    start = time.monotonic()
-    trunc_cell: list[bool] = [False]
-    stdout = proc.stdout
-    assert stdout is not None
-
-    try:
-        path = begin_streaming_bash_comms(task_dir, shell_command)
-        with _command_registry_lock:
-            if task_name in _command_registry:
-                _command_registry[task_name]["active_bash_comms_filename"] = path.name
-
-        collected = bytearray()
-
-        def read_stdout() -> None:
-            while True:
-                chunk = stdout.read(4096)
-                if not chunk:
-                    break
-                room = max_bytes - len(collected)
-                if room <= 0:
-                    trunc_cell[0] = True
-                    break
-                take = min(len(chunk), room)
-                portion = chunk[:take]
-                collected.extend(portion)
-                _append_bytes_to_bash_comms(path, portion)
-                if take < len(chunk):
-                    trunc_cell[0] = True
-                    break
-
-        reader = threading.Thread(target=read_stdout, daemon=True)
-        reader.start()
-
-        try:
-            while proc.poll() is None:
-                if cancel_requested.is_set():
-                    cancelled = True
-                    _terminate_process_group(proc, use_kill=False)
-                    break
-                if timeout_sec > 0 and (time.monotonic() - start) > timeout_sec:
-                    timed_out = True
-                    _terminate_process_group(proc, use_kill=True)
-                    break
-                if trunc_cell[0] or len(collected) >= max_bytes:
-                    truncated = True
-                    _terminate_process_group(proc, use_kill=True)
-                    break
-                time.sleep(0.1)
-            reader.join(timeout=30.0)
-            if proc.poll() is None:
-                _terminate_process_group(proc, use_kill=True)
-                proc.wait(timeout=15)
-            else:
-                proc.wait(timeout=15)
-        finally:
-            try:
-                stdout.close()
-            except OSError:
-                pass
-
-        truncated = truncated or trunc_cell[0]
-        exit_code = proc.returncode
-        _append_bash_comms_footer(
-            path,
-            truncated=truncated,
-            cancelled=cancelled,
-            timed_out=timed_out,
-            exit_code=exit_code,
-            timeout_sec=timeout_sec,
+        _stream_bash_command(
+            task_dir,
+            task_name,
+            shell_command=shell_command,
+            cwd=task_dir,
+            cancel_requested=cancel_requested,
         )
-        footer_written = True
     except Exception:
         logger.exception("bash run failed for task %s", task_name)
-        if path is not None and not footer_written:
-            try:
-                _append_bash_comms_footer(
-                    path,
-                    truncated=False,
-                    cancelled=False,
-                    timed_out=False,
-                    exit_code=None,
-                    timeout_sec=timeout_sec,
-                    interrupted=True,
-                )
-                footer_written = True
-            except OSError:
-                logger.exception("failed to write bash interrupted footer for task %s", task_name)
     finally:
-        if path is not None and not footer_written:
-            try:
-                _append_bash_comms_footer(
-                    path,
-                    truncated=False,
-                    cancelled=False,
-                    timed_out=False,
-                    exit_code=None,
-                    timeout_sec=timeout_sec,
-                    interrupted=True,
-                )
-            except OSError:
-                logger.exception("failed to finalize bash comms for task %s", task_name)
         with _command_registry_lock:
             _command_registry.pop(task_name, None)
 
 
-def _stream_bash_command_in_cwd(
+def _stream_bash_command(
     task_dir: Path,
     task_name: str,
     *,
@@ -460,7 +339,7 @@ def _run_merge_from_main_in_thread(
             return
 
         shell_command = merge_shell_command(repo_root, task_dir)
-        exit_code, cancelled, _timed_out, _truncated = _stream_bash_command_in_cwd(
+        exit_code, cancelled, _timed_out, _truncated = _stream_bash_command(
             task_dir,
             task_name,
             shell_command=shell_command,
@@ -512,11 +391,11 @@ def _run_command_in_thread(
                 _command_registry[task_name]["active_log_filename"] = stream_log_path.name
 
     try:
-        if command_id == "question":
+        if command_id == TaskCommand.QUESTION.value:
             run_question_mode(task_dir, on_start=on_start, cancel_event=cancel_requested)
-        elif command_id == "plan-implement":
+        elif command_id == TaskCommand.PLAN_IMPLEMENT.value:
             run_plan_implement(task_dir, on_start=on_start, cancel_event=cancel_requested)
-        elif command_id == "implement":
+        elif command_id == TaskCommand.IMPLEMENT.value:
             run_implement(task_dir, on_start=on_start, cancel_event=cancel_requested)
         else:
             # "do" command
@@ -1293,22 +1172,22 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
             status_code=400,
             detail=f"Unsupported command: {body.command!r}. Supported: {list(SUPPORTED_COMMANDS)}",
         )
-    if body.command == "do":
+    if body.command == TaskCommand.DO.value:
         if body.prompt is None or not body.prompt.strip():
             raise HTTPException(status_code=400, detail="prompt is required for do command")
-    if body.command == "bash":
+    if body.command == TaskCommand.BASH.value:
         if body.prompt is None or not body.prompt.strip():
             raise HTTPException(
                 status_code=400,
                 detail="prompt is required for bash command (shell command text)",
             )
     task_dir = _task_dir(task_name)
-    if body.command == "implement" and TaskManager.describe_clone_layout(task_dir) is None:
+    if body.command == TaskCommand.IMPLEMENT.value and TaskManager.describe_clone_layout(task_dir) is None:
         raise HTTPException(
             status_code=400,
             detail="This task has no cloned repository under the task root; the Implement command is not available.",
         )
-    if body.command == "merge-from-main":
+    if body.command == TaskCommand.MERGE_FROM_MAIN.value:
         if TaskManager.describe_clone_layout(task_dir) is None:
             raise HTTPException(
                 status_code=400,
@@ -1318,7 +1197,7 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
             validate_merge_from_main_can_start(task_dir)
         except MergeFromMainError as e:
             raise HTTPException(status_code=422, detail=str(e)) from e
-    if body.command == "do":
+    if body.command == TaskCommand.DO.value:
         set_task_comment_draft(_tasks_root(), task_name, "")
     if "DEV_TASKS_DIR" not in os.environ:
         os.environ["DEV_TASKS_DIR"] = str(_tasks_root())
@@ -1329,13 +1208,13 @@ def start_task_command(task_name: str, body: StartCommandRequest) -> StartComman
                 detail="A command is already running for this task.",
             )
         cancel_requested = threading.Event()
-        if body.command == "bash":
+        if body.command == TaskCommand.BASH.value:
             thread = threading.Thread(
                 target=_run_bash_in_thread,
                 args=(task_name, task_dir, cancel_requested, body.prompt.strip()),
                 daemon=True,
             )
-        elif body.command == "merge-from-main":
+        elif body.command == TaskCommand.MERGE_FROM_MAIN.value:
             thread = threading.Thread(
                 target=_run_merge_from_main_in_thread,
                 args=(task_name, task_dir, cancel_requested),
