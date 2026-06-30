@@ -6,7 +6,7 @@ import { api, apiBaseUrl, type TaskWorkspaceInfo } from './api'
 import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import { QuestionAnswerForm } from './QuestionAnswerForm'
-import { tryParseQuestionPayload } from './questionForm'
+import { getPersistedAnswersForSource, tryParseQuestionPayload, type SubmittedAnswers } from './questionForm'
 import './App.css'
 
 const markdownComponents: Partial<Components> = {
@@ -877,6 +877,7 @@ const FeedEntryRow = memo(function FeedEntryRow({
   onDeleteComms,
   taskName,
   onFeedRefresh,
+  persistedAnswers,
 }: {
   entry: { type: string; id: string; created_at: number; deletable?: boolean | null }
   contents: Record<string, string>
@@ -891,6 +892,7 @@ const FeedEntryRow = memo(function FeedEntryRow({
   onDeleteComms?: (filename: string) => void
   taskName: string
   onFeedRefresh?: () => void
+  persistedAnswers?: SubmittedAnswers | null
 }) {
   useEffect(() => {
     if (!isCollapsed && contents[entry.id] === undefined && !loadingContentKeys.has(entryKey)) {
@@ -949,6 +951,7 @@ const FeedEntryRow = memo(function FeedEntryRow({
               taskName={taskName}
               sourceFilename={entry.id}
               payload={questionPayload}
+              persistedAnswers={persistedAnswers}
               onSubmitted={onFeedRefresh}
             />
           ) : (
@@ -1749,6 +1752,14 @@ export function TaskCommsPageContent({
     [taskName, activeLogFilename]
   )
 
+  useEffect(() => {
+    for (const entry of feedEntries) {
+      if (entry.type !== 'comms' || !entry.id.endsWith('-user-answers.md')) continue
+      if (contents[entry.id] !== undefined) continue
+      void loadEntryContent(entry.id, 'comms')
+    }
+  }, [feedEntries, contents, loadEntryContent])
+
   const applyFeedPage = useCallback(
     (
       res: {
@@ -2496,6 +2507,10 @@ export function TaskCommsPageContent({
           {feedEntries.map((entry, i) => {
             const entryKey = `${entry.type}:${entry.id}`
             const isLast = i === feedEntries.length - 1
+            const persistedAnswers =
+              entry.type === 'comms' && entry.id.endsWith('-agent-question.md')
+                ? getPersistedAnswersForSource(entry.id, feedEntries, contents)
+                : undefined
             return (
               <FeedEntryRow
                 key={entryKey}
@@ -2512,6 +2527,7 @@ export function TaskCommsPageContent({
                 onDeleteComms={handleDeleteComms}
                 taskName={taskName}
                 onFeedRefresh={() => void loadFeedTail()}
+                persistedAnswers={persistedAnswers}
               />
             )
           })}
