@@ -606,12 +606,14 @@ class QuestionAnswersDraftRequest(BaseModel):
     selections: dict[str, str] = Field(default_factory=dict)
     freeText: dict[str, str] = Field(default_factory=dict)
     expandedFreeText: dict[str, bool] = Field(default_factory=dict)
+    editing: bool = False
 
 
 class QuestionAnswersDraftResponse(BaseModel):
     selections: dict[str, str] = Field(default_factory=dict)
     freeText: dict[str, str] = Field(default_factory=dict)
     expandedFreeText: dict[str, bool] = Field(default_factory=dict)
+    editing: bool = False
 
 
 def _task_dir(task_name: str) -> Path:
@@ -760,6 +762,7 @@ def get_task_question_answers_draft_endpoint(task_name: str, comms_filename: str
         selections=draft.get("selections") if isinstance(draft.get("selections"), dict) else {},
         freeText=draft.get("freeText") if isinstance(draft.get("freeText"), dict) else {},
         expandedFreeText=draft.get("expandedFreeText") if isinstance(draft.get("expandedFreeText"), dict) else {},
+        editing=bool(draft.get("editing")),
     )
 
 
@@ -774,8 +777,9 @@ def put_task_question_answers_draft_endpoint(
         "selections": body.selections,
         "freeText": body.freeText,
         "expandedFreeText": body.expandedFreeText,
+        "editing": body.editing,
     }
-    if not body.selections and not body.freeText and not body.expandedFreeText:
+    if not body.selections and not body.freeText and not body.expandedFreeText and not body.editing:
         delete_task_question_answers_draft(_tasks_root(), task_name, comms_filename)
     else:
         set_task_question_answers_draft(_tasks_root(), task_name, comms_filename, data)

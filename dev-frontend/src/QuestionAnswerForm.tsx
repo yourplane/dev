@@ -3,10 +3,14 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from './api'
 import {
+  draftIndicatesEditing,
   hasAnyAnswer,
+  submittedAnswersEqual,
+  submittedAnswersSignature,
   type QuestionAnswersDraft,
   type QuestionItem,
   type QuestionPayload,
+  type SubmittedAnswers,
 } from './questionForm'
 
 const markdownComponents: Partial<Components> = {
@@ -25,42 +29,47 @@ function MarkdownInline({ children }: { children: string }) {
   )
 }
 
-export interface SubmittedAnswers {
-  selections: Record<string, string>
-  freeText: Record<string, string>
-}
+export type { SubmittedAnswers }
 
 export function QuestionAnswerForm({
   taskName,
   sourceFilename,
   payload,
+  persistedAnswers,
   onSubmitted,
 }: {
   taskName: string
   sourceFilename: string
   payload: QuestionPayload
+  /** Latest submitted answers from feed, null if none, undefined while loading. */
+  persistedAnswers?: SubmittedAnswers | null
   onSubmitted?: () => void
 }) {
   const questions = payload.questions
   const [selections, setSelections] = useState<Record<string, string>>({})
   const [freeText, setFreeText] = useState<Record<string, string>>({})
   const [expandedFreeText, setExpandedFreeText] = useState<Record<string, boolean>>({})
+  const [editing, setEditing] = useState(false)
   const [locked, setLocked] = useState(false)
   const [lastSubmitted, setLastSubmitted] = useState<SubmittedAnswers | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [draftStatus, setDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
   const draftLoadedRef = useRef(false)
+  const lockStateAppliedRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const persistedAnswersSignatureValue = submittedAnswersSignature(persistedAnswers)
 
   useEffect(() => {
     draftLoadedRef.current = false
+    lockStateAppliedRef.current = false
     let cancelled = false
     api.getQuestionAnswersDraft(taskName, sourceFilename).then((draft) => {
       if (cancelled) return
       setSelections(draft.selections ?? {})
       setFreeText(draft.freeText ?? {})
       setExpandedFreeText(draft.expandedFreeText ?? {})
+      setEditing(draft.editing ?? false)
       draftLoadedRef.current = true
       setDraftStatus('saved')
     }).catch(() => {
@@ -68,6 +77,41 @@ export function QuestionAnswerForm({
     })
     return () => { cancelled = true }
   }, [taskName, sourceFilename])
+
+  useEffect(() => {
+    if (!draftLoadedRef.current) return
+    if (persistedAnswers === undefined) return
+
+    const draft: QuestionAnswersDraft = {
+      selections,
+      freeText,
+      expandedFreeText,
+      editing,
+    }
+    const showEditable = draftIndicatesEditing(draft, questions)
+    const nextLocked = !showEditable && !!persistedAnswers
+    const nextSubmitted = persistedAnswers ?? null
+
+    if (!lockStateAppliedRef.current) {
+      lockStateAppliedRef.current = true
+      setLocked(nextLocked)
+      setLastSubmitted(nextSubmitted)
+      return
+    }
+
+    setLocked((prev) => (prev === nextLocked ? prev : nextLocked))
+    setLastSubmitted((prev) => (
+      submittedAnswersEqual(prev, nextSubmitted) ? prev : nextSubmitted
+    ))
+  }, [
+    persistedAnswersSignatureValue,
+    persistedAnswers,
+    selections,
+    freeText,
+    expandedFreeText,
+    editing,
+    questions,
+  ])
 
   const saveDraft = useCallback((data: QuestionAnswersDraft) => {
     if (!draftLoadedRef.current) return
@@ -83,8 +127,8 @@ export function QuestionAnswerForm({
 
   useEffect(() => {
     if (!draftLoadedRef.current || locked) return
-    saveDraft({ selections, freeText, expandedFreeText })
-  }, [selections, freeText, expandedFreeText, locked, saveDraft])
+    saveDraft({ selections, freeText, expandedFreeText, editing: editing || undefined })
+  }, [selections, freeText, expandedFreeText, editing, locked, saveDraft])
 
   const canSubmit = !locked && hasAnyAnswer(questions, selections, freeText)
 
@@ -108,6 +152,7 @@ export function QuestionAnswerForm({
         freeText: { ...freeText },
       }
       setLastSubmitted(submitted)
+      setEditing(false)
       setLocked(true)
       onSubmitted?.()
     } catch (e) {
@@ -118,11 +163,24 @@ export function QuestionAnswerForm({
   }
 
   const handleUnlock = () => {
-    if (lastSubmitted) {
-      setSelections({ ...lastSubmitted.selections })
-      setFreeText({ ...lastSubmitted.freeText })
-    }
+    const nextSelections = lastSubmitted
+      ? { ...lastSubmitted.selections }
+      : { ...selections }
+    const nextFreeText = lastSubmitted
+      ? { ...lastSubmitted.freeText }
+      : { ...freeText }
+    setSelections(nextSelections)
+    setFreeText(nextFreeText)
+    setEditing(true)
     setLocked(false)
+    if (draftLoadedRef.current) {
+      void api.setQuestionAnswersDraft(taskName, sourceFilename, {
+        selections: nextSelections,
+        freeText: nextFreeText,
+        expandedFreeText,
+        editing: true,
+      })
+    }
   }
 
   const displaySelections = locked && lastSubmitted ? lastSubmitted.selections : selections
