@@ -2,6 +2,7 @@
   max-width: 720px;
   margin: 0 auto;
   padding: 1rem 1.5rem;
+  min-width: 0;
 }
 
 .header {
@@ -53,6 +54,8 @@
   border-radius: 8px;
   padding: 1.25rem;
   box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+  min-width: 0;
+  max-width: 100%;
 }
 
 .status {
@@ -582,6 +585,12 @@
 }
 
 /* Task comms view */
+.task-comms {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
+}
+
 .task-comms-header {
   display: flex;
   align-items: center;
@@ -660,6 +669,7 @@
   display: flex;
   gap: 0.5rem;
   align-items: stretch;
+  flex-wrap: wrap;
 }
 
 .command-split {
@@ -866,8 +876,20 @@
   border-color: #0077dd;
 }
 
+@media (max-width: 640px) {
+  .task-comms-scroll-btn {
+    width: 1.75rem;
+  }
+
+  .task-comms-scroll-buttons {
+    right: 0.5rem;
+  }
+}
+
 .comms-history {
   margin-top: 1rem;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .comms-entry,
@@ -1088,6 +1110,9 @@
   color: #1565c0;
   text-decoration: none;
   font-weight: 500;
+  min-width: 0;
+  max-width: 100%;
+  word-break: break-all;
 }
 .feed-log-tool-call-web-fetch-link:hover {
   text-decoration: underline;
@@ -1103,6 +1128,8 @@
 .feed-log-tool-call-link {
   color: #06c;
   text-decoration: none;
+  word-break: break-all;
+  min-width: 0;
 }
 .feed-log-tool-call-link:hover {
   text-decoration: underline;
@@ -1277,7 +1304,9 @@
   font-family: ui-monospace, monospace;
   font-size: 0.82rem;
   border-radius: 4px;
-  overflow: hidden;
+  overflow-x: auto;
+  overflow-y: hidden;
+  max-width: 100%;
   border: 1px solid #e0e0e0;
 }
 .feed-log-diff-line {
@@ -1304,6 +1333,8 @@
   color: #e0e0e0;
   border-radius: 6px;
   border: 1px solid #555;
+  max-width: 100%;
+  overflow-x: auto;
 }
 .comms-content .feed-log-tool-call-shell pre.feed-log-shell-block {
   background: #3a3a3a;
@@ -1333,6 +1364,7 @@
 
 .feed-log-raw {
   max-height: 20rem;
+  max-width: 100%;
   overflow: auto;
   margin: 0;
   padding: 0.75rem;
@@ -1350,6 +1382,9 @@
   word-break: break-word;
   background: #fff;
   border-top: 1px solid #eee;
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: clip;
 }
 
 .comms-content h1, .comms-content h2, .comms-content h3 {
