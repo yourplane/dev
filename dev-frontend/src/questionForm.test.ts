@@ -1,6 +1,5 @@
 import { describe, it, expect } from 'vitest'
 import {
-  draftIndicatesEditing,
   getPersistedAnswersForSource,
   hasAnyAnswer,
   normalizeQuestionIds,
@@ -83,11 +82,13 @@ Need pooling
     expect(getPersistedAnswersForSource('002-agent-question.md', feed, {})).toBeUndefined()
   })
 
-  it('draftIndicatesEditing treats editing flag and in-progress answers as editable', () => {
-    const questions = [{ id: 'q1', text: 'Q?', options: ['A'] }]
-    expect(draftIndicatesEditing({ selections: {}, freeText: {}, expandedFreeText: {} }, questions)).toBe(false)
-    expect(draftIndicatesEditing({ selections: {}, freeText: {}, expandedFreeText: {}, editing: true }, questions)).toBe(true)
-    expect(draftIndicatesEditing({ selections: { q1: 'A' }, freeText: {}, expandedFreeText: {} }, questions)).toBe(true)
+  it('getPersistedAnswersForSource falls back to older submission when latest is removed', () => {
+    const feed = [{ type: 'comms', id: '004-user-answers.md' }]
+    const contents = {
+      '004-user-answers.md': 'Source: `002-agent-question.md`\n\n## q1 — Q\n\n**Selected:** A\n',
+    }
+    const answers = getPersistedAnswersForSource('002-agent-question.md', feed, contents)
+    expect(answers?.selections.q1).toBe('A')
   })
 
   it('userAnswersContentsKey ignores unrelated comms content changes', () => {

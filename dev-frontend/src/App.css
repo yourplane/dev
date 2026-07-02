@@ -1720,6 +1720,22 @@
   resize: vertical;
 }
 
+.question-clear-selection-btn {
+  align-self: flex-start;
+  margin-top: 0.15rem;
+  background: none;
+  border: none;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 0.85rem;
+  line-height: 1;
+  padding: 0.1rem 0.25rem;
+}
+
+.question-clear-selection-btn:hover {
+  color: #666;
+}
+
 .question-form-actions {
   display: flex;
   align-items: center;
@@ -1758,18 +1774,4 @@
 .question-summary-notes {
   margin: 0.35rem 0 0;
   font-size: 0.9rem;
-}
-
-.question-unlock-btn {
-  margin-top: 0.5rem;
-  background: none;
-  border: 1px solid #ccc;
-  border-radius: 4px;
-  padding: 0.35rem 0.75rem;
-  cursor: pointer;
-  font-size: 0.85rem;
-}
-
-.question-unlock-btn:hover {
-  background: #f0f0f0;
 }

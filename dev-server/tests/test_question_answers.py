@@ -76,18 +76,14 @@ def test_question_answers_draft_roundtrip(client: TestClient, task_dir: Path, ta
     assert data["freeText"]["q1"] == "notes"
 
 
-def test_question_answers_editing_flag_keeps_empty_draft(client: TestClient, task_dir: Path, tasks_root: Path) -> None:
+def test_question_answers_draft_clears_when_empty(client: TestClient, task_dir: Path, tasks_root: Path) -> None:
     resp = client.put(
         "/tasks/mytask/drafts/question-answers/002-agent-question.md",
-        json={"selections": {}, "freeText": {}, "expandedFreeText": {}, "editing": True},
+        json={"selections": {}, "freeText": {}, "expandedFreeText": {}},
     )
     assert resp.status_code == 204
     draft_file = tasks_root / ".drafts" / "question-answers-mytask-002-agent-question.md"
-    assert draft_file.is_file()
-
-    resp2 = client.get("/tasks/mytask/drafts/question-answers/002-agent-question.md")
-    assert resp2.status_code == 200
-    assert resp2.json()["editing"] is True
+    assert not draft_file.exists()
 
 
 def test_post_question_answers_clears_draft(client: TestClient, task_with_question: Path, tasks_root: Path) -> None:

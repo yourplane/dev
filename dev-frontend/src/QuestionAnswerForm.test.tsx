@@ -56,7 +56,7 @@ describe('QuestionAnswerForm', () => {
     expect(screen.queryByRole('button', { name: 'Submit answers' })).not.toBeInTheDocument()
   })
 
-  it('locks form and shows unlock after submit', async () => {
+  it('locks form after submit without unlock control', async () => {
     render(
       <QuestionAnswerForm
         taskName="t"
@@ -68,13 +68,15 @@ describe('QuestionAnswerForm', () => {
     fireEvent.click(screen.getByLabelText('SQLite'))
     fireEvent.click(screen.getByRole('button', { name: 'Submit answers' }))
     await waitFor(() => {
-      expect(screen.getByText('Unlock to edit')).toBeInTheDocument()
+      expect(screen.getByText('SQLite')).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: 'Submit answers' })).not.toBeInTheDocument()
     })
+    expect(screen.queryByText('Unlock to edit')).not.toBeInTheDocument()
     const { api } = await import('./api')
     expect(api.postQuestionAnswers).toHaveBeenCalled()
   })
 
-  it('defaults to locked summary when persisted answers exist and no draft', async () => {
+  it('defaults to locked summary when persisted answers exist', async () => {
     render(
       <QuestionAnswerForm
         taskName="t"
@@ -84,57 +86,77 @@ describe('QuestionAnswerForm', () => {
       />,
     )
     await waitFor(() => {
-      expect(screen.getByText('Unlock to edit')).toBeInTheDocument()
       expect(screen.getByText('Postgres')).toBeInTheDocument()
     })
     expect(screen.queryByRole('button', { name: 'Submit answers' })).not.toBeInTheDocument()
+    expect(screen.queryByText('Unlock to edit')).not.toBeInTheDocument()
   })
 
-  it('restores editable draft over persisted answers when editing flag is set', async () => {
+  it('reloads draft when persisted answers are removed', async () => {
     const { api } = await import('./api')
     vi.mocked(api.getQuestionAnswersDraft).mockResolvedValue({
       selections: { q1: 'SQLite' },
-      freeText: {},
-      expandedFreeText: {},
-      editing: true,
+      freeText: { q1: 'notes' },
+      expandedFreeText: { q1: true },
     })
 
-    render(
+    const { rerender } = render(
       <QuestionAnswerForm
         taskName="t"
         sourceFilename="002-agent-question.md"
         payload={payload}
         persistedAnswers={{ selections: { q1: 'Postgres' }, freeText: {} }}
+      />,
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Submit answers' })).not.toBeInTheDocument()
+    })
+
+    rerender(
+      <QuestionAnswerForm
+        taskName="t"
+        sourceFilename="002-agent-question.md"
+        payload={payload}
+        persistedAnswers={null}
       />,
     )
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Submit answers' })).toBeInTheDocument()
       expect(screen.getByLabelText('SQLite')).toBeChecked()
+      expect(screen.getByLabelText('Additional notes')).toHaveValue('notes')
     })
-    expect(screen.queryByText('Unlock to edit')).not.toBeInTheDocument()
   })
 
-  it('unlock saves editing draft immediately', async () => {
+  it('clears radio selection but keeps additional notes', async () => {
     const { api } = await import('./api')
+    vi.mocked(api.getQuestionAnswersDraft).mockResolvedValue({
+      selections: { q1: 'Postgres' },
+      freeText: { q1: 'keep me' },
+      expandedFreeText: { q1: true },
+    })
+
     render(
       <QuestionAnswerForm
         taskName="t"
         sourceFilename="002-agent-question.md"
         payload={payload}
-        persistedAnswers={{ selections: { q1: 'Postgres' }, freeText: {} }}
+        persistedAnswers={null}
       />,
     )
+
     await waitFor(() => {
-      expect(screen.getByText('Unlock to edit')).toBeInTheDocument()
+      expect(screen.getByLabelText('Postgres')).toBeChecked()
+      expect(screen.getByLabelText('Additional notes')).toHaveValue('keep me')
     })
-    fireEvent.click(screen.getByText('Unlock to edit'))
+
+    fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }))
+
     await waitFor(() => {
-      expect(api.setQuestionAnswersDraft).toHaveBeenCalledWith(
-        't',
-        '002-agent-question.md',
-        expect.objectContaining({ editing: true, selections: { q1: 'Postgres' } }),
-      )
+      expect(screen.getByLabelText('Postgres')).not.toBeChecked()
+      expect(screen.getByLabelText('SQLite')).not.toBeChecked()
+      expect(screen.getByLabelText('Additional notes')).toHaveValue('keep me')
     })
   })
 })

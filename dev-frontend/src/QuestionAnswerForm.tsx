@@ -3,7 +3,6 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from './api'
 import {
-  draftIndicatesEditing,
   hasAnyAnswer,
   submittedAnswersEqual,
   submittedAnswersSignature,
@@ -49,69 +48,71 @@ export function QuestionAnswerForm({
   const [selections, setSelections] = useState<Record<string, string>>({})
   const [freeText, setFreeText] = useState<Record<string, string>>({})
   const [expandedFreeText, setExpandedFreeText] = useState<Record<string, boolean>>({})
-  const [editing, setEditing] = useState(false)
   const [locked, setLocked] = useState(false)
   const [lastSubmitted, setLastSubmitted] = useState<SubmittedAnswers | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [draftStatus, setDraftStatus] = useState<'saved' | 'unsaved' | 'saving'>('saved')
+  const [draftLoaded, setDraftLoaded] = useState(false)
   const draftLoadedRef = useRef(false)
   const lockStateAppliedRef = useRef(false)
+  const hadPersistedAnswersRef = useRef(false)
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const persistedAnswersSignatureValue = submittedAnswersSignature(persistedAnswers)
 
   useEffect(() => {
     draftLoadedRef.current = false
+    setDraftLoaded(false)
     lockStateAppliedRef.current = false
+    hadPersistedAnswersRef.current = false
     let cancelled = false
     api.getQuestionAnswersDraft(taskName, sourceFilename).then((draft) => {
       if (cancelled) return
       setSelections(draft.selections ?? {})
       setFreeText(draft.freeText ?? {})
       setExpandedFreeText(draft.expandedFreeText ?? {})
-      setEditing(draft.editing ?? false)
       draftLoadedRef.current = true
+      setDraftLoaded(true)
       setDraftStatus('saved')
     }).catch(() => {
       draftLoadedRef.current = true
+      setDraftLoaded(true)
     })
     return () => { cancelled = true }
   }, [taskName, sourceFilename])
 
   useEffect(() => {
-    if (!draftLoadedRef.current) return
+    if (!draftLoaded) return
     if (persistedAnswers === undefined) return
 
-    const draft: QuestionAnswersDraft = {
-      selections,
-      freeText,
-      expandedFreeText,
-      editing,
-    }
-    const showEditable = draftIndicatesEditing(draft, questions)
-    const nextLocked = !showEditable && !!persistedAnswers
+    const nextLocked = !!persistedAnswers
     const nextSubmitted = persistedAnswers ?? null
 
     if (!lockStateAppliedRef.current) {
       lockStateAppliedRef.current = true
+      hadPersistedAnswersRef.current = nextLocked
       setLocked(nextLocked)
       setLastSubmitted(nextSubmitted)
       return
     }
 
+    const wasLocked = hadPersistedAnswersRef.current
+    hadPersistedAnswersRef.current = nextLocked
+
     setLocked((prev) => (prev === nextLocked ? prev : nextLocked))
     setLastSubmitted((prev) => (
       submittedAnswersEqual(prev, nextSubmitted) ? prev : nextSubmitted
     ))
-  }, [
-    persistedAnswersSignatureValue,
-    persistedAnswers,
-    selections,
-    freeText,
-    expandedFreeText,
-    editing,
-    questions,
-  ])
+
+    if (wasLocked && !nextLocked) {
+      void api.getQuestionAnswersDraft(taskName, sourceFilename).then((draft) => {
+        setSelections(draft.selections ?? {})
+        setFreeText(draft.freeText ?? {})
+        setExpandedFreeText(draft.expandedFreeText ?? {})
+        setDraftStatus('saved')
+      }).catch(() => {})
+    }
+  }, [draftLoaded, persistedAnswersSignatureValue, persistedAnswers, taskName, sourceFilename])
 
   const saveDraft = useCallback((data: QuestionAnswersDraft) => {
     if (!draftLoadedRef.current) return
@@ -127,8 +128,8 @@ export function QuestionAnswerForm({
 
   useEffect(() => {
     if (!draftLoadedRef.current || locked) return
-    saveDraft({ selections, freeText, expandedFreeText, editing: editing || undefined })
-  }, [selections, freeText, expandedFreeText, editing, locked, saveDraft])
+    saveDraft({ selections, freeText, expandedFreeText })
+  }, [selections, freeText, expandedFreeText, locked, saveDraft])
 
   const canSubmit = !locked && hasAnyAnswer(questions, selections, freeText)
 
@@ -152,34 +153,12 @@ export function QuestionAnswerForm({
         freeText: { ...freeText },
       }
       setLastSubmitted(submitted)
-      setEditing(false)
       setLocked(true)
       onSubmitted?.()
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : String(e))
     } finally {
       setSubmitting(false)
-    }
-  }
-
-  const handleUnlock = () => {
-    const nextSelections = lastSubmitted
-      ? { ...lastSubmitted.selections }
-      : { ...selections }
-    const nextFreeText = lastSubmitted
-      ? { ...lastSubmitted.freeText }
-      : { ...freeText }
-    setSelections(nextSelections)
-    setFreeText(nextFreeText)
-    setEditing(true)
-    setLocked(false)
-    if (draftLoadedRef.current) {
-      void api.setQuestionAnswersDraft(taskName, sourceFilename, {
-        selections: nextSelections,
-        freeText: nextFreeText,
-        expandedFreeText,
-        editing: true,
-      })
     }
   }
 
@@ -206,9 +185,6 @@ export function QuestionAnswerForm({
               freeText={displayFreeText[q.id ?? ''] ?? ''}
             />
           ))}
-          <button type="button" className="question-unlock-btn" onClick={handleUnlock}>
-            Unlock to edit
-          </button>
         </div>
       ) : (
         <>
@@ -222,6 +198,14 @@ export function QuestionAnswerForm({
               onSelect={(value) => {
                 const id = q.id ?? ''
                 setSelections((prev) => ({ ...prev, [id]: value }))
+              }}
+              onClearSelection={() => {
+                const id = q.id ?? ''
+                setSelections((prev) => {
+                  const next = { ...prev }
+                  delete next[id]
+                  return next
+                })
               }}
               onFreeTextChange={(value) => {
                 const id = q.id ?? ''
@@ -261,6 +245,7 @@ function QuestionField({
   freeText,
   expanded,
   onSelect,
+  onClearSelection,
   onFreeTextChange,
   onToggleFreeText,
 }: {
@@ -269,6 +254,7 @@ function QuestionField({
   freeText: string
   expanded: boolean
   onSelect: (value: string) => void
+  onClearSelection: () => void
   onFreeTextChange: (value: string) => void
   onToggleFreeText: () => void
 }) {
@@ -294,6 +280,17 @@ function QuestionField({
               </span>
             </label>
           ))}
+          {selected ? (
+            <button
+              type="button"
+              className="question-clear-selection-btn"
+              onClick={onClearSelection}
+              aria-label="Clear selection"
+              title="Clear selection"
+            >
+              ×
+            </button>
+          ) : null}
         </div>
       ) : null}
       {!expanded ? (

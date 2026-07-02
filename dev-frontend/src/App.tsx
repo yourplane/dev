@@ -6,7 +6,7 @@ import { api, apiBaseUrl, type TaskWorkspaceInfo } from './api'
 import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import { QuestionAnswerForm } from './QuestionAnswerForm'
-import { getPersistedAnswersForSource, tryParseQuestionPayload, userAnswersContentsKey, type SubmittedAnswers } from './questionForm'
+import { getPersistedAnswersForSource, parseAnswersMarkdown, tryParseQuestionPayload, userAnswersContentsKey, type SubmittedAnswers } from './questionForm'
 import './App.css'
 
 const markdownComponents: Partial<Components> = {
@@ -1949,6 +1949,27 @@ export function TaskCommsPageContent({
     async (filename: string) => {
       if (!confirm('Remove this comms entry?')) return
       setDeleteCommsError(null)
+      if (filename.endsWith('-user-answers.md')) {
+        const content = contents[filename]
+        if (content && content !== '(loading…)') {
+          const parsed = parseAnswersMarkdown(content)
+          if (parsed) {
+            const expandedFreeText: Record<string, boolean> = {}
+            for (const [id, text] of Object.entries(parsed.answers.freeText)) {
+              if (text.trim()) expandedFreeText[id] = true
+            }
+            try {
+              await api.setQuestionAnswersDraft(taskName, parsed.source, {
+                selections: parsed.answers.selections,
+                freeText: parsed.answers.freeText,
+                expandedFreeText,
+              })
+            } catch {
+              // Continue with delete even if draft save fails.
+            }
+          }
+        }
+      }
       try {
         await api.deleteCommsFile(taskName, filename)
         setFeedEntries((prev) => prev.filter((e) => !(e.type === 'comms' && e.id === filename)))
@@ -1961,7 +1982,7 @@ export function TaskCommsPageContent({
         setDeleteCommsError(e instanceof Error ? e.message : String(e))
       }
     },
-    [taskName]
+    [taskName, contents]
   )
 
   useEffect(() => {

@@ -270,7 +270,6 @@ export const api = {
     selections: Record<string, string>
     freeText: Record<string, string>
     expandedFreeText: Record<string, boolean>
-    editing?: boolean
   }> {
     return request(
       `/tasks/${encodeURIComponent(taskName)}/drafts/question-answers/${encodeURIComponent(commsFilename)}`,
@@ -284,7 +283,6 @@ export const api = {
       selections: Record<string, string>
       freeText: Record<string, string>
       expandedFreeText: Record<string, boolean>
-      editing?: boolean
     },
   ): Promise<void> {
     return request(

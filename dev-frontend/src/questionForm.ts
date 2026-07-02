@@ -18,8 +18,6 @@ export interface QuestionAnswersDraft {
   selections: Record<string, string>
   freeText: Record<string, string>
   expandedFreeText: Record<string, boolean>
-  /** True when the user unlocked a submitted form for re-editing. */
-  editing?: boolean
 }
 
 export interface ParsedAnswersMarkdown {
@@ -47,14 +45,6 @@ export function parseAnswersMarkdown(content: string): ParsedAnswersMarkdown | n
     if (notesMatch) freeText[id] = notesMatch[1].trim()
   }
   return { source, answers: { selections, freeText } }
-}
-
-export function draftIndicatesEditing(
-  draft: QuestionAnswersDraft,
-  questions: QuestionItem[] = [],
-): boolean {
-  if (draft.editing) return true
-  return hasAnyAnswer(questions, draft.selections ?? {}, draft.freeText ?? {})
 }
 
 export function getPersistedAnswersForSource(
