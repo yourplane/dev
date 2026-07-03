@@ -443,7 +443,7 @@ class Router:
             json.dumps({"type": "progress", "message": "Task queued for environment."}),
             json.dumps(
                 {
-                    "type": "accepted",
+                    "type": "complete",
                     "task_name": task_name,
                     "task_dir": task_name,
                 }
@@ -736,7 +736,13 @@ class Router:
         if task.active_command:
             active = dict(task.active_command)
             active["cancel_requested"] = True
-            self.store.update_task(task_name, active_command=active)
+            updates: dict[str, Any] = {"active_command": active}
+            if active.get("command") == "create-task":
+                progress = list(task.create_progress or [])
+                if not progress or progress[-1] != "Cancelling…":
+                    progress.append("Cancelling…")
+                    updates["create_progress"] = progress
+            self.store.update_task(task_name, **updates)
             return _no_content()
         return _json(400, {"detail": "No command to cancel"})
 

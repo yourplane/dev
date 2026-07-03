@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
 import signal
 import subprocess
 import sys
@@ -29,7 +30,7 @@ from dev_sdk.comms import (
     comms_dir,
     read_index,
 )
-from dev_sdk.task_manager import TaskManager
+from dev_sdk.task_manager import TaskCancelled, TaskManager
 
 logger = logging.getLogger("dev_cloud_worker")
 POLL_INTERVAL_SEC = float(os.environ.get("DEV_CLOUD_POLL_INTERVAL", "5"))
@@ -208,6 +209,13 @@ class CommandExecutor:
             else:
                 raise RuntimeError(f"Unknown command: {cmd}")
             self.client.complete_command(task_name, result=self._task_result(task_name))
+        except TaskCancelled as e:
+            logger.info("Command cancelled for %s: %s", task_name, e)
+            if cmd == "create-task":
+                task_dir = self.tasks_root / task_name
+                if task_dir.is_dir():
+                    shutil.rmtree(task_dir, ignore_errors=True)
+            self.client.complete_command(task_name, error="Cancelled")
         except Exception as e:
             logger.exception("Command failed for %s: %s", task_name, e)
             self.client.complete_command(task_name, error=str(e))
@@ -257,6 +265,7 @@ class CommandExecutor:
             payload.get("comment"),
             payload.get("repo_url"),
             on_progress=on_progress,
+            cancel_check=self._cancel.is_set,
         )
 
     def _archive(self, task_name: str, payload: dict) -> None:

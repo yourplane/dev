@@ -2633,11 +2633,14 @@ export function TaskCommsPageContent({
                 {cancelling ? 'Cancelling…' : 'Cancel'}
               </button>
             </div>
-            {activeCommand === 'create-task' && createProgress.length > 0 && (
+            {activeCommand === 'create-task' && (createProgress.length > 0 || cancelling) && (
               <ul className="create-task-progress-list" aria-live="polite">
                 {createProgress.map((msg, i) => (
                   <li key={`${i}-${msg}`}>{msg}</li>
                 ))}
+                {cancelling && createProgress[createProgress.length - 1] !== 'Cancelling…' && (
+                  <li key="__cancelling__">Cancelling…</li>
+                )}
               </ul>
             )}
           </div>
