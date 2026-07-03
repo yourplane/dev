@@ -144,6 +144,23 @@ class DevCloudStack(Stack):
             api_domain.replace("https://", "").rstrip("/"),
             origin_path="/",
         )
+        api_rewrite_fn = cloudfront.Function(
+            self,
+            "ApiStripPrefixFunction",
+            code=cloudfront.FunctionCode.from_inline(
+                """
+function handler(event) {
+    var request = event.request;
+    if (request.uri.startsWith('/api/')) {
+        request.uri = request.uri.substring(4);
+    } else if (request.uri === '/api') {
+        request.uri = '/';
+    }
+    return request;
+}
+"""
+            ),
+        )
         oac = cloudfront.S3OriginAccessControl(self, "SpaOAC")
         spa_origin = origins.S3BucketOrigin.with_origin_access_control(spa_bucket, origin_access_control=oac)
 
@@ -161,6 +178,12 @@ class DevCloudStack(Stack):
                     allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
                     cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
                     origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+                    function_associations=[
+                        cloudfront.FunctionAssociation(
+                            function=api_rewrite_fn,
+                            event_type=cloudfront.FunctionEventType.VIEWER_REQUEST,
+                        )
+                    ],
                 ),
             },
             default_root_object="index.html",
