@@ -64,6 +64,43 @@ def test_worker_poll_registers_environment(aws_env):
     assert resp["statusCode"] == 200
     data = json.loads(resp["body"])
     assert data["environment_id"] == "env-1"
+    assert data["display_name"] == "env-1"[:8]
+
+
+def test_worker_poll_unique_display_name(aws_env):
+    router = Router()
+    router.dispatch(
+        _event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "desk"}),
+    )
+    resp = router.dispatch(
+        _event("POST", "/worker/poll", {"environment_id": "env-2", "display_name": "desk"}),
+    )
+    data = json.loads(resp["body"])
+    assert data["display_name"] == "desk-2"
+
+
+def test_worker_poll_prunes_offline_duplicate(aws_env):
+    router = Router()
+    store = CloudStore()
+    store.register_environment("env-old", "dev-environment")
+    # Force offline by backdating heartbeat
+    store._table.update_item(
+        Key={"pk": "ENV#env-old", "sk": "META"},
+        UpdateExpression="SET last_heartbeat = :ts",
+        ExpressionAttributeValues={":ts": "1"},
+    )
+    resp = router.dispatch(
+        _event(
+            "POST",
+            "/worker/poll",
+            {"environment_id": "env-live", "display_name": "dev-environment"},
+        ),
+    )
+    assert resp["statusCode"] == 200
+    data = json.loads(resp["body"])
+    assert data["display_name"] == "dev-environment"
+    assert store.get_environment("env-old") is None
+    assert store.get_environment("env-live") is not None
 
 
 def test_create_task_queues_command(aws_env):

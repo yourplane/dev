@@ -271,8 +271,8 @@ class Router:
             return _json(400, {"detail": "display_name required"})
         if not self.store.get_environment(environment_id):
             return _json(404, {"detail": "Environment not found"})
-        self.store.update_environment_display_name(environment_id, name.strip())
-        return _no_content()
+        display_name = self.store.update_environment_display_name(environment_id, name.strip())
+        return _json(200, {"display_name": display_name})
 
     def delete_environment(self, event: dict, environment_id: str) -> dict:
         if not self.store.get_environment(environment_id):
@@ -985,11 +985,23 @@ class Router:
         env_id = (body.get("environment_id") or "").strip()
         if not env_id:
             env_id = str(uuid.uuid4())
+        requested_name = body.get("display_name")
         env = self.store.get_environment(env_id)
         if not env:
-            self.store.register_environment(env_id, body.get("display_name"))
+            self.store.register_environment(
+                env_id,
+                requested_name if isinstance(requested_name, str) else None,
+            )
+            env = self.store.get_environment(env_id)
+            display_name = env.display_name if env else env_id[:8]
         else:
             self.store.heartbeat(env_id)
+            display_name = env.display_name
+            if isinstance(requested_name, str) and requested_name.strip():
+                new_name = self.store.allocate_display_name(requested_name.strip(), env_id)
+                if new_name != display_name:
+                    display_name = self.store.update_environment_display_name(env_id, new_name)
+        self.store.prune_stale_duplicates(env_id)
 
         work: list[dict] = []
         deletions: list[dict] = []
@@ -1018,6 +1030,7 @@ class Router:
             200,
             {
                 "environment_id": env_id,
+                "display_name": display_name,
                 "work": work,
                 "deletions": deletions,
                 "repos": self.store.get_repos(),

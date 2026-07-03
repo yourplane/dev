@@ -10,10 +10,12 @@ export type SignInResult =
   | { type: 'success' }
   | { type: 'new_password_required'; session: string; email: string };
 
-const TOKEN_KEY = 'dev_cloud_id_token';
+const ID_TOKEN_KEY = 'dev_cloud_id_token';
+const REFRESH_TOKEN_KEY = 'dev_cloud_refresh_token';
+const LEGACY_ID_TOKEN_KEY = 'dev_cloud_id_token';
 
 type CognitoAuthResponse = {
-  AuthenticationResult?: { IdToken?: string };
+  AuthenticationResult?: { IdToken?: string; RefreshToken?: string };
   ChallengeName?: string;
   Session?: string;
   message?: string;
@@ -35,14 +37,49 @@ export function getCloudAuthConfig(): CloudAuthConfig | null {
   };
 }
 
+function migrateFromSessionStorage(): void {
+  const legacy = sessionStorage.getItem(LEGACY_ID_TOKEN_KEY);
+  if (legacy && !localStorage.getItem(ID_TOKEN_KEY)) {
+    localStorage.setItem(ID_TOKEN_KEY, legacy);
+  }
+  sessionStorage.removeItem(LEGACY_ID_TOKEN_KEY);
+}
+
 export function getIdToken(): string | null {
-  return sessionStorage.getItem(TOKEN_KEY);
+  migrateFromSessionStorage();
+  return localStorage.getItem(ID_TOKEN_KEY);
+}
+
+function getRefreshToken(): string | null {
+  return localStorage.getItem(REFRESH_TOKEN_KEY);
 }
 
 export function setIdToken(token: string | null): void {
-  if (token) sessionStorage.setItem(TOKEN_KEY, token);
-  else sessionStorage.removeItem(TOKEN_KEY);
+  if (token) localStorage.setItem(ID_TOKEN_KEY, token);
+  else localStorage.removeItem(ID_TOKEN_KEY);
 }
+
+function setRefreshToken(token: string | null): void {
+  if (token) localStorage.setItem(REFRESH_TOKEN_KEY, token);
+  else localStorage.removeItem(REFRESH_TOKEN_KEY);
+}
+
+function decodeJwtExp(token: string): number | null {
+  try {
+    const payload = JSON.parse(atob(token.split('.')[1])) as { exp?: number };
+    return typeof payload.exp === 'number' ? payload.exp : null;
+  } catch {
+    return null;
+  }
+}
+
+function isTokenExpired(token: string, skewSec = 60): boolean {
+  const exp = decodeJwtExp(token);
+  if (!exp) return true;
+  return Date.now() / 1000 >= exp - skewSec;
+}
+
+let refreshPromise: Promise<boolean> | null = null;
 
 async function cognitoRequest<T>(region: string, target: string, body: Record<string, unknown>): Promise<T> {
   const resp = await fetch(`https://cognito-idp.${region}.amazonaws.com/`, {
@@ -60,7 +97,7 @@ async function cognitoRequest<T>(region: string, target: string, body: Record<st
   return data;
 }
 
-function storeIdTokenFromAuth(data: CognitoAuthResponse): void {
+function storeTokensFromAuth(data: CognitoAuthResponse): void {
   const token = data.AuthenticationResult?.IdToken;
   if (!token) {
     if (data.ChallengeName) {
@@ -69,6 +106,51 @@ function storeIdTokenFromAuth(data: CognitoAuthResponse): void {
     throw new Error('No IdToken in response');
   }
   setIdToken(token);
+  const refresh = data.AuthenticationResult?.RefreshToken;
+  if (refresh) setRefreshToken(refresh);
+}
+
+async function refreshSession(): Promise<boolean> {
+  const refreshToken = getRefreshToken();
+  const cfg = getCloudAuthConfig();
+  if (!refreshToken || !cfg) return false;
+  const region = cfg.region ?? 'us-east-1';
+  try {
+    const data = await cognitoRequest<CognitoAuthResponse>(
+      region,
+      'AWSCognitoIdentityProviderService.InitiateAuth',
+      {
+        AuthFlow: 'REFRESH_TOKEN_AUTH',
+        ClientId: cfg.clientId,
+        AuthParameters: { REFRESH_TOKEN: refreshToken },
+      },
+    );
+    storeTokensFromAuth(data);
+    return true;
+  } catch {
+    signOut();
+    return false;
+  }
+}
+
+export async function ensureValidIdToken(): Promise<boolean> {
+  migrateFromSessionStorage();
+  const token = getIdToken();
+  if (token && !isTokenExpired(token)) return true;
+  if (!getRefreshToken()) return false;
+  if (!refreshPromise) {
+    refreshPromise = refreshSession().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
+/** Restore a persisted session on app load (refresh token, valid for 30 days). */
+export async function restoreCloudSession(): Promise<boolean> {
+  if (!isCloudMode()) return true;
+  migrateFromSessionStorage();
+  return ensureValidIdToken();
 }
 
 export async function signIn(email: string, password: string): Promise<SignInResult> {
@@ -90,7 +172,7 @@ export async function signIn(email: string, password: string): Promise<SignInRes
     return { type: 'new_password_required', session: data.Session, email: email.trim() };
   }
 
-  storeIdTokenFromAuth(data);
+  storeTokensFromAuth(data);
   return { type: 'success' };
 }
 
@@ -115,11 +197,12 @@ export async function completeNewPassword(
       },
     },
   );
-  storeIdTokenFromAuth(data);
+  storeTokensFromAuth(data);
 }
 
 export function signOut(): void {
   setIdToken(null);
+  setRefreshToken(null);
 }
 
 export function authHeaders(): Record<string, string> {

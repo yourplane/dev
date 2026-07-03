@@ -59,9 +59,26 @@ systemctl --user disable dev-cloud-worker.service 2>/dev/null || true
 rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user/dev-cloud-worker.service"
 systemctl --user daemon-reload 2>/dev/null || true
 
-log "Fresh clone: removing $HOME_DEV and cloud worker config"
+log "Fresh clone: removing $HOME_DEV (preserving environment registration)"
 rm -rf "$HOME_DEV"
-rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/dev-cloud"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dev-cloud"
+ENV_ID_BACKUP=""
+DISPLAY_NAME_BACKUP=""
+if [[ -f "$CONFIG_DIR/environment_id" ]]; then
+  ENV_ID_BACKUP="$(cat "$CONFIG_DIR/environment_id")"
+fi
+if [[ -f "$CONFIG_DIR/display_name" ]]; then
+  DISPLAY_NAME_BACKUP="$(cat "$CONFIG_DIR/display_name")"
+fi
+rm -rf "$CONFIG_DIR"
+mkdir -p "$CONFIG_DIR"
+if [[ -n "$ENV_ID_BACKUP" ]]; then
+  echo "$ENV_ID_BACKUP" > "$CONFIG_DIR/environment_id"
+  log "Preserved environment_id=$ENV_ID_BACKUP"
+fi
+if [[ -n "$DISPLAY_NAME_BACKUP" ]]; then
+  echo "$DISPLAY_NAME_BACKUP" > "$CONFIG_DIR/display_name"
+fi
 
 if ! command -v git >/dev/null; then
   echo "git is required" >&2

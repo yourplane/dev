@@ -67,6 +67,9 @@ class DevCloudStack(Stack):
             "DevCloudWebClient",
             auth_flows=cognito.AuthFlow(user_password=True, user_srp=True),
             generate_secret=False,
+            refresh_token_validity=Duration.days(30),
+            id_token_validity=Duration.hours(1),
+            access_token_validity=Duration.hours(1),
         )
 
         api_fn = lambda_.Function(

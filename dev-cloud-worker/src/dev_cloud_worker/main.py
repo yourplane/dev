@@ -85,6 +85,12 @@ class WorkerClient:
             self.env_id = data["environment_id"]
             CONFIG_DIR.mkdir(parents=True, exist_ok=True)
             ENV_ID_FILE.write_text(self.env_id, encoding="utf-8")
+        assigned_name = data.get("display_name")
+        if isinstance(assigned_name, str) and assigned_name.strip():
+            current = _load_display_name()
+            if assigned_name != current:
+                CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+                DISPLAY_NAME_FILE.write_text(assigned_name, encoding="utf-8")
         return data
 
     def complete_command(self, task_name: str, *, error: str | None = None, result: dict | None = None) -> None:

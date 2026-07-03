@@ -4,7 +4,7 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, apiBaseUrl, type TaskWorkspaceInfo, type EnvironmentInfo } from './api'
 import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
-import { isCloudMode, getIdToken, signIn, signOut, completeNewPassword } from './cloudAuth'
+import { isCloudMode, getIdToken, signIn, signOut, completeNewPassword, restoreCloudSession } from './cloudAuth'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import { QuestionAnswerForm } from './QuestionAnswerForm'
 import { getPersistedAnswersForSource, tryParseQuestionPayload, userAnswersContentsKey, type SubmittedAnswers } from './questionForm'
@@ -3053,9 +3053,33 @@ function CloudLoginGate({ children }: { children: React.ReactNode }) {
   const [challengeSession, setChallengeSession] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [token, setToken] = useState(getIdToken)
+  const [authReady, setAuthReady] = useState(!isCloudMode())
+  const [token, setToken] = useState<string | null>(() => (isCloudMode() ? null : getIdToken()))
+
+  useEffect(() => {
+    if (!isCloudMode()) return
+    let cancelled = false
+    void restoreCloudSession().then((ok) => {
+      if (!cancelled) {
+        setToken(ok ? getIdToken() : null)
+        setAuthReady(true)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   if (!isCloudMode()) return <>{children}</>
+  if (!authReady) {
+    return (
+      <div className="cloud-login-page">
+        <div className="cloud-login-card">
+          <p className="cloud-login-subtitle">Restoring session…</p>
+        </div>
+      </div>
+    )
+  }
   if (token) {
     return <>{children}</>
   }

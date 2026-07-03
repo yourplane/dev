@@ -1,5 +1,5 @@
 /** Base URL for API requests. Default `/api` uses Vite proxy (single-port dev). Override with VITE_DEV_SERVER_URL to talk to backend directly. */
-import { authHeaders, isCloudMode } from './cloudAuth';
+import { authHeaders, ensureValidIdToken, isCloudMode } from './cloudAuth';
 
 export const apiBaseUrl = import.meta.env.VITE_DEV_SERVER_URL ?? '/api';
 
@@ -13,6 +13,14 @@ function apiErrorMessage(httpStatus: number, detail: string): string {
   return `Could not reach dev-server at ${apiBaseUrl}. ${detail}`;
 }
 
+async function cloudAuthFetch(url: string, init?: RequestInit): Promise<Response> {
+  if (isCloudMode()) await ensureValidIdToken();
+  return fetch(url, {
+    ...init,
+    headers: { ...authHeaders(), ...init?.headers },
+  });
+}
+
 async function request<T>(
   path: string,
   options?: RequestInit & { parseJson?: boolean }
@@ -21,8 +29,8 @@ async function request<T>(
   const url = `${apiBaseUrl}${path}`;
   let res: Response;
   try {
-    res = await fetch(url, {
-      headers: { 'Content-Type': 'application/json', ...authHeaders(), ...init.headers },
+    res = await cloudAuthFetch(url, {
+      headers: { 'Content-Type': 'application/json', ...init.headers },
       ...init,
     });
   } catch (e) {
@@ -165,9 +173,9 @@ export const api = {
     const url = `${apiBaseUrl}/tasks`;
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await cloudAuthFetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       });
     } catch (e) {
@@ -273,7 +281,7 @@ export const api = {
 
   async getTaskCommentDraft(taskName: string): Promise<string> {
     const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/drafts/comment`;
-    const res = await fetch(url);
+    const res = await cloudAuthFetch(url);
     if (!res.ok) {
       const text = await res.text();
       let detail = text;
@@ -298,7 +306,7 @@ export const api = {
 
   async getTaskBashDraft(taskName: string): Promise<string> {
     const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/drafts/bash`;
-    const res = await fetch(url);
+    const res = await cloudAuthFetch(url);
     if (!res.ok) {
       const text = await res.text();
       let detail = text;
@@ -440,7 +448,7 @@ export const api = {
 
   async getTaskLogFile(taskName: string, filename: string): Promise<string> {
     const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/logs/${encodeURIComponent(filename)}`;
-    const res = await fetch(url);
+    const res = await cloudAuthFetch(url);
     if (!res.ok) {
       const text = await res.text();
       let detail = text;
@@ -520,7 +528,7 @@ export const api = {
 
   async getTaskCommsFile(taskName: string, filename: string): Promise<string> {
     const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/comms/${encodeURIComponent(filename)}`;
-    const res = await fetch(url);
+    const res = await cloudAuthFetch(url);
     if (!res.ok) {
       const text = await res.text();
       let detail = text;
@@ -540,7 +548,7 @@ export const api = {
    */
   async downloadTaskCommsZip(taskName: string): Promise<void> {
     const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/comms/download`;
-    const res = await fetch(url);
+    const res = await cloudAuthFetch(url);
     if (!res.ok) {
       const text = await res.text();
       let detail = text;

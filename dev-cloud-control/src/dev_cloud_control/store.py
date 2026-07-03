@@ -102,14 +102,57 @@ class CloudStore:
 
     # --- environments ---
 
+    def allocate_display_name(self, desired: str | None, environment_id: str) -> str:
+        base = (desired or "").strip() or environment_id[:8]
+        self._remove_offline_name_conflicts(base, environment_id)
+        taken = {
+            e.display_name
+            for e in self.list_environments()
+            if e.environment_id != environment_id
+        }
+        if base not in taken:
+            return base
+        n = 2
+        while f"{base}-{n}" in taken:
+            n += 1
+        return f"{base}-{n}"
+
+    def _display_name_conflicts(self, base: str, existing: str) -> bool:
+        return existing == base or existing.startswith(f"{base}-")
+
+    def _remove_offline_name_conflicts(self, base: str, keep_id: str) -> None:
+        for env in list(self.list_environments()):
+            if env.environment_id == keep_id:
+                continue
+            if not self._display_name_conflicts(base, env.display_name):
+                continue
+            if env.online:
+                continue
+            if self.count_tasks_for_environment(env.environment_id) == 0:
+                self.delete_environment(env.environment_id)
+
+    def prune_stale_duplicates(self, keep_id: str) -> None:
+        keep = self.get_environment(keep_id)
+        if not keep:
+            return
+        for env in list(self.list_environments()):
+            if env.environment_id == keep_id:
+                continue
+            if env.display_name != keep.display_name:
+                continue
+            stale = not env.online or float(env.last_heartbeat) < float(keep.last_heartbeat)
+            if stale and self.count_tasks_for_environment(env.environment_id) == 0:
+                self.delete_environment(env.environment_id)
+
     def register_environment(self, environment_id: str, display_name: str | None = None) -> EnvironmentRecord:
+        name = self.allocate_display_name(display_name, environment_id)
         ts = _now()
         item = {
             "pk": f"ENV#{environment_id}",
             "sk": "META",
             "entity": "environment",
             "environment_id": environment_id,
-            "display_name": display_name or environment_id[:8],
+            "display_name": name,
             "registered_at": ts,
             "last_heartbeat": ts,
         }
@@ -144,12 +187,14 @@ class CloudStore:
         item = resp.get("Item")
         return self._env_from_item(item) if item else None
 
-    def update_environment_display_name(self, environment_id: str, display_name: str) -> None:
+    def update_environment_display_name(self, environment_id: str, display_name: str) -> str:
+        unique = self.allocate_display_name(display_name, environment_id)
         self._table.update_item(
             Key={"pk": f"ENV#{environment_id}", "sk": "META"},
             UpdateExpression="SET display_name = :n",
-            ExpressionAttributeValues={":n": display_name},
+            ExpressionAttributeValues={":n": unique},
         )
+        return unique
 
     def _env_from_item(self, item: dict) -> EnvironmentRecord:
         return EnvironmentRecord(
