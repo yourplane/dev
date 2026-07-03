@@ -31,13 +31,23 @@ if [[ -n "$DEV_CLOUD_DISPLAY_NAME" ]]; then
   echo "$DEV_CLOUD_DISPLAY_NAME" > "$CONFIG_DIR/display_name"
 fi
 
+if [[ -x "$HOME/.local/bin/uv" ]]; then
+  UV_BIN="$HOME/.local/bin/uv"
+else
+  UV_BIN="$(command -v uv)"
+fi
+
 cd "$WORK_DIR"
-uv pip install -e dev-sdk -e dev-cloud-control -e dev-cloud-worker
+"$UV_BIN" sync --package dev-cloud-worker --no-dev
+
+WORKER_BIN="$WORK_DIR/.venv/bin/dev-cloud-worker"
+if [[ ! -x "$WORKER_BIN" ]]; then
+  echo "dev-cloud-worker binary not found at $WORKER_BIN" >&2
+  exit 1
+fi
 
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 mkdir -p "$UNIT_DIR"
-
-UV_BIN="$(command -v uv)"
 
 cat > "$UNIT_DIR/dev-cloud-worker.service" <<EOF
 [Unit]
@@ -49,7 +59,7 @@ Type=simple
 WorkingDirectory=$WORK_DIR
 Environment=CONTROL_PLANE_URL=$CONTROL_PLANE_URL
 Environment=DEV_TASKS_ROOT=$DEV_TASKS_ROOT
-ExecStart=$UV_BIN run dev-cloud-worker
+ExecStart=$WORKER_BIN
 Restart=always
 RestartSec=5
 

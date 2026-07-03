@@ -71,8 +71,8 @@ fi
 if ! command -v uv >/dev/null; then
   log "Installing uv"
   curl -LsSf https://astral.sh/uv/install.sh | sh
-  export PATH="$HOME/.local/bin:$PATH"
 fi
+export PATH="$HOME/.local/bin:$PATH"
 
 log "Cloning $DEV_REPO_URL (branch $DEV_REPO_BRANCH) to $HOME_DEV"
 git clone --branch "$DEV_REPO_BRANCH" --depth 1 "$DEV_REPO_URL" "$HOME_DEV"
