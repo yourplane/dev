@@ -53,6 +53,14 @@ export CONTROL_PLANE_URL=https://YOUR_CLOUDFRONT_DOMAIN/api
 ./dev-cloud-worker/install.sh
 ```
 
+**Cursor API key** — CDK creates Secrets Manager secret `dev-cloud/cursor-api-key`. After deploy, set your personal key:
+
+```bash
+./dev-cloud-infra/scripts/set-cursor-api-key.sh
+```
+
+On the workstation, run `./dev-cloud-worker/wire-cursor-environment.sh` (or re-run bootstrap after the key is set).
+
 ## Manual CDK deploy
 
 ```bash

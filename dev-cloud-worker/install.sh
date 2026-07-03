@@ -8,6 +8,8 @@ WORK_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 CONTROL_PLANE_URL="${CONTROL_PLANE_URL:-}"
 DEV_TASKS_ROOT="${DEV_TASKS_ROOT:-$HOME/tasks}"
 DEV_CLOUD_DISPLAY_NAME="${DEV_CLOUD_DISPLAY_NAME:-}"
+CURSOR_API_KEY_SECRET_NAME="${CURSOR_API_KEY_SECRET_NAME:-dev-cloud/cursor-api-key}"
+AWS_REGION="${AWS_REGION:-us-east-1}"
 
 if [[ -z "$CONTROL_PLANE_URL" ]]; then
   echo "Set CONTROL_PLANE_URL to your CloudFront /api base (e.g. https://xxx.cloudfront.net/api)" >&2
@@ -46,6 +48,8 @@ if [[ ! -x "$WORKER_BIN" ]]; then
   exit 1
 fi
 
+"$SCRIPT_DIR/setup-cursor.sh"
+
 UNIT_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 mkdir -p "$UNIT_DIR"
 
@@ -59,6 +63,9 @@ Type=simple
 WorkingDirectory=$WORK_DIR
 Environment=CONTROL_PLANE_URL=$CONTROL_PLANE_URL
 Environment=DEV_TASKS_ROOT=$DEV_TASKS_ROOT
+Environment=CURSOR_API_KEY_SECRET_NAME=$CURSOR_API_KEY_SECRET_NAME
+Environment=AWS_REGION=$AWS_REGION
+Environment=PATH=$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=$WORKER_BIN
 Restart=always
 RestartSec=5

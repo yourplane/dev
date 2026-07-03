@@ -103,6 +103,17 @@ export DEV_TASKS_ROOT
 log "Installing dev-cloud-worker"
 "$HOME_DEV/dev-cloud-worker/install.sh"
 
+log "Wiring Cursor (install CLI; wire secret when key is set)"
+if aws secretsmanager get-secret-value \
+  --region "${AWS_REGION:-us-east-1}" \
+  --secret-id "${CURSOR_API_KEY_SECRET_NAME:-dev-cloud/cursor-api-key}" \
+  --query SecretString --output text 2>/dev/null | grep -qv 'REPLACE_IN_CONSOLE'; then
+  "$HOME_DEV/dev-cloud-worker/wire-cursor-environment.sh"
+  log "Cursor wired"
+else
+  log "Cursor wire skipped — set secret value in AWS, then run wire-cursor-environment.sh"
+fi
+
 log "Worker status"
 prepare_user_systemd
 systemctl --user status dev-cloud-worker.service --no-pager || true

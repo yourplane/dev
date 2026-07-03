@@ -43,3 +43,19 @@ aws ssm send-command \
 Prefer cloning the repo and running `bootstrap-environment.sh` from disk after push.
 
 The worker stores its `environment_id` in `~/.config/dev-cloud/environment_id`. Uses the EC2 instance IAM role for worker API calls (no static keys).
+
+## Cursor CLI + API key
+
+The worker runs `cursor agent` locally. On install/bootstrap:
+
+1. **`setup-cursor.sh`** — installs Cursor Agent CLI if missing (`curl https://cursor.com/install -fsS | bash`)
+2. **Secrets Manager** — shared secret `dev-cloud/cursor-api-key` (CDK-managed). Set the personal API key after deploy:
+
+   ```bash
+   ./dev-cloud-infra/scripts/set-cursor-api-key.sh 'YOUR_KEY'
+   ```
+
+3. **`wire-cursor-environment.sh`** — verifies secret access, updates systemd env (`CURSOR_API_KEY_SECRET_NAME`, `PATH`), restarts worker. The worker loads `CURSOR_API_KEY` from Secrets Manager at startup.
+
+Desk instances need `secretsmanager:GetSecretValue` on the secret (desk IAM role is typically already permissive). `DevCloudWorkerRole` is also granted read access for future workers.
+

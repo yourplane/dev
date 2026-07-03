@@ -153,4 +153,10 @@ if [[ -n "${CloudFrontUrl:-}" ]]; then
   echo "API (direct): ${ApiUrl:-}"
   echo "Cognito User Pool: ${UserPoolId:-}"
   echo "Outputs saved: $OUTPUTS_FILE"
+  if [[ -n "${CursorApiKeySecretName:-}" ]]; then
+    echo ""
+    echo "Cursor API key secret: $CursorApiKeySecretName"
+    echo "  Set value: $SCRIPT_DIR/set-cursor-api-key.sh"
+    echo "  (or: aws secretsmanager put-secret-value --secret-id $CursorApiKeySecretName --secret-string 'YOUR_KEY')"
+  fi
 fi

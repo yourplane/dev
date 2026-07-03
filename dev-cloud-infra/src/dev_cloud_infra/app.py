@@ -21,7 +21,9 @@ from aws_cdk import (
     aws_s3 as s3,
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as origins,
+    aws_secretsmanager as secretsmanager,
 )
+from aws_cdk import SecretValue
 from constructs import Construct
 
 
@@ -212,6 +214,16 @@ function handler(event) {
             )
         )
 
+        cursor_api_secret = secretsmanager.Secret(
+            self,
+            "CursorApiKeySecret",
+            secret_name="dev-cloud/cursor-api-key",
+            description="Shared personal Cursor API key for environment workers",
+            secret_string_value=SecretValue.unsafe_plain_text("REPLACE_IN_CONSOLE"),
+            removal_policy=RemovalPolicy.RETAIN,
+        )
+        cursor_api_secret.grant_read(worker_role)
+
         CfnOutput(self, "UserPoolId", value=user_pool.user_pool_id)
         CfnOutput(self, "UserPoolClientId", value=user_pool_client.user_pool_client_id)
         CfnOutput(self, "ApiUrl", value=http_api.url or "")
@@ -220,6 +232,8 @@ function handler(event) {
         CfnOutput(self, "SpaBucketName", value=spa_bucket.bucket_name)
         CfnOutput(self, "WorkerRoleArn", value=worker_role.role_arn)
         CfnOutput(self, "DataBucketName", value=bucket.bucket_name)
+        CfnOutput(self, "CursorApiKeySecretArn", value=cursor_api_secret.secret_arn)
+        CfnOutput(self, "CursorApiKeySecretName", value=cursor_api_secret.secret_name)
 
 
 def main() -> None:

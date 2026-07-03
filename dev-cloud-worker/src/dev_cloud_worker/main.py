@@ -66,6 +66,38 @@ def _load_display_name() -> str | None:
     return None
 
 
+def _load_cursor_api_key() -> None:
+    """Load CURSOR_API_KEY from Secrets Manager when not already set."""
+    if os.environ.get("CURSOR_API_KEY"):
+        return
+    secret_id = os.environ.get("CURSOR_API_KEY_SECRET_NAME", "").strip()
+    if not secret_id:
+        logger.warning("CURSOR_API_KEY_SECRET_NAME not set; Cursor agent may fail without a key")
+        return
+    try:
+        import boto3
+
+        client = boto3.client("secretsmanager")
+        resp = client.get_secret_value(SecretId=secret_id)
+        secret_str = (resp.get("SecretString") or "").strip()
+        if not secret_str:
+            logger.warning("Cursor API key secret %s is empty", secret_id)
+            return
+        if secret_str.startswith("{"):
+            data = json.loads(secret_str)
+            for key in ("api_key", "CURSOR_API_KEY", "cursor_api_key"):
+                if isinstance(data.get(key), str) and data[key].strip():
+                    secret_str = data[key].strip()
+                    break
+        if secret_str in ("REPLACE_IN_CONSOLE", "PASTE_CURSOR_API_KEY_IN_CONSOLE"):
+            logger.warning("Cursor API key secret still has placeholder value; set it in AWS Console")
+            return
+        os.environ["CURSOR_API_KEY"] = secret_str
+        logger.info("Loaded CURSOR_API_KEY from Secrets Manager (%s)", secret_id)
+    except Exception:
+        logger.exception("Failed to load Cursor API key from %s", secret_id)
+
+
 class WorkerClient:
     def __init__(self) -> None:
         self.base = _control_plane_url()
@@ -314,6 +346,7 @@ class CommandExecutor:
 
 def run_loop() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+    _load_cursor_api_key()
     client = WorkerClient()
     executor = CommandExecutor(client)
     logger.info("Worker started env=%s tasks_root=%s", client.env_id, _tasks_root())
