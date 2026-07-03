@@ -306,33 +306,41 @@ class CommandExecutor:
         cancel_flag: threading.Event,
     ) -> None:
         task_dir = self.tasks_root / task_name
-        log_name = f"dev-{command}-stream.log"
-        log_path = task_dir / ".logs" / log_name
-        log_path.parent.mkdir(parents=True, exist_ok=True)
+        log_path_holder: dict[str, Path | None] = {"path": None}
+        uploaded_size = {"bytes": 0}
+
+        def on_start(stream_log_path: Path) -> None:
+            log_path_holder["path"] = stream_log_path
+            uploaded_size["bytes"] = 0
+            self.client.upload_log_chunk(task_name, stream_log_path.name, b"")
 
         def tail_log() -> None:
-            last_size = 0
             while not cancel_flag.is_set():
-                if log_path.is_file():
-                    data = log_path.read_bytes()
-                    if len(data) > last_size:
-                        self.client.upload_log_chunk(task_name, log_name, data[last_size:])
-                        last_size = len(data)
+                path = log_path_holder["path"]
+                if path and path.is_file():
+                    data = path.read_bytes()
+                    if len(data) > uploaded_size["bytes"]:
+                        self.client.upload_log_chunk(
+                            task_name,
+                            path.name,
+                            data[uploaded_size["bytes"] :],
+                        )
+                        uploaded_size["bytes"] = len(data)
                 time.sleep(1)
 
         t = threading.Thread(target=tail_log, daemon=True)
         t.start()
         try:
             if command == "question":
-                run_question_mode(task_dir, cancel_event=cancel_flag)
+                run_question_mode(task_dir, on_start=on_start, cancel_event=cancel_flag)
             elif command == "plan-implement":
-                run_plan_implement(task_dir, cancel_event=cancel_flag)
+                run_plan_implement(task_dir, on_start=on_start, cancel_event=cancel_flag)
             elif command == "implement":
-                run_implement(task_dir, cancel_event=cancel_flag)
+                run_implement(task_dir, on_start=on_start, cancel_event=cancel_flag)
             elif command == "do":
                 if not prompt or not str(prompt).strip():
                     raise RuntimeError("Missing prompt for do command")
-                run_do(task_dir, str(prompt).strip(), cancel_event=cancel_flag)
+                run_do(task_dir, str(prompt).strip(), on_start=on_start, cancel_event=cancel_flag)
             else:
                 raise RuntimeError(f"Unknown agent command: {command}")
         except AgentRunError as e:
@@ -340,8 +348,15 @@ class CommandExecutor:
         finally:
             cancel_flag.set()
             t.join(timeout=2)
-            if log_path.is_file():
-                self.client.upload_log_chunk(task_name, log_name, log_path.read_bytes())
+            path = log_path_holder["path"]
+            if path and path.is_file():
+                data = path.read_bytes()
+                if len(data) > uploaded_size["bytes"]:
+                    self.client.upload_log_chunk(
+                        task_name,
+                        path.name,
+                        data[uploaded_size["bytes"] :],
+                    )
 
     def _run_bash(
         self,
