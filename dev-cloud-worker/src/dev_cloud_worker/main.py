@@ -322,14 +322,19 @@ class CommandExecutor:
 
         t = threading.Thread(target=tail_log, daemon=True)
         t.start()
-        runners = {
-            "plan-implement": run_plan_implement,
-            "implement": run_implement,
-            "do": run_do,
-            "question": run_question_mode,
-        }
         try:
-            runners[command](task_dir, prompt=prompt)
+            if command == "question":
+                run_question_mode(task_dir, cancel_event=cancel_flag)
+            elif command == "plan-implement":
+                run_plan_implement(task_dir, cancel_event=cancel_flag)
+            elif command == "implement":
+                run_implement(task_dir, cancel_event=cancel_flag)
+            elif command == "do":
+                if not prompt or not str(prompt).strip():
+                    raise RuntimeError("Missing prompt for do command")
+                run_do(task_dir, str(prompt).strip(), cancel_event=cancel_flag)
+            else:
+                raise RuntimeError(f"Unknown agent command: {command}")
         except AgentRunError as e:
             raise RuntimeError(str(e)) from e
         finally:
