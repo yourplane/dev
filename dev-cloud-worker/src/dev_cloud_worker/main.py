@@ -77,7 +77,12 @@ def _load_cursor_api_key() -> None:
     try:
         import boto3
 
-        client = boto3.client("secretsmanager")
+        region = (
+            os.environ.get("AWS_REGION")
+            or os.environ.get("AWS_DEFAULT_REGION")
+            or "us-east-1"
+        )
+        client = boto3.client("secretsmanager", region_name=region)
         resp = client.get_secret_value(SecretId=secret_id)
         secret_str = (resp.get("SecretString") or "").strip()
         if not secret_str:

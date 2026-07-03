@@ -41,6 +41,9 @@ fi
 if ! grep -q '^Environment=AWS_REGION=' "$UNIT"; then
   sed -i "/^Environment=CURSOR_API_KEY_SECRET_NAME=/a Environment=AWS_REGION=$AWS_REGION" "$UNIT"
 fi
+if ! grep -q '^Environment=AWS_DEFAULT_REGION=' "$UNIT"; then
+  sed -i "/^Environment=AWS_REGION=/a Environment=AWS_DEFAULT_REGION=$AWS_REGION" "$UNIT"
+fi
 if ! grep -q '^Environment=PATH=' "$UNIT"; then
   sed -i "/^Environment=AWS_REGION=/a Environment=PATH=$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" "$UNIT"
 fi

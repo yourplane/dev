@@ -65,6 +65,7 @@ Environment=CONTROL_PLANE_URL=$CONTROL_PLANE_URL
 Environment=DEV_TASKS_ROOT=$DEV_TASKS_ROOT
 Environment=CURSOR_API_KEY_SECRET_NAME=$CURSOR_API_KEY_SECRET_NAME
 Environment=AWS_REGION=$AWS_REGION
+Environment=AWS_DEFAULT_REGION=$AWS_REGION
 Environment=PATH=$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 ExecStart=$WORKER_BIN
 Restart=always
