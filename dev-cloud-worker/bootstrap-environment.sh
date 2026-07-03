@@ -30,6 +30,29 @@ fi
 
 log() { echo "==> $*"; }
 
+prepare_user_systemd() {
+  local uid
+  uid="$(id -u)"
+  export XDG_RUNTIME_DIR="/run/user/${uid}"
+  export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+  if [[ ! -S "${XDG_RUNTIME_DIR}/bus" ]] && command -v sudo >/dev/null; then
+    sudo loginctl enable-linger "$(whoami)" 2>/dev/null || true
+    sudo systemctl start "user@${uid}.service" 2>/dev/null || true
+  fi
+}
+
+log "Enabling systemd user linger for $(whoami)"
+if command -v loginctl >/dev/null; then
+  if loginctl enable-linger "$(whoami)" 2>/dev/null; then
+    :
+  elif command -v sudo >/dev/null; then
+    sudo loginctl enable-linger "$(whoami)"
+  else
+    echo "Warning: could not enable linger; worker may stop when you log out" >&2
+  fi
+fi
+prepare_user_systemd
+
 log "Stopping any existing dev-cloud-worker service"
 systemctl --user stop dev-cloud-worker.service 2>/dev/null || true
 systemctl --user disable dev-cloud-worker.service 2>/dev/null || true
@@ -63,18 +86,8 @@ export DEV_TASKS_ROOT
 log "Installing dev-cloud-worker"
 "$HOME_DEV/dev-cloud-worker/install.sh"
 
-if command -v loginctl >/dev/null; then
-  log "Enabling systemd user linger for $(whoami)"
-  if loginctl enable-linger "$(whoami)" 2>/dev/null; then
-    :
-  elif command -v sudo >/dev/null; then
-    sudo loginctl enable-linger "$(whoami)"
-  else
-    echo "Warning: could not enable linger; worker may stop when you log out" >&2
-  fi
-fi
-
 log "Worker status"
+prepare_user_systemd
 systemctl --user status dev-cloud-worker.service --no-pager || true
 
 log "Bootstrap complete (display_name=$DEV_CLOUD_DISPLAY_NAME)"

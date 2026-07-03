@@ -14,6 +14,17 @@ if [[ -z "$CONTROL_PLANE_URL" ]]; then
   exit 1
 fi
 
+prepare_user_systemd() {
+  local uid
+  uid="$(id -u)"
+  export XDG_RUNTIME_DIR="/run/user/${uid}"
+  export DBUS_SESSION_BUS_ADDRESS="unix:path=${XDG_RUNTIME_DIR}/bus"
+  if [[ ! -S "${XDG_RUNTIME_DIR}/bus" ]] && command -v sudo >/dev/null; then
+    sudo loginctl enable-linger "$(whoami)" 2>/dev/null || true
+    sudo systemctl start "user@${uid}.service" 2>/dev/null || true
+  fi
+}
+
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/dev-cloud"
 mkdir -p "$CONFIG_DIR"
 if [[ -n "$DEV_CLOUD_DISPLAY_NAME" ]]; then
@@ -46,6 +57,7 @@ RestartSec=5
 WantedBy=default.target
 EOF
 
+prepare_user_systemd
 systemctl --user daemon-reload
 systemctl --user enable --now dev-cloud-worker.service
 echo "dev-cloud-worker installed and started."
