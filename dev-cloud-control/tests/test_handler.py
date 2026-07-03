@@ -152,3 +152,74 @@ def test_archive_task_updates_status(aws_env):
     assert task_name not in tasks
     archive = json.loads(router.dispatch(_event("GET", "/archive"))["body"])
     assert any(e["task_name"] == task_name for e in archive["entries"])
+
+
+def test_cancel_active_command_sets_cancelling_state(aws_env):
+    router = Router()
+    store = CloudStore()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Cancel me", "environment_id": "env-1", "repo": None},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+
+    cancel = router.dispatch(_event("POST", f"/tasks/{task_name}/commands/cancel"))
+    assert cancel["statusCode"] == 204
+
+    status = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/commands"))["body"])
+    assert status["active"] is True
+    assert status["cancelling"] is True
+    assert status["create_progress"][-1] == "Cancelling…"
+
+    task = store.get_task(task_name)
+    assert task.active_command["cancelling"] is True
+    assert task.active_command["cancel_requested"] is True
+
+
+def test_cancel_stuck_cancelling_force_clears(aws_env):
+    router = Router()
+    store = CloudStore()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Stuck", "environment_id": "env-1", "repo": None},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    router.dispatch(_event("POST", f"/tasks/{task_name}/commands/cancel"))
+    router.dispatch(_event("POST", f"/tasks/{task_name}/commands/cancel"))
+
+    status = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/commands"))["body"])
+    assert status["active"] is False
+    assert status["command"] is None
+    assert status["cancelling"] is False
+    assert status["command_error"] == "Cancelled"
+    task = store.get_task(task_name)
+    assert task.active_command is None
+    assert task.last_command_error == "Cancelled"
+
+
+def test_command_status_shows_queued_create_task(aws_env):
+    router = Router()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Queued", "environment_id": "env-1", "repo": None},
+        )
+    )
+    task_name = json.loads(router.dispatch(_event("GET", "/tasks"))["body"])["tasks"][0]
+    status = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/commands"))["body"])
+    assert status["queued"] is True
+    assert status["active"] is False
+    assert status["command"] == "create-task"
+    assert status["cancelling"] is False

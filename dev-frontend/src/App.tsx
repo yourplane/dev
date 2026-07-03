@@ -1594,6 +1594,7 @@ export function TaskCommsPageContent({
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
+  const [commandQueued, setCommandQueued] = useState(false)
   const [createProgress, setCreateProgress] = useState<string[]>([])
   const [activeLogFilename, setActiveLogFilename] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
@@ -1760,15 +1761,17 @@ export function TaskCommsPageContent({
   const loadCommandStatus = useCallback(async () => {
     try {
       const res = await api.getTaskCommandStatus(taskName)
-      const nextActive = res.active && res.command ? res.command : null
+      const pending = Boolean(res.command && (res.active || res.queued))
+      const nextActive = pending ? res.command : null
       setActiveCommand(nextActive)
+      setCommandQueued(Boolean(res.queued))
       setCreateProgress(res.create_progress ?? [])
-      if (!nextActive) setCancelling(false)
+      setCancelling(Boolean(res.cancelling))
       setActiveLogFilename(res.active && res.active_log_filename ? res.active_log_filename : null)
       setActiveBashCommsFilename(
         res.active && res.active_bash_comms_filename ? res.active_bash_comms_filename : null,
       )
-      if (nextActive) {
+      if (pending) {
         setCommandError(null)
       } else if (res.command_error) {
         setCommandError(res.command_error)
@@ -2131,13 +2134,11 @@ export function TaskCommsPageContent({
 
   const handleCancelCommand = async () => {
     setCommandError(null)
-    setCancelling(true)
     try {
       await api.cancelTaskCommand(taskName)
-      // Leave cancelling true; loadCommandStatus will set it false when poll sees command inactive
+      await loadCommandStatus()
     } catch (e) {
       setCommandError(e instanceof Error ? e.message : String(e))
-      setCancelling(false)
     }
   }
 
@@ -2633,14 +2634,14 @@ export function TaskCommsPageContent({
                 {cancelling ? 'Cancelling…' : 'Cancel'}
               </button>
             </div>
-            {activeCommand === 'create-task' && (createProgress.length > 0 || cancelling) && (
+            {activeCommand === 'create-task' && (createProgress.length > 0 || cancelling || commandQueued) && (
               <ul className="create-task-progress-list" aria-live="polite">
+                {commandQueued && createProgress.length === 0 && !cancelling && (
+                  <li key="__queued__">Waiting for environment worker…</li>
+                )}
                 {createProgress.map((msg, i) => (
                   <li key={`${i}-${msg}`}>{msg}</li>
                 ))}
-                {cancelling && createProgress[createProgress.length - 1] !== 'Cancelling…' && (
-                  <li key="__cancelling__">Cancelling…</li>
-                )}
               </ul>
             )}
           </div>

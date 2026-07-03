@@ -185,14 +185,28 @@ class CommandExecutor:
         self.client = client
         self.tasks_root = _tasks_root()
         self.manager = TaskManager(self.tasks_root)
-        self._cancel = threading.Event()
+        self._cancel_flags: dict[str, threading.Event] = {}
+        self._cancel_lock = threading.Lock()
+
+    def _cancel_for(self, task_name: str) -> threading.Event:
+        with self._cancel_lock:
+            flag = self._cancel_flags.get(task_name)
+            if flag is None:
+                flag = threading.Event()
+                self._cancel_flags[task_name] = flag
+            return flag
+
+    def request_cancel(self, task_name: str) -> None:
+        self._cancel_for(task_name).set()
 
     def execute(self, task_name: str, command: dict) -> None:
         cmd = command.get("command")
         payload = command.get("payload") or {}
+        cancel_flag = self._cancel_for(task_name)
+        cancel_flag.clear()
         try:
             if cmd == "create-task":
-                self._create_task(task_name, payload)
+                self._create_task(task_name, payload, cancel_flag)
             elif cmd == "archive":
                 self._archive(task_name, payload)
             elif cmd == "unarchive":
@@ -200,12 +214,12 @@ class CommandExecutor:
             elif cmd == "copy-from-archive":
                 self._copy_from_archive(task_name, payload)
             elif cmd == "cancel":
-                self._cancel.set()
+                cancel_flag.set()
                 return
             elif cmd in ("question", "plan-implement", "implement", "do"):
-                self._run_agent(task_name, cmd, payload.get("prompt"))
+                self._run_agent(task_name, cmd, payload.get("prompt"), cancel_flag)
             elif cmd == "bash":
-                self._run_bash(task_name, payload.get("prompt", ""))
+                self._run_bash(task_name, payload.get("prompt", ""), cancel_flag)
             else:
                 raise RuntimeError(f"Unknown command: {cmd}")
             self.client.complete_command(task_name, result=self._task_result(task_name))
@@ -220,7 +234,7 @@ class CommandExecutor:
             logger.exception("Command failed for %s: %s", task_name, e)
             self.client.complete_command(task_name, error=str(e))
         finally:
-            self._cancel.clear()
+            cancel_flag.clear()
             self._sync_comms(task_name)
 
     def _task_result(self, task_name: str) -> dict:
@@ -255,7 +269,12 @@ class CommandExecutor:
                 break
         return out
 
-    def _create_task(self, task_name: str, payload: dict) -> None:
+    def _create_task(
+        self,
+        task_name: str,
+        payload: dict,
+        cancel_flag: threading.Event,
+    ) -> None:
         def on_progress(msg: str) -> None:
             self.client.progress(task_name, msg)
 
@@ -265,7 +284,7 @@ class CommandExecutor:
             payload.get("comment"),
             payload.get("repo_url"),
             on_progress=on_progress,
-            cancel_check=self._cancel.is_set,
+            cancel_check=cancel_flag.is_set,
         )
 
     def _archive(self, task_name: str, payload: dict) -> None:
@@ -279,7 +298,13 @@ class CommandExecutor:
         archived_name = payload["archived_name"]
         self.manager.copy_task_from_archive(archived_name, task_name_override=task_name)
 
-    def _run_agent(self, task_name: str, command: str, prompt: str | None) -> None:
+    def _run_agent(
+        self,
+        task_name: str,
+        command: str,
+        prompt: str | None,
+        cancel_flag: threading.Event,
+    ) -> None:
         task_dir = self.tasks_root / task_name
         log_name = f"dev-{command}-stream.log"
         log_path = task_dir / ".logs" / log_name
@@ -287,7 +312,7 @@ class CommandExecutor:
 
         def tail_log() -> None:
             last_size = 0
-            while not self._cancel.is_set():
+            while not cancel_flag.is_set():
                 if log_path.is_file():
                     data = log_path.read_bytes()
                     if len(data) > last_size:
@@ -308,12 +333,17 @@ class CommandExecutor:
         except AgentRunError as e:
             raise RuntimeError(str(e)) from e
         finally:
-            self._cancel.set()
+            cancel_flag.set()
             t.join(timeout=2)
             if log_path.is_file():
                 self.client.upload_log_chunk(task_name, log_name, log_path.read_bytes())
 
-    def _run_bash(self, task_name: str, shell_command: str) -> None:
+    def _run_bash(
+        self,
+        task_name: str,
+        shell_command: str,
+        cancel_flag: threading.Event,
+    ) -> None:
         task_dir = self.tasks_root / task_name
         path = begin_streaming_bash_comms(task_dir, shell_command)
         proc = subprocess.Popen(
@@ -325,6 +355,13 @@ class CommandExecutor:
         )
         assert proc.stdout is not None
         for line in proc.stdout:
+            if cancel_flag.is_set():
+                proc.terminate()
+                try:
+                    proc.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                raise TaskCancelled("Cancelled during bash")
             with open(path, "ab") as f:
                 f.write(line)
         proc.wait()
@@ -384,7 +421,7 @@ def run_loop() -> None:
                 task_name = item["task_name"]
                 command = item["command"]
                 if command.get("command") == "cancel":
-                    executor._cancel.set()
+                    executor.request_cancel(task_name)
                     continue
                 threading.Thread(
                     target=run_command,

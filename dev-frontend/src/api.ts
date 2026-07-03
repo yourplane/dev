@@ -466,6 +466,7 @@ export const api = {
     command_error: string | null;
     create_progress?: string[];
     queued?: boolean;
+    cancelling?: boolean;
   }> {
     return request(`/tasks/${encodeURIComponent(taskName)}/commands`);
   },

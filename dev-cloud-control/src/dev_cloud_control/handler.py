@@ -32,6 +32,19 @@ from dev_cloud_control.store import (
 SUPPORTED_COMMANDS = ("question", "plan-implement", "implement", "do", "bash")
 
 
+def _command_cancelling(active: dict | None) -> bool:
+    if not active:
+        return False
+    return bool(active.get("cancelling") or active.get("cancel_requested"))
+
+
+def _append_cancelling_progress(progress: list[str]) -> list[str]:
+    out = list(progress)
+    if not out or out[-1] != "Cancelling…":
+        out.append("Cancelling…")
+    return out
+
+
 def _json_default(obj: Any) -> Any:
     if isinstance(obj, Decimal):
         return float(obj)
@@ -675,6 +688,7 @@ class Router:
                     "command_error": active.get("command_error"),
                     "create_progress": progress,
                     "queued": False,
+                    "cancelling": _command_cancelling(active),
                 },
             )
         if queued:
@@ -688,6 +702,7 @@ class Router:
                     "command_error": None,
                     "create_progress": progress,
                     "queued": True,
+                    "cancelling": False,
                 },
             )
         return _json(
@@ -700,6 +715,7 @@ class Router:
                 "command_error": task.last_command_error,
                 "create_progress": progress,
                 "queued": False,
+                "cancelling": False,
             },
         )
 
@@ -731,17 +747,32 @@ class Router:
         if not task:
             return _json(404, {"detail": "Task not found"})
         if task.queued_command:
-            self.store.update_task(task_name, queued_command=None)
+            progress = _append_cancelling_progress(list(task.create_progress or []))
+            self.store.update_task(
+                task_name,
+                queued_command=None,
+                create_progress=progress,
+                last_command_error="Cancelled",
+            )
             return _no_content()
         if task.active_command:
             active = dict(task.active_command)
+            if _command_cancelling(active):
+                progress = _append_cancelling_progress(list(task.create_progress or []))
+                self.store.update_task(
+                    task_name,
+                    active_command=None,
+                    create_progress=progress,
+                    last_command_error="Cancelled",
+                )
+                return _no_content()
             active["cancel_requested"] = True
+            active["cancelling"] = True
             updates: dict[str, Any] = {"active_command": active}
             if active.get("command") == "create-task":
-                progress = list(task.create_progress or [])
-                if not progress or progress[-1] != "Cancelling…":
-                    progress.append("Cancelling…")
-                    updates["create_progress"] = progress
+                updates["create_progress"] = _append_cancelling_progress(
+                    list(task.create_progress or [])
+                )
             self.store.update_task(task_name, **updates)
             return _no_content()
         return _json(400, {"detail": "No command to cancel"})
@@ -1034,6 +1065,7 @@ class Router:
                     active_command=active,
                     queued_command=None,
                     create_progress=[],
+                    last_command_error=None,
                 )
             elif task.active_command and task.active_command.get("cancel_requested"):
                 cmd = {"command": "cancel", "payload": {}}
