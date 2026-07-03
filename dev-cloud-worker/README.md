@@ -37,7 +37,7 @@ aws ssm send-command \
   --instance-ids "$INSTANCE_ID" \
   --document-name AWS-RunShellScript \
   --parameters "$(jq -n --arg url 'https://xxx.cloudfront.net/api' \
-    '{commands: ["sudo -u ubuntu -H env CONTROL_PLANE_URL=\($url) DEV_CLOUD_DISPLAY_NAME=dev-environment DEV_REPO_BRANCH=task/cloud-dev bash -lc \"curl -fsSL https://raw.githubusercontent.com/yourplane/dev/task/cloud-dev/dev/dev-cloud-worker/bootstrap-environment.sh | bash\""]}')"
+    '{commands: ["sudo -u ubuntu -H env CONTROL_PLANE_URL=\($url) DEV_CLOUD_DISPLAY_NAME=dev-environment DEV_REPO_BRANCH=task/cloud-dev bash -lc \"curl -fsSL https://raw.githubusercontent.com/yourplane/dev/task/cloud-dev/dev-cloud-worker/bootstrap-environment.sh | bash\""]}')"
 ```
 
 Prefer cloning the repo and running `bootstrap-environment.sh` from disk after push.

@@ -3,8 +3,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-WORK_DIR="$(cd "$REPO_ROOT/.." && pwd)"
+WORK_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 CONTROL_PLANE_URL="${CONTROL_PLANE_URL:-}"
 DEV_TASKS_ROOT="${DEV_TASKS_ROOT:-$HOME/tasks}"
