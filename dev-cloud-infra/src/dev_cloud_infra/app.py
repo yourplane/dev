@@ -197,7 +197,13 @@ function handler(event) {
                     http_status=404,
                     response_http_status=200,
                     response_page_path="/index.html",
-                )
+                ),
+                # S3 OAC returns 403 for missing keys; SPA client routes need index.html.
+                cloudfront.ErrorResponse(
+                    http_status=403,
+                    response_http_status=200,
+                    response_page_path="/index.html",
+                ),
             ],
         )
 
