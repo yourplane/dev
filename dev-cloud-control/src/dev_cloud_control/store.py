@@ -364,18 +364,16 @@ class CloudStore:
 
     def append_log(self, task_name: str, filename: str, chunk: bytes) -> int:
         key = self._log_key(task_name, filename)
+        existing = b""
         try:
-            head = self._s3.head_object(Bucket=self._bucket, Key=key)
-            size = head["ContentLength"]
-        except ClientError:
-            size = 0
-        self._s3.put_object(
-            Bucket=self._bucket,
-            Key=key,
-            Body=chunk,
-            Metadata={"append_offset": str(size)} if size else {},
-        )
-        return size + len(chunk)
+            resp = self._s3.get_object(Bucket=self._bucket, Key=key)
+            existing = resp["Body"].read()
+        except ClientError as e:
+            if e.response["Error"]["Code"] != "NoSuchKey":
+                raise
+        body = existing + chunk
+        self._s3.put_object(Bucket=self._bucket, Key=key, Body=body)
+        return len(body)
 
     def get_log(self, task_name: str, filename: str) -> str:
         try:

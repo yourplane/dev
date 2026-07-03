@@ -223,3 +223,46 @@ def test_command_status_shows_queued_create_task(aws_env):
     assert status["active"] is False
     assert status["command"] == "create-task"
     assert status["cancelling"] is False
+
+
+def test_worker_upload_log_empty_chunk_registers_feed(aws_env):
+    import base64
+
+    router = Router()
+    store = CloudStore()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Log test", "environment_id": "env-1", "repo": None},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    log_name = "dev-question-stream-20260703-161500.log"
+
+    resp = router.dispatch(
+        _event(
+            "POST",
+            f"/worker/tasks/{task_name}/logs",
+            {"filename": log_name, "chunk_b64": ""},
+        )
+    )
+    assert resp["statusCode"] == 204
+
+    task = store.get_task(task_name)
+    assert task.active_command["active_log_filename"] == log_name
+    feed = store.list_feed_items(task_name)
+    assert any(f.type == "log" and f.id == log_name for f in feed)
+
+    resp2 = router.dispatch(
+        _event(
+            "POST",
+            f"/worker/tasks/{task_name}/logs",
+            {"filename": log_name, "chunk_b64": base64.b64encode(b"line1\n").decode("ascii")},
+        )
+    )
+    assert resp2["statusCode"] == 204
+    content = store.get_log(task_name, log_name)
+    assert content == "line1\n"

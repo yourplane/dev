@@ -1110,18 +1110,22 @@ class Router:
         return _json(200, {"token": token, "expires_in": 3600})
 
     def worker_upload_log(self, event: dict, task_name: str) -> dict:
-        body = event.get("body") or ""
-        if event.get("isBase64Encoded"):
-            chunk = base64.b64decode(body)
-        else:
-            chunk = body.encode("utf-8") if isinstance(body, str) else body
-        data = _parse_body(event) if not chunk else None
+        data = _parse_body(event)
         filename = ""
+        chunk = b""
         if isinstance(data, dict):
-            filename = data.get("filename", "")
-            chunk_b64 = data.get("chunk_b64", "")
+            filename = str(data.get("filename") or "")
+            chunk_b64 = data.get("chunk_b64")
             if chunk_b64:
                 chunk = base64.b64decode(chunk_b64)
+        else:
+            body = event.get("body") or ""
+            if event.get("isBase64Encoded"):
+                chunk = base64.b64decode(body)
+            elif isinstance(body, str):
+                chunk = body.encode("utf-8")
+            else:
+                chunk = body or b""
         if not filename:
             return _json(400, {"detail": "filename required"})
         self.store.append_log(task_name, filename, chunk)
