@@ -354,7 +354,13 @@ def run_loop() -> None:
     _load_cursor_api_key()
     client = WorkerClient()
     executor = CommandExecutor(client)
+    command_lock = threading.Lock()
     logger.info("Worker started env=%s tasks_root=%s", client.env_id, _tasks_root())
+
+    def run_command(task_name: str, command: dict) -> None:
+        with command_lock:
+            executor.execute(task_name, command)
+
     while True:
         try:
             data = client.poll()
@@ -371,7 +377,12 @@ def run_loop() -> None:
                 if command.get("command") == "cancel":
                     executor._cancel.set()
                     continue
-                executor.execute(task_name, command)
+                threading.Thread(
+                    target=run_command,
+                    args=(task_name, command),
+                    daemon=True,
+                    name=f"dev-cmd-{task_name}",
+                ).start()
         except Exception:
             logger.exception("Poll loop error")
         time.sleep(POLL_INTERVAL_SEC)

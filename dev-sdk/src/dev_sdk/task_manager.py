@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import secrets
 import shutil
@@ -119,17 +120,21 @@ class TaskManager:
     def _create_agent_chat(self) -> str:
         cmd = ["cursor", "agent", "create-chat"]
         logger.debug("Creating agent chat: cmd=%s", cmd)
+        env = os.environ.copy()
+        env["PATH"] = f"{Path.home() / '.local' / 'bin'}:{env.get('PATH', '')}"
         try:
             result = subprocess.run(
                 cmd,
                 capture_output=True,
                 text=True,
                 check=True,
+                env=env,
+                timeout=120,
             )
             chat_id = self._parse_chat_id(result.stdout.strip())
             logger.debug("Agent chat created: chat_id=%s", chat_id)
             return chat_id
-        except (subprocess.CalledProcessError, ValueError) as e:
+        except (subprocess.CalledProcessError, ValueError, subprocess.TimeoutExpired) as e:
             logger.warning("Agent chat failed: %s", e)
             raise
 

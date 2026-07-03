@@ -443,7 +443,7 @@ class Router:
             json.dumps({"type": "progress", "message": "Task queued for environment."}),
             json.dumps(
                 {
-                    "type": "complete",
+                    "type": "accepted",
                     "task_name": task_name,
                     "task_dir": task_name,
                 }
@@ -663,6 +663,7 @@ class Router:
             return _json(404, {"detail": "Task not found"})
         active = task.active_command
         queued = task.queued_command
+        progress = list(task.create_progress or [])
         if active:
             return _json(
                 200,
@@ -672,6 +673,8 @@ class Router:
                     "active_log_filename": active.get("active_log_filename"),
                     "active_bash_comms_filename": active.get("active_bash_comms_filename"),
                     "command_error": active.get("command_error"),
+                    "create_progress": progress,
+                    "queued": False,
                 },
             )
         if queued:
@@ -683,6 +686,7 @@ class Router:
                     "active_log_filename": None,
                     "active_bash_comms_filename": None,
                     "command_error": None,
+                    "create_progress": progress,
                     "queued": True,
                 },
             )
@@ -693,7 +697,9 @@ class Router:
                 "command": None,
                 "active_log_filename": None,
                 "active_bash_comms_filename": None,
-                "command_error": None,
+                "command_error": task.last_command_error,
+                "create_progress": progress,
+                "queued": False,
             },
         )
 
@@ -1021,6 +1027,7 @@ class Router:
                     task_name,
                     active_command=active,
                     queued_command=None,
+                    create_progress=[],
                 )
             elif task.active_command and task.active_command.get("cancel_requested"):
                 cmd = {"command": "cancel", "payload": {}}
@@ -1144,6 +1151,7 @@ class Router:
         updates: dict[str, Any] = {"active_command": None}
         if task.active_command and task.active_command.get("command") == "create-task":
             updates["status"] = "active"
+            updates["create_progress"] = []
         if task.active_command and task.active_command.get("command") == "archive":
             updates["status"] = "archived"
             updates["queued_command"] = None
@@ -1152,6 +1160,9 @@ class Router:
         if error:
             updates["active_command"] = None
             updates["queued_command"] = None
+            updates["last_command_error"] = str(error)
+        else:
+            updates["last_command_error"] = None
         if result.get("owner"):
             updates["owner"] = result["owner"]
         if result.get("repo_name"):

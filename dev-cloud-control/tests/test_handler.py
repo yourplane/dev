@@ -115,7 +115,8 @@ def test_create_task_queues_command(aws_env):
     )
     assert resp["statusCode"] == 200
     lines = [json.loads(ln) for ln in resp["body"].strip().split("\n") if ln]
-    assert any(l["type"] == "complete" for l in lines)
+    assert any(l["type"] == "accepted" for l in lines)
+    assert not any(l["type"] == "complete" for l in lines)
     poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
     work = json.loads(poll["body"])["work"]
     assert any(w["command"]["command"] == "create-task" for w in work)

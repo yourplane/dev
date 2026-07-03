@@ -753,6 +753,7 @@ function CreateTaskForm({
 }
 
 const COMMAND_LABEL: Record<string, string> = {
+  'create-task': 'Create task',
   question: 'Question',
   'plan-implement': 'Plan',
   implement: 'Implement',
@@ -1593,6 +1594,7 @@ export function TaskCommsPageContent({
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
+  const [createProgress, setCreateProgress] = useState<string[]>([])
   const [activeLogFilename, setActiveLogFilename] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [lastAgentCommand, setLastAgentCommand] = useState<AgentModeCommand>(readLastAgentCommand)
@@ -1760,6 +1762,7 @@ export function TaskCommsPageContent({
       const res = await api.getTaskCommandStatus(taskName)
       const nextActive = res.active && res.command ? res.command : null
       setActiveCommand(nextActive)
+      setCreateProgress(res.create_progress ?? [])
       if (!nextActive) setCancelling(false)
       setActiveLogFilename(res.active && res.active_log_filename ? res.active_log_filename : null)
       setActiveBashCommsFilename(
@@ -2610,24 +2613,33 @@ export function TaskCommsPageContent({
       ) : null}
       <div className="task-commands">
         {activeCommand ? (
-          <div className="command-status-row">
-            {cancelling ? (
-              <p className="command-status">
-                <span className="command-spinner" aria-hidden /> Cancelling…
-              </p>
-            ) : (
-              <p className="command-status">
-                <span className="command-spinner" aria-hidden /> Running: {COMMAND_LABEL[activeCommand] ?? activeCommand}
-              </p>
+          <div className="command-status-block">
+            <div className="command-status-row">
+              {cancelling ? (
+                <p className="command-status">
+                  <span className="command-spinner" aria-hidden /> Cancelling…
+                </p>
+              ) : (
+                <p className="command-status">
+                  <span className="command-spinner" aria-hidden /> Running: {COMMAND_LABEL[activeCommand] ?? activeCommand}
+                </p>
+              )}
+              <button
+                type="button"
+                className="command-btn command-cancel-btn"
+                disabled={cancelling}
+                onClick={handleCancelCommand}
+              >
+                {cancelling ? 'Cancelling…' : 'Cancel'}
+              </button>
+            </div>
+            {activeCommand === 'create-task' && createProgress.length > 0 && (
+              <ul className="create-task-progress-list" aria-live="polite">
+                {createProgress.map((msg, i) => (
+                  <li key={`${i}-${msg}`}>{msg}</li>
+                ))}
+              </ul>
             )}
-            <button
-              type="button"
-              className="command-btn command-cancel-btn"
-              disabled={cancelling}
-              onClick={handleCancelCommand}
-            >
-              {cancelling ? 'Cancelling…' : 'Cancel'}
-            </button>
           </div>
         ) : (
           <div className="command-buttons">

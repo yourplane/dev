@@ -802,6 +802,17 @@
   min-width: 0;
 }
 
+.create-task-progress-list {
+  margin: 0.35rem 0 0;
+  padding-left: 1.25rem;
+  color: #555;
+  font-size: 0.9rem;
+}
+
+.create-task-progress-list li {
+  margin: 0.15rem 0;
+}
+
 .command-cancel-btn {
   background: #6b7280;
 }

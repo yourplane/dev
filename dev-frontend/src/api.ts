@@ -3,6 +3,45 @@ import { authHeaders, ensureValidIdToken, isCloudMode } from './cloudAuth';
 
 export const apiBaseUrl = import.meta.env.VITE_DEV_SERVER_URL ?? '/api';
 
+const CLOUD_CREATE_POLL_MS = 1000;
+const CLOUD_CREATE_TIMEOUT_MS = 15 * 60 * 1000;
+
+async function waitForCloudCreateTask(
+  taskName: string,
+  onProgress?: (message: string) => void,
+): Promise<CreateTaskResponse> {
+  const seen = new Set<string>();
+  const deadline = Date.now() + CLOUD_CREATE_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const st = await request<{
+      active: boolean;
+      command: string | null;
+      command_error: string | null;
+      create_progress?: string[];
+      queued?: boolean;
+    }>(`/tasks/${encodeURIComponent(taskName)}/commands`);
+    for (const msg of st.create_progress ?? []) {
+      if (!seen.has(msg)) {
+        seen.add(msg);
+        onProgress?.(msg);
+      }
+    }
+    if (st.command_error) {
+      throw new Error(st.command_error);
+    }
+    const pending = st.command === 'create-task' && (st.active || st.queued);
+    if (!pending) {
+      return { task_name: taskName, task_dir: taskName };
+    }
+    if (st.queued && !seen.has('__waiting_worker__')) {
+      seen.add('__waiting_worker__');
+      onProgress?.('Waiting for environment worker…');
+    }
+    await new Promise((r) => setTimeout(r, CLOUD_CREATE_POLL_MS));
+  }
+  throw new Error('Task creation timed out waiting for the environment worker');
+}
+
 function apiErrorMessage(httpStatus: number, detail: string): string {
   if (isCloudMode()) {
     if (httpStatus === 401 || httpStatus === 403) {
@@ -205,6 +244,7 @@ export const api = {
     const decoder = new TextDecoder();
     let buffer = '';
     let result: CreateTaskResponse | null = null;
+    let acceptedTaskName: string | null = null;
     while (true) {
       const { done, value } = await reader.read();
       buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
@@ -222,6 +262,9 @@ export const api = {
         };
         if (obj.type === 'progress' && typeof obj.message === 'string') {
           onProgress?.(obj.message);
+        }
+        if (obj.type === 'accepted' && typeof obj.task_name === 'string') {
+          acceptedTaskName = obj.task_name;
         }
         if (obj.type === 'complete' && typeof obj.task_name === 'string' && typeof obj.task_dir === 'string') {
           result = { task_name: obj.task_name, task_dir: obj.task_dir };
@@ -246,12 +289,18 @@ export const api = {
       if (obj.type === 'progress' && typeof obj.message === 'string') {
         onProgress?.(obj.message);
       }
+      if (obj.type === 'accepted' && typeof obj.task_name === 'string') {
+        acceptedTaskName = obj.task_name;
+      }
       if (obj.type === 'complete' && typeof obj.task_name === 'string' && typeof obj.task_dir === 'string') {
         result = { task_name: obj.task_name, task_dir: obj.task_dir };
       }
       if (obj.type === 'error' && typeof obj.detail === 'string') {
         throw new Error(obj.detail);
       }
+    }
+    if (!result && acceptedTaskName && isCloudMode()) {
+      result = await waitForCloudCreateTask(acceptedTaskName, onProgress);
     }
     if (!result) {
       throw new Error('Task creation finished without a result');
@@ -478,6 +527,8 @@ export const api = {
     active_log_filename: string | null;
     active_bash_comms_filename: string | null;
     command_error: string | null;
+    create_progress?: string[];
+    queued?: boolean;
   }> {
     return request(`/tasks/${encodeURIComponent(taskName)}/commands`);
   },

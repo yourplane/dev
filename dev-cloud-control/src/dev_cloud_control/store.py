@@ -67,6 +67,7 @@ class TaskRecord:
     active_command: dict | None = None
     queued_command: dict | None = None
     create_progress: list[str] = field(default_factory=list)
+    last_command_error: str | None = None
 
 
 @dataclass
@@ -222,6 +223,7 @@ class CloudStore:
             "active_command": record.active_command,
             "queued_command": record.queued_command,
             "create_progress": record.create_progress,
+            "last_command_error": record.last_command_error,
         }
         self._table.put_item(
             Item=_ddb(item),
@@ -278,6 +280,7 @@ class CloudStore:
             active_command=item.get("active_command"),
             queued_command=item.get("queued_command"),
             create_progress=item.get("create_progress") or [],
+            last_command_error=item.get("last_command_error"),
         )
 
     # --- config ---
