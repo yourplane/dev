@@ -1657,6 +1657,7 @@
   border-radius: 6px;
   padding: 0.75rem 1rem;
   margin-bottom: 0.75rem;
+  position: relative;
 }
 
 .question-field legend.question-text {
@@ -1690,13 +1691,18 @@
   position: relative;
 }
 
-.question-option.question-complexity-low,
-.question-option.question-complexity-medium,
-.question-option.question-complexity-high,
-.question-summary-selection-group.question-complexity-low,
-.question-summary-selection-group.question-complexity-medium,
-.question-summary-selection-group.question-complexity-high {
-  padding-left: 0.55rem;
+.question-option.question-complexity-low::before,
+.question-option.question-complexity-medium::before,
+.question-option.question-complexity-high::before {
+  left: calc(-1rem - 1px);
+  z-index: 1;
+}
+
+.question-summary-selection-group.question-complexity-low::before,
+.question-summary-selection-group.question-complexity-medium::before,
+.question-summary-selection-group.question-complexity-high::before {
+  left: calc(-0.85rem - 1px);
+  z-index: 1;
 }
 
 .question-option.question-complexity-low::before,
@@ -1707,7 +1713,6 @@
 .question-summary-selection-group.question-complexity-high::before {
   content: '';
   position: absolute;
-  left: 0;
   top: 0.1rem;
   bottom: 0.1rem;
   width: 3px;
@@ -1749,14 +1754,19 @@
   min-width: 0;
 }
 
+.question-option-label p {
+  margin: 0;
+}
+
 .question-option-implications.question-attached-collapsible {
-  margin-top: 0;
+  margin-top: -0.1rem;
 }
 
 .question-option-implications .question-collapsible-toggle {
   padding: 0;
+  margin: 0;
   font-size: 0.78rem;
-  line-height: 1.25;
+  line-height: 1.15;
 }
 
 .question-collapsible {
@@ -1879,6 +1889,7 @@
   padding: 0.65rem 0.85rem;
   margin-bottom: 0.5rem;
   background: #fafafa;
+  position: relative;
 }
 
 .question-summary-selected,
