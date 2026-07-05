@@ -167,6 +167,7 @@ def test_cancel_active_command_sets_cancelling_state(aws_env):
     )
     poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
     task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    router.dispatch(_event("POST", f"/worker/tasks/{task_name}/command/start"))
 
     cancel = router.dispatch(_event("POST", f"/tasks/{task_name}/commands/cancel"))
     assert cancel["statusCode"] == 204
@@ -330,3 +331,45 @@ def test_worker_upload_bash_stream(aws_env):
     data, total = store.read_stream_from_offset(task_name, "bash", bash_name, 0)
     assert data.decode("utf-8") == "output\n"
     assert total == len(b"output\n")
+
+
+def test_comms_sync_blocks_command_until_worker_pulls(aws_env):
+    router = Router()
+    store = CloudStore()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Sync gate", "environment_id": "env-1", "repo": None},
+        )
+    )
+    task_name = json.loads(router.dispatch(_event("GET", "/tasks"))["body"])["tasks"][0]
+    router.dispatch(_event("POST", f"/worker/tasks/{task_name}/sync", {"push": []}))
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    assert poll["statusCode"] == 200
+    router.dispatch(
+        _event("POST", f"/worker/tasks/{task_name}/command/complete", {"result": {}})
+    )
+    router.dispatch(
+        _event(
+            "POST",
+            f"/tasks/{task_name}/comms/question-answers",
+            {
+                "source": "001-agent-question.md",
+                "answers": [{"id": "q1", "text": "Q?", "selected": "A", "free_text": ""}],
+            },
+        )
+    )
+    router.dispatch(_event("POST", f"/tasks/{task_name}/commands", {"command": "question"}))
+    status = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/commands"))["body"])
+    assert status["command"] == "question"
+    assert status["active"] is False
+    assert status["pending_state"] == "syncing"
+    no_work = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    assert json.loads(no_work["body"])["work"] == []
+    router.dispatch(_event("POST", f"/worker/tasks/{task_name}/sync", {"push": []}))
+    task = store.get_task(task_name)
+    assert task.worker_comms_epoch >= task.comms_cloud_epoch
+    work = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    assert len(json.loads(work["body"])["work"]) == 1

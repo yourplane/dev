@@ -33,6 +33,19 @@ from dev_sdk.stream_sse import SSE_HEADERS, STREAM_MAX_DURATION_SEC, run_task_st
 SUPPORTED_COMMANDS = ("question", "plan-implement", "implement", "do", "bash")
 
 
+def _command_execution_started(active: dict | None) -> bool:
+    return bool(active and active.get("started"))
+
+
+def _task_comms_synced(task: TaskRecord) -> bool:
+    return int(task.worker_comms_epoch or 0) >= int(task.comms_cloud_epoch or 0)
+
+
+def _environment_online(store: CloudStore, environment_id: str) -> bool:
+    env = store.get_environment(environment_id)
+    return bool(env and env.online)
+
+
 def _command_cancelling(active: dict | None) -> bool:
     if not active:
         return False
@@ -106,6 +119,65 @@ def _normalize_path(path: str) -> str:
 class Router:
     def __init__(self, store: CloudStore | None = None) -> None:
         self.store = store or CloudStore()
+
+    def _notify_cloud_comms_changed(self, task_name: str) -> None:
+        self.store.bump_comms_cloud_epoch(task_name)
+
+    def _pending_command_state(self, task: TaskRecord) -> str | None:
+        if not task.queued_command and not task.active_command:
+            return None
+        if _command_execution_started(task.active_command):
+            return None
+        if not _environment_online(self.store, task.environment_id):
+            return "worker_offline"
+        return "syncing"
+
+    def _command_status_body(self, task: TaskRecord) -> dict[str, Any]:
+        active = task.active_command
+        queued = task.queued_command
+        progress = list(task.create_progress or [])
+        pending_state = self._pending_command_state(task)
+        started = _command_execution_started(active)
+        if started and active:
+            return {
+                "active": True,
+                "command": active.get("command"),
+                "active_log_filename": active.get("active_log_filename"),
+                "active_bash_comms_filename": active.get("active_bash_comms_filename"),
+                "command_error": active.get("command_error"),
+                "create_progress": progress,
+                "queued": False,
+                "cancelling": _command_cancelling(active),
+                "pending_state": None,
+            }
+        cmd = None
+        if queued:
+            cmd = queued.get("command")
+        elif active:
+            cmd = active.get("command")
+        if queued or (active and not started):
+            return {
+                "active": False,
+                "command": cmd,
+                "active_log_filename": None,
+                "active_bash_comms_filename": None,
+                "command_error": None,
+                "create_progress": progress,
+                "queued": bool(queued),
+                "cancelling": _command_cancelling(active),
+                "pending_state": pending_state,
+            }
+        return {
+            "active": False,
+            "command": None,
+            "active_log_filename": None,
+            "active_bash_comms_filename": None,
+            "command_error": task.last_command_error,
+            "create_progress": progress,
+            "queued": False,
+            "cancelling": False,
+            "pending_state": None,
+        }
 
     def dispatch(self, event: dict, context: Any = None) -> dict:
         method = event.get("requestContext", {}).get("http", {}).get("method") or event.get("httpMethod", "GET")
@@ -543,6 +615,7 @@ class Router:
             task_name,
             FeedItem(type="comms", id=filename, created_at=ts, deletable=True, origin="cloud"),
         )
+        self._notify_cloud_comms_changed(task_name)
         return _json(201, {"filename": filename})
 
     def post_question_answers(self, event: dict, task_name: str) -> dict:
@@ -570,6 +643,7 @@ class Router:
             task_name,
             FeedItem(type="comms", id=filename, created_at=ts, deletable=True, origin="cloud"),
         )
+        self._notify_cloud_comms_changed(task_name)
         return _json(201, {"filename": filename})
 
     def get_comms_file(self, event: dict, task_name: str, filename: str) -> dict:
@@ -761,50 +835,7 @@ class Router:
         task = self.store.get_task(task_name)
         if not task:
             return _json(404, {"detail": "Task not found"})
-        active = task.active_command
-        queued = task.queued_command
-        progress = list(task.create_progress or [])
-        if active:
-            return _json(
-                200,
-                {
-                    "active": True,
-                    "command": active.get("command"),
-                    "active_log_filename": active.get("active_log_filename"),
-                    "active_bash_comms_filename": active.get("active_bash_comms_filename"),
-                    "command_error": active.get("command_error"),
-                    "create_progress": progress,
-                    "queued": False,
-                    "cancelling": _command_cancelling(active),
-                },
-            )
-        if queued:
-            return _json(
-                200,
-                {
-                    "active": False,
-                    "command": queued.get("command"),
-                    "active_log_filename": None,
-                    "active_bash_comms_filename": None,
-                    "command_error": None,
-                    "create_progress": progress,
-                    "queued": True,
-                    "cancelling": False,
-                },
-            )
-        return _json(
-            200,
-            {
-                "active": False,
-                "command": None,
-                "active_log_filename": None,
-                "active_bash_comms_filename": None,
-                "command_error": task.last_command_error,
-                "create_progress": progress,
-                "queued": False,
-                "cancelling": False,
-            },
-        )
+        return _json(200, self._command_status_body(task))
 
     def start_command(self, event: dict, task_name: str) -> dict:
         task = self.store.get_task(task_name)
@@ -1061,6 +1092,7 @@ class Router:
             task_name,
             FeedItem(type="comms", id=filename, created_at=ts, deletable=False, origin="cloud"),
         )
+        self._notify_cloud_comms_changed(task_name)
         return _json(
             200,
             {"pr_url": pr_url, "new_comments_count": count, "comms_filename": filename},
@@ -1099,6 +1131,9 @@ class Router:
         m = re.match(r"^/worker/tasks/([^/]+)/sync$", path)
         if m and method == "POST":
             return self.worker_sync(event, unquote(m.group(1)))
+        m = re.match(r"^/worker/tasks/([^/]+)/command/start$", path)
+        if m and method == "POST":
+            return self.worker_command_start(event, unquote(m.group(1)))
         m = re.match(r"^/worker/tasks/([^/]+)/command/complete$", path)
         if m and method == "POST":
             return self.worker_command_complete(event, unquote(m.group(1)))
@@ -1132,28 +1167,35 @@ class Router:
                 if new_name != display_name:
                     display_name = self.store.update_environment_display_name(env_id, new_name)
         self.store.prune_stale_duplicates(env_id)
+        claim_work = body.get("claim_work", True)
+        if isinstance(claim_work, str):
+            claim_work = claim_work.lower() not in ("0", "false", "no")
 
         work: list[dict] = []
         deletions: list[dict] = []
+        sync_tasks: list[str] = []
         for task_name in self.store.list_tasks():
             task = self.store.get_task(task_name)
             if not task or task.environment_id != env_id:
                 continue
+            sync_tasks.append(task_name)
             for fi in self.store.list_feed_items(task_name):
                 if fi.delete_status == "delete_pending":
                     deletions.append({"task_name": task_name, "filename": fi.id})
             cmd = None
-            if task.queued_command and not task.active_command:
-                cmd = task.queued_command
-                active = dict(cmd)
-                active["claimed_at"] = time.time()
-                self.store.update_task(
-                    task_name,
-                    active_command=active,
-                    queued_command=None,
-                    create_progress=[],
-                    last_command_error=None,
-                )
+            if claim_work and task.queued_command and not task.active_command:
+                if _environment_online(self.store, env_id) and _task_comms_synced(task):
+                    cmd = task.queued_command
+                    active = dict(cmd)
+                    active["claimed_at"] = time.time()
+                    active["started"] = False
+                    self.store.update_task(
+                        task_name,
+                        active_command=active,
+                        queued_command=None,
+                        create_progress=[],
+                        last_command_error=None,
+                    )
             elif task.active_command and task.active_command.get("cancel_requested"):
                 cmd = {"command": "cancel", "payload": {}}
             if cmd:
@@ -1165,6 +1207,7 @@ class Router:
                 "display_name": display_name,
                 "work": work,
                 "deletions": deletions,
+                "sync_tasks": sync_tasks,
                 "repos": self.store.get_repos(),
                 "bots": self.store.get_bots(),
             },
@@ -1279,7 +1322,18 @@ class Router:
                 content = self.store.get_comms(task_name, fi.id)
                 if content is not None:
                     pull.append({"filename": fi.id, "content": content, "origin": "cloud"})
+        self.store.mark_worker_comms_synced(task_name)
         return _json(200, {"pull": pull})
+
+    def worker_command_start(self, event: dict, task_name: str) -> dict:
+        task = self.store.get_task(task_name)
+        if not task or not task.active_command:
+            return _json(404, {"detail": "No active command"})
+        active = dict(task.active_command)
+        active["started"] = True
+        active["started_at"] = time.time()
+        self.store.update_task(task_name, active_command=active)
+        return _no_content()
 
     def worker_command_complete(self, event: dict, task_name: str) -> dict:
         body = _parse_body(event) or {}

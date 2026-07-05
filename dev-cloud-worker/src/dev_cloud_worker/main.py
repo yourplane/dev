@@ -33,7 +33,7 @@ from dev_sdk.comms import (
 from dev_sdk.task_manager import TaskCancelled, TaskManager
 
 logger = logging.getLogger("dev_cloud_worker")
-POLL_INTERVAL_SEC = float(os.environ.get("DEV_CLOUD_POLL_INTERVAL", "5"))
+POLL_INTERVAL_SEC = float(os.environ.get("DEV_CLOUD_POLL_INTERVAL", "1"))
 CONFIG_DIR = Path.home() / ".config" / "dev-cloud"
 ENV_ID_FILE = CONFIG_DIR / "environment_id"
 DISPLAY_NAME_FILE = CONFIG_DIR / "display_name"
@@ -111,10 +111,14 @@ class WorkerClient:
         self.session = requests.Session()
         self.session.headers["Content-Type"] = "application/json"
 
-    def poll(self) -> dict:
+    def poll(self, *, claim_work: bool = True) -> dict:
         resp = self.session.post(
             f"{self.base}/worker/poll",
-            json={"environment_id": self.env_id, "display_name": _load_display_name()},
+            json={
+                "environment_id": self.env_id,
+                "display_name": _load_display_name(),
+                "claim_work": claim_work,
+            },
             timeout=30,
         )
         resp.raise_for_status()
@@ -169,6 +173,12 @@ class WorkerClient:
             timeout=30,
         ).raise_for_status()
 
+    def command_start(self, task_name: str) -> None:
+        self.session.post(
+            f"{self.base}/worker/tasks/{task_name}/command/start",
+            timeout=10,
+        ).raise_for_status()
+
     def ack_deletion(self, task_name: str, filename: str) -> None:
         self.session.post(
             f"{self.base}/worker/deletions/ack",
@@ -211,6 +221,7 @@ class CommandExecutor:
         cancel_flag = self._cancel_for(task_name)
         cancel_flag.clear()
         try:
+            self.client.command_start(task_name)
             if cmd == "create-task":
                 self._create_task(task_name, payload, cancel_flag)
             elif cmd == "archive":
@@ -414,29 +425,33 @@ class CommandExecutor:
         self._sync_comms(task_name)
 
     def _sync_comms(self, task_name: str) -> None:
-        task_dir = self.tasks_root / task_name
-        if not task_dir.is_dir():
-            return
-        push: list[dict] = []
-        cdir = comms_dir(task_dir)
-        if cdir.is_dir():
-            for filename in read_index(task_dir):
-                fp = cdir / filename
-                if fp.is_file():
-                    push.append(
-                        {
-                            "filename": filename,
-                            "content": fp.read_text(encoding="utf-8", errors="replace"),
-                            "origin": "worker",
-                            "created_at": fp.stat().st_mtime,
-                            "deletable": None,
-                        }
-                    )
-        pull = self.client.sync_push(task_name, push)
-        for item in pull:
-            fp = cdir / item["filename"]
-            fp.parent.mkdir(parents=True, exist_ok=True)
-            fp.write_text(item["content"], encoding="utf-8")
+        sync_task_comms(self.client, self.tasks_root, task_name)
+
+
+def sync_task_comms(client: WorkerClient, tasks_root: Path, task_name: str) -> None:
+    task_dir = tasks_root / task_name
+    if not task_dir.is_dir():
+        return
+    push: list[dict] = []
+    cdir = comms_dir(task_dir)
+    if cdir.is_dir():
+        for filename in read_index(task_dir):
+            fp = cdir / filename
+            if fp.is_file():
+                push.append(
+                    {
+                        "filename": filename,
+                        "content": fp.read_text(encoding="utf-8", errors="replace"),
+                        "origin": "worker",
+                        "created_at": fp.stat().st_mtime,
+                        "deletable": None,
+                    }
+                )
+    pull = client.sync_push(task_name, push)
+    for item in pull:
+        fp = cdir / item["filename"]
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        fp.write_text(item["content"], encoding="utf-8")
 
 
 def run_loop() -> None:
@@ -463,15 +478,21 @@ def run_loop() -> None:
 
     while True:
         try:
-            data = client.poll()
-            for d in data.get("deletions", []):
+            data = client.poll(claim_work=False)
+            for task_name in data.get("sync_tasks", []):
+                try:
+                    sync_task_comms(client, _tasks_root(), task_name)
+                except Exception:
+                    logger.exception("Comms sync failed for %s", task_name)
+            work_data = client.poll(claim_work=True)
+            for d in work_data.get("deletions", []):
                 task_name = d["task_name"]
                 filename = d["filename"]
                 fp = comms_dir(_tasks_root() / task_name) / filename
                 if fp.is_file():
                     fp.unlink()
                 client.ack_deletion(task_name, filename)
-            for item in data.get("work", []):
+            for item in work_data.get("work", []):
                 task_name = item["task_name"]
                 command = item["command"]
                 if command.get("command") == "cancel":

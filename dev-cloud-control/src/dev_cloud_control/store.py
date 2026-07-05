@@ -14,7 +14,7 @@ from typing import Any
 import boto3
 from botocore.exceptions import ClientError
 
-OFFLINE_THRESHOLD_SEC = 30
+OFFLINE_THRESHOLD_SEC = 10
 STREAM_CHUNK_MAX_BYTES = 250_000
 
 
@@ -70,6 +70,8 @@ class TaskRecord:
     queued_command: dict | None = None
     create_progress: list[str] = field(default_factory=list)
     last_command_error: str | None = None
+    comms_cloud_epoch: int = 0
+    worker_comms_epoch: int = 0
 
 
 @dataclass
@@ -226,6 +228,8 @@ class CloudStore:
             "queued_command": record.queued_command,
             "create_progress": record.create_progress,
             "last_command_error": record.last_command_error,
+            "comms_cloud_epoch": record.comms_cloud_epoch,
+            "worker_comms_epoch": record.worker_comms_epoch,
         }
         self._table.put_item(
             Item=_ddb(item),
@@ -283,7 +287,21 @@ class CloudStore:
             queued_command=item.get("queued_command"),
             create_progress=item.get("create_progress") or [],
             last_command_error=item.get("last_command_error"),
+            comms_cloud_epoch=int(item.get("comms_cloud_epoch", 0) or 0),
+            worker_comms_epoch=int(item.get("worker_comms_epoch", 0) or 0),
         )
+
+    def bump_comms_cloud_epoch(self, task_name: str) -> int:
+        task = self.get_task(task_name)
+        epoch = (task.comms_cloud_epoch if task else 0) + 1
+        self.update_task(task_name, comms_cloud_epoch=epoch)
+        return epoch
+
+    def mark_worker_comms_synced(self, task_name: str) -> None:
+        task = self.get_task(task_name)
+        if not task:
+            return
+        self.update_task(task_name, worker_comms_epoch=task.comms_cloud_epoch)
 
     # --- config ---
 

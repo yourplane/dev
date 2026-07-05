@@ -606,6 +606,7 @@ export const api = {
     create_progress?: string[];
     queued?: boolean;
     cancelling?: boolean;
+    pending_state?: 'syncing' | 'worker_offline' | null;
   }> {
     return request(`/tasks/${encodeURIComponent(taskName)}/commands`);
   },

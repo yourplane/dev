@@ -1594,7 +1594,8 @@ export function TaskCommsPageContent({
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
-  const [commandQueued, setCommandQueued] = useState(false)
+  const [pendingCommand, setPendingCommand] = useState<string | null>(null)
+  const [pendingCommandState, setPendingCommandState] = useState<'syncing' | 'worker_offline' | null>(null)
   const [createProgress, setCreateProgress] = useState<string[]>([])
   const [activeLogFilename, setActiveLogFilename] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
@@ -1761,17 +1762,18 @@ export function TaskCommsPageContent({
   const loadCommandStatus = useCallback(async () => {
     try {
       const res = await api.getTaskCommandStatus(taskName)
-      const pending = Boolean(res.command && (res.active || res.queued))
-      const nextActive = pending ? res.command : null
-      setActiveCommand(nextActive)
-      setCommandQueued(Boolean(res.queued))
+      const running = Boolean(res.active && res.command)
+      const pending = Boolean(!res.active && res.command)
+      setActiveCommand(running ? res.command : null)
+      setPendingCommand(pending ? res.command : null)
+      setPendingCommandState(pending ? (res.pending_state ?? 'syncing') : null)
       setCreateProgress(res.create_progress ?? [])
       setCancelling(Boolean(res.cancelling))
       setActiveLogFilename(res.active && res.active_log_filename ? res.active_log_filename : null)
       setActiveBashCommsFilename(
         res.active && res.active_bash_comms_filename ? res.active_bash_comms_filename : null,
       )
-      if (pending) {
+      if (running || pending) {
         setCommandError(null)
       } else if (res.command_error) {
         setCommandError(res.command_error)
@@ -2023,7 +2025,7 @@ export function TaskCommsPageContent({
   useEffect(() => {
     const interval = setInterval(() => {
       if (tabVisibleRef.current) loadCommandStatus()
-    }, 3000)
+    }, 1000)
     return () => clearInterval(interval)
   }, [loadCommandStatus])
 
@@ -2043,6 +2045,8 @@ export function TaskCommsPageContent({
     window.addEventListener('pageshow', onPageShow)
     return () => window.removeEventListener('pageshow', onPageShow)
   }, [])
+
+  const commandInFlight = activeCommand ?? pendingCommand
 
   useEffect(() => {
     if (prevActiveCommandRef.current !== null && activeCommand === null) {
@@ -2618,11 +2622,34 @@ export function TaskCommsPageContent({
                 {cancelling ? 'Cancelling…' : 'Cancel'}
               </button>
             </div>
-            {activeCommand === 'create-task' && (createProgress.length > 0 || cancelling || commandQueued) && (
+            {activeCommand === 'create-task' && createProgress.length > 0 && (
               <ul className="create-task-progress-list" aria-live="polite">
-                {commandQueued && createProgress.length === 0 && !cancelling && (
-                  <li key="__queued__">Waiting for environment worker…</li>
-                )}
+                {createProgress.map((msg, i) => (
+                  <li key={`${i}-${msg}`}>{msg}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        ) : pendingCommand ? (
+          <div className="command-status-block">
+            <div className="command-status-row">
+              <p className="command-status">
+                <span className="command-spinner" aria-hidden />{' '}
+                {pendingCommandState === 'worker_offline'
+                  ? 'Worker offline — command queued'
+                  : 'Syncing to worker…'}
+              </p>
+              <button
+                type="button"
+                className="command-btn command-cancel-btn"
+                disabled={cancelling}
+                onClick={handleCancelCommand}
+              >
+                Cancel
+              </button>
+            </div>
+            {pendingCommand === 'create-task' && createProgress.length > 0 && (
+              <ul className="create-task-progress-list" aria-live="polite">
                 {createProgress.map((msg, i) => (
                   <li key={`${i}-${msg}`}>{msg}</li>
                 ))}
@@ -2671,7 +2698,7 @@ export function TaskCommsPageContent({
               type="button"
               className={`comms-entry-mode-btn${entryMode === 'prompt' ? ' comms-entry-mode-btn-active' : ''}`}
               onClick={() => setEntryMode('prompt')}
-              disabled={!!activeCommand}
+              disabled={!!commandInFlight}
             >
               Prompt
             </button>
@@ -2679,7 +2706,7 @@ export function TaskCommsPageContent({
               type="button"
               className={`comms-entry-mode-btn${entryMode === 'bash' ? ' comms-entry-mode-btn-active' : ''}`}
               onClick={() => setEntryMode('bash')}
-              disabled={!!activeCommand}
+              disabled={!!commandInFlight}
             >
               Bash
             </button>
@@ -2708,7 +2735,7 @@ export function TaskCommsPageContent({
             onChange={(e) => setCommentText(e.target.value)}
             placeholder="Write a comment…"
             rows={3}
-            disabled={posting || !!activeCommand}
+            disabled={posting || !!commandInFlight}
           />
         ) : (
           <>
@@ -2720,7 +2747,7 @@ export function TaskCommsPageContent({
                 className="comms-bash-history-select"
                 aria-label="Insert a recent bash command"
                 value={bashHistoryPicker}
-                disabled={bashHistory.length === 0 || !!activeCommand || !!startingCommand}
+                disabled={bashHistory.length === 0 || !!commandInFlight || !!startingCommand}
                 onChange={(e) => {
                   const v = e.target.value
                   setBashHistoryPicker('')
@@ -2748,7 +2775,7 @@ export function TaskCommsPageContent({
                 className="comms-bash-history-arrow"
                 aria-label="Older bash command"
                 title="Older command"
-                disabled={bashHistory.length === 0 || !!activeCommand || !!startingCommand}
+                disabled={bashHistory.length === 0 || !!commandInFlight || !!startingCommand}
                 onClick={bashHistoryOlder}
               >
                 ↑
@@ -2758,7 +2785,7 @@ export function TaskCommsPageContent({
                 className="comms-bash-history-arrow"
                 aria-label="Newer bash command"
                 title="Newer command"
-                disabled={bashHistoryBrowseIdx === null || !!activeCommand || !!startingCommand}
+                disabled={bashHistoryBrowseIdx === null || !!commandInFlight || !!startingCommand}
                 onClick={bashHistoryNewer}
               >
                 ↓
@@ -2773,7 +2800,7 @@ export function TaskCommsPageContent({
               }}
               placeholder="$ "
               rows={4}
-              disabled={!!activeCommand || !!startingCommand}
+              disabled={!!commandInFlight || !!startingCommand}
               spellCheck={false}
               autoCapitalize="none"
               autoCorrect="off"
@@ -2787,8 +2814,8 @@ export function TaskCommsPageContent({
             type="submit"
             disabled={
               entryMode === 'prompt'
-                ? posting || !commentText.trim() || !!activeCommand
-                : !shellInput.trim() || !!startingCommand || !!activeCommand
+                ? posting || !commentText.trim() || !!commandInFlight
+                : !shellInput.trim() || !!startingCommand || !!commandInFlight
             }
           >
             {entryMode === 'prompt'
@@ -2799,7 +2826,7 @@ export function TaskCommsPageContent({
             <button
               type="button"
               className="do-btn command-btn"
-              disabled={posting || !commentText.trim() || !!startingCommand || !!activeCommand}
+              disabled={posting || !commentText.trim() || !!startingCommand || !!commandInFlight}
               onClick={handleDoFromComment}
             >
               {startingCommand === 'do' ? 'Starting…' : 'Do'}
