@@ -448,7 +448,9 @@ def sync_task_comms(client: WorkerClient, tasks_root: Path, task_name: str) -> N
                     }
                 )
     pull = client.sync_push(task_name, push)
-    for item in pull:
+    non_index = [item for item in pull if item.get("filename") != "index.txt"]
+    index_items = [item for item in pull if item.get("filename") == "index.txt"]
+    for item in non_index + index_items:
         fp = cdir / item["filename"]
         fp.parent.mkdir(parents=True, exist_ok=True)
         fp.write_text(item["content"], encoding="utf-8")

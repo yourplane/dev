@@ -92,7 +92,9 @@ fi
 export PATH="$HOME/.local/bin:$PATH"
 
 log "Cloning $DEV_REPO_URL (branch $DEV_REPO_BRANCH) to $HOME_DEV"
+git config --global --add safe.directory "$HOME_DEV" 2>/dev/null || true
 git clone --branch "$DEV_REPO_BRANCH" --depth 1 "$DEV_REPO_URL" "$HOME_DEV"
+git config --global --add safe.directory "$HOME_DEV"
 
 mkdir -p "$DEV_TASKS_ROOT"
 

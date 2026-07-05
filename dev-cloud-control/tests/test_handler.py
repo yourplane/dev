@@ -373,3 +373,37 @@ def test_comms_sync_blocks_command_until_worker_pulls(aws_env):
     assert task.worker_comms_epoch >= task.comms_cloud_epoch
     work = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
     assert len(json.loads(work["body"])["work"]) == 1
+
+
+def test_worker_sync_pulls_comms_index(aws_env):
+    router = Router()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Index sync", "environment_id": "env-1", "repo": None},
+        )
+    )
+    task_name = json.loads(router.dispatch(_event("GET", "/tasks"))["body"])["tasks"][0]
+    router.dispatch(_event("POST", f"/worker/tasks/{task_name}/sync", {"push": []}))
+    answers_resp = router.dispatch(
+        _event(
+            "POST",
+            f"/tasks/{task_name}/comms/question-answers",
+            {
+                "source": "001-agent-question.md",
+                "answers": [{"id": "q1", "text": "Q?", "selected": "A", "free_text": ""}],
+            },
+        )
+    )
+    answers_filename = json.loads(answers_resp["body"])["filename"]
+    sync = json.loads(
+        router.dispatch(_event("POST", f"/worker/tasks/{task_name}/sync", {"push": []}))["body"]
+    )
+    pull = sync["pull"]
+    pulled_names = {p["filename"] for p in pull}
+    assert answers_filename in pulled_names
+    index_item = next((p for p in pull if p["filename"] == "index.txt"), None)
+    assert index_item is not None
+    assert answers_filename in index_item["content"]

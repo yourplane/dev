@@ -1322,6 +1322,9 @@ class Router:
                 content = self.store.get_comms(task_name, fi.id)
                 if content is not None:
                     pull.append({"filename": fi.id, "content": content, "origin": "cloud"})
+        index_raw = self.store.get_comms(task_name, "index.txt")
+        if index_raw is not None:
+            pull.append({"filename": "index.txt", "content": index_raw, "origin": "cloud"})
         self.store.mark_worker_comms_synced(task_name)
         return _json(200, {"pull": pull})
 
