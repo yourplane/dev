@@ -13,7 +13,11 @@ vi.mock('./api', () => ({
 const payload = {
   intro: 'Please answer',
   questions: [
-    { id: 'q1', text: 'Which database?', options: ['Postgres', 'SQLite'] },
+    {
+      id: 'q1',
+      text: 'Which database?',
+      options: [{ label: 'Postgres' }, { label: 'SQLite' }],
+    },
   ],
 }
 
@@ -135,6 +139,64 @@ describe('QuestionAnswerForm', () => {
         '002-agent-question.md',
         expect.objectContaining({ editing: true, selections: { q1: 'Postgres' } }),
       )
+    })
+  })
+
+  it('shows rationale and implications collapsibles for enriched questions', async () => {
+    render(
+      <QuestionAnswerForm
+        taskName="t"
+        sourceFilename="002-agent-question.md"
+        payload={{
+          intro: 'Consider tradeoffs',
+          questions: [{
+            id: 'q1',
+            text: 'Which approach?',
+            rationale: 'This affects service boundaries.',
+            options: [
+              { label: 'Monolith', complexity: 'low' },
+              {
+                label: 'Microservices',
+                complexity: 'high',
+                implications: 'Adds deployment and observability overhead.',
+              },
+            ],
+          }],
+        }}
+        persistedAnswers={null}
+      />,
+    )
+    expect(screen.getByText('Why am I asking this?')).toBeInTheDocument()
+    expect(screen.getByText('Low complexity')).toBeInTheDocument()
+    expect(screen.getByText('High complexity')).toBeInTheDocument()
+    expect(screen.getAllByText('Implications')).toHaveLength(1)
+  })
+
+  it('keeps rationale and implications visible in locked summary', async () => {
+    render(
+      <QuestionAnswerForm
+        taskName="t"
+        sourceFilename="002-agent-question.md"
+        payload={{
+          intro: '',
+          questions: [{
+            id: 'q1',
+            text: 'Which approach?',
+            rationale: 'Boundary choice.',
+            options: [{
+              label: 'Microservices',
+              complexity: 'high',
+              implications: 'More moving parts.',
+            }],
+          }],
+        }}
+        persistedAnswers={{ selections: { q1: 'Microservices' }, freeText: {} }}
+      />,
+    )
+    await waitFor(() => {
+      expect(screen.getByText('Why am I asking this?')).toBeInTheDocument()
+      expect(screen.getByText('High complexity')).toBeInTheDocument()
+      expect(screen.getByText('Implications')).toBeInTheDocument()
     })
   })
 })

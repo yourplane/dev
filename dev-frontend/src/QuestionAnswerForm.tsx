@@ -3,12 +3,15 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from './api'
 import {
+  complexityLabel,
   draftIndicatesEditing,
+  findOptionByLabel,
   hasAnyAnswer,
   submittedAnswersEqual,
   submittedAnswersSignature,
   type QuestionAnswersDraft,
   type QuestionItem,
+  type QuestionOption,
   type QuestionPayload,
   type SubmittedAnswers,
 } from './questionForm'
@@ -30,6 +33,39 @@ function MarkdownInline({ children }: { children: string }) {
 }
 
 export type { SubmittedAnswers }
+
+function CollapsibleSection({
+  label,
+  children,
+  defaultExpanded = false,
+}: {
+  label: string
+  children: React.ReactNode
+  defaultExpanded?: boolean
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded)
+  return (
+    <div className="question-collapsible">
+      <button
+        type="button"
+        className="question-collapsible-toggle"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((prev) => !prev)}
+      >
+        {label}
+      </button>
+      {expanded ? <div className="question-collapsible-body">{children}</div> : null}
+    </div>
+  )
+}
+
+function ComplexityBadge({ level }: { level: NonNullable<QuestionOption['complexity']> }) {
+  return (
+    <span className={`question-complexity-badge question-complexity-${level}`}>
+      {complexityLabel(level)}
+    </span>
+  )
+}
 
 export function QuestionAnswerForm({
   taskName,
@@ -278,6 +314,11 @@ function QuestionField({
       <legend className="question-text">
         <MarkdownInline>{question.text}</MarkdownInline>
       </legend>
+      {question.rationale?.trim() ? (
+        <CollapsibleSection label="Why am I asking this?">
+          <MarkdownInline>{question.rationale}</MarkdownInline>
+        </CollapsibleSection>
+      ) : null}
       {question.options.length > 0 ? (
         <div className="question-options" role="radiogroup" aria-label={question.text}>
           {question.options.map((option, i) => (
@@ -285,12 +326,22 @@ function QuestionField({
               <input
                 type="radio"
                 name={`question-${qid}`}
-                value={option}
-                checked={selected === option}
-                onChange={() => onSelect(option)}
+                value={option.label}
+                checked={selected === option.label}
+                onChange={() => onSelect(option.label)}
               />
-              <span className="question-option-label">
-                <MarkdownInline>{option}</MarkdownInline>
+              <span className="question-option-content">
+                <span className="question-option-label-row">
+                  <span className="question-option-label">
+                    <MarkdownInline>{option.label}</MarkdownInline>
+                  </span>
+                  {option.complexity ? <ComplexityBadge level={option.complexity} /> : null}
+                </span>
+                {option.implications?.trim() ? (
+                  <CollapsibleSection label="Implications">
+                    <MarkdownInline>{option.implications}</MarkdownInline>
+                  </CollapsibleSection>
+                ) : null}
               </span>
             </label>
           ))}
@@ -326,17 +377,33 @@ function QuestionSummary({
 }) {
   const hasSelected = selected.trim().length > 0
   const hasNotes = freeText.trim().length > 0
+  const selectedOption = hasSelected ? findOptionByLabel(question.options, selected) : undefined
   if (!hasSelected && !hasNotes) return null
   return (
     <div className="question-summary-item">
       <div className="question-summary-text">
         <MarkdownInline>{question.text}</MarkdownInline>
       </div>
+      {question.rationale?.trim() ? (
+        <CollapsibleSection label="Why am I asking this?">
+          <MarkdownInline>{question.rationale}</MarkdownInline>
+        </CollapsibleSection>
+      ) : null}
       {hasSelected ? (
-        <p className="question-summary-selected">
+        <div className="question-summary-selected">
           <strong>Selected:</strong>{' '}
-          <MarkdownInline>{selected}</MarkdownInline>
-        </p>
+          <span className="question-summary-selected-label">
+            <MarkdownInline>{selected}</MarkdownInline>
+          </span>
+          {selectedOption?.complexity ? (
+            <ComplexityBadge level={selectedOption.complexity} />
+          ) : null}
+          {selectedOption?.implications?.trim() ? (
+            <CollapsibleSection label="Implications">
+              <MarkdownInline>{selectedOption.implications}</MarkdownInline>
+            </CollapsibleSection>
+          ) : null}
+        </div>
       ) : null}
       {hasNotes ? (
         <div className="question-summary-notes">
