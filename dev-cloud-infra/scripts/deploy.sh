@@ -53,6 +53,7 @@ fetch_stack_outputs() {
 if [[ "$DEPLOY_BACKEND" -eq 1 ]]; then
   log "Packaging Lambda bundle"
   "$SCRIPT_DIR/package-lambda.sh"
+  "$SCRIPT_DIR/package-stream-lambda.sh"
 
   log "Migrating S3 agent logs to DynamoDB streams (blocking)"
   (

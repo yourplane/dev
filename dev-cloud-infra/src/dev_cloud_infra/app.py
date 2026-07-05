@@ -10,6 +10,7 @@ from aws_cdk import (
     Duration,
     RemovalPolicy,
     Stack,
+    aws_apigateway as apigateway,
     aws_apigatewayv2 as apigwv2,
     aws_apigatewayv2_integrations as apigwv2_integrations,
     aws_apigatewayv2_authorizers as apigwv2_auth,
@@ -135,6 +136,50 @@ class DevCloudStack(Stack):
             integration=integration,
         )
 
+        # True SSE requires REST API response streaming (HTTP APIs buffer only).
+        # Node.js supports native Lambda response streaming; Python does not without LWA.
+        stream_fn = lambda_.Function(
+            self,
+            "DevCloudStreamApi",
+            runtime=lambda_.Runtime.NODEJS_20_X,
+            handler="index.handler",
+            code=lambda_.Code.from_asset(
+                os.path.join(os.path.dirname(__file__), "..", "..", "dist", "stream-lambda"),
+            ),
+            timeout=Duration.minutes(5),
+            memory_size=256,
+            environment={"DEV_CLOUD_TABLE": table.table_name},
+        )
+        table.grant_read_data(stream_fn)
+
+        stream_rest_api = apigateway.RestApi(
+            self,
+            "DevCloudStreamRestApi",
+            rest_api_name="dev-cloud-stream",
+            deploy_options=apigateway.StageOptions(stage_name="prod"),
+            default_cors_preflight_options=apigateway.CorsOptions(
+                allow_origins=apigateway.Cors.ALL_ORIGINS,
+                allow_methods=["GET", "OPTIONS"],
+                allow_headers=["Content-Type", "Authorization"],
+            ),
+        )
+        stream_authorizer = apigateway.CognitoUserPoolsAuthorizer(
+            self,
+            "StreamRestAuthorizer",
+            cognito_user_pools=[user_pool],
+        )
+        stream_integration = apigateway.LambdaIntegration(
+            stream_fn,
+            proxy=True,
+            response_transfer_mode=apigateway.ResponseTransferMode.STREAM,
+        )
+        stream_rest_api.root.add_resource("tasks").add_resource("{task_name}").add_resource("stream").add_method(
+            "GET",
+            stream_integration,
+            authorizer=stream_authorizer,
+            authorization_type=apigateway.AuthorizationType.COGNITO,
+        )
+
         spa_bucket = s3.Bucket(
             self,
             "DevCloudSpaBucket",
@@ -148,6 +193,13 @@ class DevCloudStack(Stack):
         api_origin = origins.HttpOrigin(
             api_domain.replace("https://", "").rstrip("/"),
             origin_path="/",
+        )
+        stream_origin = origins.HttpOrigin(
+            f"{stream_rest_api.rest_api_id}.execute-api.{self.region}.amazonaws.com",
+            origin_path="/prod",
+            read_timeout=Duration.seconds(30),
+            response_completion_timeout=Duration.seconds(180),
+            origin_id="DevCloudStreamRestApi",
         )
         api_rewrite_fn = cloudfront.Function(
             self,
@@ -177,6 +229,19 @@ function handler(event) {
                 viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
             ),
             additional_behaviors={
+                "/api/tasks/*/stream": cloudfront.BehaviorOptions(
+                    origin=stream_origin,
+                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                    allowed_methods=cloudfront.AllowedMethods.ALLOW_GET_HEAD_OPTIONS,
+                    cache_policy=cloudfront.CachePolicy.CACHING_DISABLED,
+                    origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+                    function_associations=[
+                        cloudfront.FunctionAssociation(
+                            function=api_rewrite_fn,
+                            event_type=cloudfront.FunctionEventType.VIEWER_REQUEST,
+                        )
+                    ],
+                ),
                 "/api/*": cloudfront.BehaviorOptions(
                     origin=api_origin,
                     viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
