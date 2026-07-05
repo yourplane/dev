@@ -882,8 +882,14 @@
   }
 
   .task-comms-scroll-buttons {
-    right: 0.5rem;
+    left: 0.5rem;
+    right: auto;
   }
+}
+
+[data-feed-nav-type='header'],
+[data-feed-nav-type='segment'] {
+  scroll-margin-top: 0.75rem;
 }
 
 .comms-history {
