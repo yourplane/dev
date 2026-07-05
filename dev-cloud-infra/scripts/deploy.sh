@@ -54,6 +54,22 @@ if [[ "$DEPLOY_BACKEND" -eq 1 ]]; then
   log "Packaging Lambda bundle"
   "$SCRIPT_DIR/package-lambda.sh"
 
+  log "Migrating S3 agent logs to DynamoDB streams (blocking)"
+  (
+    cd "$REPO_ROOT"
+    DEV_CLOUD_BUCKET="$(aws cloudformation describe-stacks \
+      --region "$REGION" \
+      --stack-name "$STACK_NAME" \
+      --query "Stacks[0].Outputs[?OutputKey=='DataBucketName'].OutputValue | [0]" \
+      --output text 2>/dev/null || true)"
+    if [[ -n "$DEV_CLOUD_BUCKET" && "$DEV_CLOUD_BUCKET" != "None" ]]; then
+      DEV_CLOUD_TABLE=dev-cloud DEV_CLOUD_BUCKET="$DEV_CLOUD_BUCKET" \
+        uv run python "$SCRIPT_DIR/migrate-s3-logs.py" || true
+    else
+      log "Skipping log migration (stack not deployed yet)"
+    fi
+  )
+
   log "Installing CDK app dependencies"
   (
     cd "$REPO_ROOT"

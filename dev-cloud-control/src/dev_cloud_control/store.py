@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import re
@@ -14,6 +15,7 @@ import boto3
 from botocore.exceptions import ClientError
 
 OFFLINE_THRESHOLD_SEC = 30
+STREAM_CHUNK_MAX_BYTES = 250_000
 
 
 def _now() -> Decimal:
@@ -362,7 +364,95 @@ class CloudStore:
                 keys.append(key[len(prefix) :])
         return keys
 
+    def _stream_meta_sk(self, kind: str, stream_id: str) -> str:
+        return f"STREAMMETA#{kind}#{stream_id}"
+
+    def _stream_chunk_prefix(self, kind: str, stream_id: str) -> str:
+        return f"STREAM#{kind}#{stream_id}#"
+
+    def get_stream_size(self, task_name: str, kind: str, stream_id: str) -> int:
+        resp = self._table.get_item(
+            Key={"pk": f"TASK#{task_name}", "sk": self._stream_meta_sk(kind, stream_id)}
+        )
+        item = resp.get("Item")
+        if not item:
+            return 0
+        return int(item.get("total_bytes", 0))
+
+    def append_stream(self, task_name: str, kind: str, stream_id: str, chunk: bytes) -> int:
+        if not chunk:
+            return self.get_stream_size(task_name, kind, stream_id)
+        offset = self.get_stream_size(task_name, kind, stream_id)
+        remaining = chunk
+        pk = f"TASK#{task_name}"
+        while remaining:
+            piece = remaining[:STREAM_CHUNK_MAX_BYTES]
+            remaining = remaining[STREAM_CHUNK_MAX_BYTES:]
+            chunk_sk = f"{self._stream_chunk_prefix(kind, stream_id)}{offset:012d}"
+            self._table.put_item(
+                Item=_ddb(
+                    {
+                        "pk": pk,
+                        "sk": chunk_sk,
+                        "entity": "stream_chunk",
+                        "kind": kind,
+                        "stream_id": stream_id,
+                        "offset": offset,
+                        "size": len(piece),
+                        "data_b64": base64.b64encode(piece).decode("ascii"),
+                    }
+                )
+            )
+            offset += len(piece)
+        self._table.put_item(
+            Item=_ddb(
+                {
+                    "pk": pk,
+                    "sk": self._stream_meta_sk(kind, stream_id),
+                    "entity": "stream_meta",
+                    "kind": kind,
+                    "stream_id": stream_id,
+                    "total_bytes": offset,
+                    "updated_at": time.time(),
+                }
+            )
+        )
+        return offset
+
+    def read_stream_from_offset(
+        self, task_name: str, kind: str, stream_id: str, offset: int
+    ) -> tuple[bytes, int]:
+        total = self.get_stream_size(task_name, kind, stream_id)
+        if offset >= total:
+            return b"", total
+        prefix = self._stream_chunk_prefix(kind, stream_id)
+        resp = self._table.query(
+            KeyConditionExpression="pk = :pk AND begins_with(sk, :pfx)",
+            ExpressionAttributeValues={":pk": f"TASK#{task_name}", ":pfx": prefix},
+        )
+        chunks = sorted(resp.get("Items", []), key=lambda item: item["sk"])
+        buf = bytearray()
+        for item in chunks:
+            start = int(item.get("offset", 0))
+            data = base64.b64decode(str(item.get("data_b64", "")))
+            end = start + len(data)
+            if end <= offset:
+                continue
+            skip = max(0, offset - start)
+            buf.extend(data[skip:])
+        return bytes(buf), total
+
+    def import_stream_from_bytes(
+        self, task_name: str, kind: str, stream_id: str, body: bytes
+    ) -> int:
+        if self.get_stream_size(task_name, kind, stream_id) > 0:
+            return self.get_stream_size(task_name, kind, stream_id)
+        if not body:
+            return 0
+        return self.append_stream(task_name, kind, stream_id, body)
+
     def append_log(self, task_name: str, filename: str, chunk: bytes) -> int:
+        total = self.append_stream(task_name, "log", filename, chunk)
         key = self._log_key(task_name, filename)
         existing = b""
         try:
@@ -371,11 +461,16 @@ class CloudStore:
         except ClientError as e:
             if e.response["Error"]["Code"] != "NoSuchKey":
                 raise
-        body = existing + chunk
-        self._s3.put_object(Bucket=self._bucket, Key=key, Body=body)
-        return len(body)
+        if chunk:
+            self._s3.put_object(Bucket=self._bucket, Key=key, Body=existing + chunk)
+        elif not existing:
+            self._s3.put_object(Bucket=self._bucket, Key=key, Body=b"")
+        return total
 
     def get_log(self, task_name: str, filename: str) -> str:
+        data, _ = self.read_stream_from_offset(task_name, "log", filename, 0)
+        if data:
+            return data.decode("utf-8", errors="replace")
         try:
             resp = self._s3.get_object(Bucket=self._bucket, Key=self._log_key(task_name, filename))
             return resp["Body"].read().decode("utf-8", errors="replace")
@@ -383,6 +478,10 @@ class CloudStore:
             if e.response["Error"]["Code"] == "NoSuchKey":
                 return ""
             raise
+
+    def get_bash_stream(self, task_name: str, filename: str) -> str:
+        data, _ = self.read_stream_from_offset(task_name, "bash", filename, 0)
+        return data.decode("utf-8", errors="replace")
 
     def list_log_keys(self, task_name: str) -> list[str]:
         prefix = f"tasks/{task_name}/logs/"

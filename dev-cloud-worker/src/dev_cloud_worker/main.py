@@ -154,12 +154,18 @@ class WorkerClient:
         resp.raise_for_status()
         return resp.json().get("pull", [])
 
-    def upload_log_chunk(self, task_name: str, filename: str, chunk: bytes) -> None:
+    def upload_log_chunk(
+        self, task_name: str, filename: str, chunk: bytes, *, kind: str = "log"
+    ) -> None:
         import base64
 
         self.session.post(
             f"{self.base}/worker/tasks/{task_name}/logs",
-            json={"filename": filename, "chunk_b64": base64.b64encode(chunk).decode("ascii")},
+            json={
+                "filename": filename,
+                "kind": kind,
+                "chunk_b64": base64.b64encode(chunk).decode("ascii"),
+            },
             timeout=30,
         ).raise_for_status()
 
@@ -366,6 +372,22 @@ class CommandExecutor:
     ) -> None:
         task_dir = self.tasks_root / task_name
         path = begin_streaming_bash_comms(task_dir, shell_command)
+        uploaded_size = {"bytes": 0}
+
+        def upload_bash() -> None:
+            if not path.is_file():
+                return
+            data = path.read_bytes()
+            if len(data) > uploaded_size["bytes"]:
+                self.client.upload_log_chunk(
+                    task_name,
+                    path.name,
+                    data[uploaded_size["bytes"] :],
+                    kind="bash",
+                )
+                uploaded_size["bytes"] = len(data)
+
+        upload_bash()
         proc = subprocess.Popen(
             ["bash", "-c", shell_command],
             cwd=str(task_dir),
@@ -384,9 +406,11 @@ class CommandExecutor:
                 raise TaskCancelled("Cancelled during bash")
             with open(path, "ab") as f:
                 f.write(line)
+            upload_bash()
         proc.wait()
         with open(path, "a", encoding="utf-8") as f:
             f.write(f"\n---\nExit code: {proc.returncode}\n")
+        upload_bash()
         self._sync_comms(task_name)
 
     def _sync_comms(self, task_name: str) -> None:
@@ -420,11 +444,21 @@ def run_loop() -> None:
     _load_cursor_api_key()
     client = WorkerClient()
     executor = CommandExecutor(client)
-    command_lock = threading.Lock()
+    task_locks: dict[str, threading.Lock] = {}
+    task_locks_guard = threading.Lock()
+
+    def task_lock(task_name: str) -> threading.Lock:
+        with task_locks_guard:
+            lock = task_locks.get(task_name)
+            if lock is None:
+                lock = threading.Lock()
+                task_locks[task_name] = lock
+            return lock
+
     logger.info("Worker started env=%s tasks_root=%s", client.env_id, _tasks_root())
 
     def run_command(task_name: str, command: dict) -> None:
-        with command_lock:
+        with task_lock(task_name):
             executor.execute(task_name, command)
 
     while True:

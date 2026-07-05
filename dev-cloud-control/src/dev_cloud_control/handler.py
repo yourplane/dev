@@ -28,6 +28,7 @@ from dev_cloud_control.store import (
     collect_pr_comment_keys,
     next_comms_filename,
 )
+from dev_sdk.stream_sse import SSE_HEADERS, STREAM_MAX_DURATION_SEC, run_task_stream
 
 SUPPORTED_COMMANDS = ("question", "plan-implement", "implement", "do", "bash")
 
@@ -205,6 +206,10 @@ class Router:
         m = re.match(r"^/tasks/([^/]+)/logs/([^/]+)$", path)
         if m and method == "GET":
             return self.get_log_file(event, unquote(m.group(1)), unquote(m.group(2)))
+
+        m = re.match(r"^/tasks/([^/]+)/stream$", path)
+        if m and method == "GET":
+            return self.task_stream(event, unquote(m.group(1)))
 
         m = re.match(r"^/tasks/([^/]+)/logs/stream$", path)
         if m and method == "GET":
@@ -649,24 +654,106 @@ class Router:
     def get_log_file(self, event: dict, task_name: str, filename: str) -> dict:
         return _text(200, self.store.get_log(task_name, filename))
 
-    def log_stream(self, event: dict, task_name: str) -> dict:
+    def _stream_offsets(self, event: dict) -> tuple[int, int]:
+        q = _query(event)
+        try:
+            log_offset = int(q.get("log_offset", ["0"])[0])
+        except ValueError:
+            log_offset = 0
+        try:
+            bash_offset = int(q.get("bash_offset", ["0"])[0])
+        except ValueError:
+            bash_offset = 0
+        return max(0, log_offset), max(0, bash_offset)
+
+    def _task_stream_active(self, task_name: str) -> tuple[dict | None, dict | None]:
         task = self.store.get_task(task_name)
         if not task or not task.active_command:
-            return _text(200, "")
-        log_name = (task.active_command or {}).get("active_log_filename")
+            return None, None
+        active = task.active_command
+        return active, task
+
+    def _read_log_chunk(self, task_name: str, active: dict, offset: int) -> tuple[str, int] | None:
+        log_name = active.get("active_log_filename")
         if not log_name:
-            return _text(200, "")
-        content = self.store.get_log(task_name, log_name)
-        body = f"data: {json.dumps({'chunk': content})}\n\n"
+            return None
+        data, total = self.store.read_stream_from_offset(task_name, "log", log_name, offset)
+        if not data and total <= offset:
+            return "", total
+        return data.decode("utf-8", errors="replace"), total
+
+    def _read_bash_chunk(self, task_name: str, active: dict, offset: int) -> tuple[str, int] | None:
+        bash_name = active.get("active_bash_comms_filename")
+        if not bash_name:
+            return None
+        data, total = self.store.read_stream_from_offset(task_name, "bash", bash_name, offset)
+        if not data and total <= offset:
+            return "", total
+        return data.decode("utf-8", errors="replace"), total
+
+    def _stream_max_duration(self, event: dict) -> float:
+        q = _query(event)
+        try:
+            val = float(q.get("stream_duration", [str(STREAM_MAX_DURATION_SEC)])[0])
+        except ValueError:
+            val = STREAM_MAX_DURATION_SEC
+        return min(STREAM_MAX_DURATION_SEC, max(0.5, val))
+
+    def run_task_stream_sse(
+        self,
+        task_name: str,
+        log_offset: int,
+        bash_offset: int,
+        write: Any,
+        *,
+        max_duration_sec: float | None = None,
+    ) -> tuple[int, int]:
+        def is_active() -> bool:
+            active, _task = self._task_stream_active(task_name)
+            return active is not None
+
+        def read_log(offset: int) -> tuple[str, int] | None:
+            active, _task = self._task_stream_active(task_name)
+            if not active:
+                return None
+            return self._read_log_chunk(task_name, active, offset)
+
+        def read_bash(offset: int) -> tuple[str, int] | None:
+            active, _task = self._task_stream_active(task_name)
+            if not active:
+                return None
+            return self._read_bash_chunk(task_name, active, offset)
+
+        return run_task_stream(
+            log_offset=log_offset,
+            bash_offset=bash_offset,
+            read_log=read_log,
+            read_bash=read_bash,
+            is_active=is_active,
+            write=write,
+            max_duration_sec=max_duration_sec or STREAM_MAX_DURATION_SEC,
+        )
+
+    def task_stream(self, event: dict, task_name: str) -> dict:
+        log_offset, bash_offset = self._stream_offsets(event)
+        max_duration = self._stream_max_duration(event)
+        parts: list[str] = []
+
+        def write(chunk: str) -> None:
+            parts.append(chunk)
+
+        self.run_task_stream_sse(
+            task_name, log_offset, bash_offset, write, max_duration_sec=max_duration
+        )
         return {
             "statusCode": 200,
-            "headers": {
-                "Content-Type": "text/event-stream",
-                "Cache-Control": "no-cache",
-                "Access-Control-Allow-Origin": "*",
-            },
-            "body": body,
+            "headers": dict(SSE_HEADERS),
+            "body": "".join(parts),
         }
+
+    def log_stream(self, event: dict, task_name: str) -> dict:
+        """Legacy alias: multiplexed stream with bash offset pinned at zero."""
+        return self.task_stream(event, task_name)
 
     # --- commands ---
 
@@ -1113,8 +1200,10 @@ class Router:
         data = _parse_body(event)
         filename = ""
         chunk = b""
+        kind = "log"
         if isinstance(data, dict):
             filename = str(data.get("filename") or "")
+            kind = str(data.get("kind") or "log")
             chunk_b64 = data.get("chunk_b64")
             if chunk_b64:
                 chunk = base64.b64decode(chunk_b64)
@@ -1128,13 +1217,22 @@ class Router:
                 chunk = body or b""
         if not filename:
             return _json(400, {"detail": "filename required"})
-        self.store.append_log(task_name, filename, chunk)
+        if kind not in ("log", "bash"):
+            return _json(400, {"detail": "kind must be log or bash"})
+        if kind == "log":
+            self.store.append_log(task_name, filename, chunk)
+            field = "active_log_filename"
+            feed_type = "log"
+        else:
+            self.store.append_stream(task_name, "bash", filename, chunk)
+            field = "active_bash_comms_filename"
+            feed_type = None
         task = self.store.get_task(task_name)
         if task and task.active_command:
             active = dict(task.active_command)
-            active["active_log_filename"] = filename
+            active[field] = filename
             self.store.update_task(task_name, active_command=active)
-        if not self._feed_has_log(task_name, filename):
+        if feed_type == "log" and not self._feed_has_log(task_name, filename):
             self.store.put_feed_item(
                 task_name,
                 FeedItem(type="log", id=filename, created_at=time.time(), origin="worker"),
@@ -1239,6 +1337,52 @@ class Router:
 
 
 _router: Router | None = None
+
+
+def _http_path(event: dict) -> str:
+    return event.get("rawPath") or event.get("requestContext", {}).get("http", {}).get("path", "")
+
+
+def _http_method(event: dict) -> str:
+    return (event.get("requestContext", {}).get("http", {}) or {}).get("method", "GET")
+
+
+def is_stream_request(event: dict) -> bool:
+    return _http_method(event) == "GET" and _http_path(event).endswith("/stream")
+
+
+def handle_stream_request(event: dict, response_stream: Any, context: Any = None) -> None:
+    global _router
+    if _router is None:
+        _router = Router()
+    m = re.match(r"^/tasks/([^/]+)/stream$", _http_path(event))
+    if not m:
+        metadata = {"statusCode": 404, "headers": {"Content-Type": "text/plain"}}
+        try:
+            import awslambda
+
+            awslambda.http.set_response_stream(response_stream, metadata)
+        except ImportError:
+            pass
+        response_stream.write(b"Not found")
+        return
+    task_name = unquote(m.group(1))
+    log_offset, bash_offset = _router._stream_offsets(event)
+    max_duration = _router._stream_max_duration(event)
+
+    try:
+        import awslambda
+
+        awslambda.http.set_response_stream(response_stream, {"statusCode": 200, "headers": SSE_HEADERS})
+    except ImportError:
+        pass
+
+    def write(chunk: str) -> None:
+        response_stream.write(chunk.encode("utf-8"))
+
+    _router.run_task_stream_sse(
+        task_name, log_offset, bash_offset, write, max_duration_sec=max_duration
+    )
 
 
 def handle_request(event: dict, context: Any = None) -> dict:

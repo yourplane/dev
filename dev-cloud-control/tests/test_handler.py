@@ -47,11 +47,11 @@ def aws_env():
         yield
 
 
-def _event(method: str, path: str, body: dict | None = None) -> dict:
+def _event(method: str, path: str, body: dict | None = None, *, query: str = "") -> dict:
     ev = {
         "requestContext": {"http": {"method": method}},
         "rawPath": f"/api{path}",
-        "rawQueryString": "",
+        "rawQueryString": query,
     }
     if body is not None:
         ev["body"] = json.dumps(body)
@@ -266,3 +266,67 @@ def test_worker_upload_log_empty_chunk_registers_feed(aws_env):
     assert resp2["statusCode"] == 204
     content = store.get_log(task_name, log_name)
     assert content == "line1\n"
+
+
+def test_task_stream_emits_log_and_reconnect(aws_env):
+    import base64
+
+    router = Router()
+    store = CloudStore()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Stream test", "environment_id": "env-1", "repo": None},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    log_name = "dev-question-stream-20260703-161500.log"
+    router.dispatch(
+        _event(
+            "POST",
+            f"/worker/tasks/{task_name}/logs",
+            {"filename": log_name, "chunk_b64": base64.b64encode(b"live\n").decode("ascii")},
+        )
+    )
+    ev = _event("GET", f"/tasks/{task_name}/stream", query="stream_duration=0.5")
+    resp = router.dispatch(ev)
+    assert resp["statusCode"] == 200
+    assert resp["headers"]["Content-Type"] == "text/event-stream"
+    assert "event: log" in resp["body"]
+    assert "live" in resp["body"]
+    assert "event: reconnect" in resp["body"]
+
+
+def test_worker_upload_bash_stream(aws_env):
+    import base64
+
+    router = Router()
+    store = CloudStore()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Bash stream", "environment_id": "env-1", "repo": None},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    bash_name = "001-user-bash.md"
+    router.dispatch(
+        _event(
+            "POST",
+            f"/worker/tasks/{task_name}/logs",
+            {
+                "filename": bash_name,
+                "kind": "bash",
+                "chunk_b64": base64.b64encode(b"output\n").decode("ascii"),
+            },
+        )
+    )
+    data, total = store.read_stream_from_offset(task_name, "bash", bash_name, 0)
+    assert data.decode("utf-8") == "output\n"
+    assert total == len(b"output\n")

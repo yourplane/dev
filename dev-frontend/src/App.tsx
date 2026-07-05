@@ -2074,45 +2074,29 @@ export function TaskCommsPageContent({
     }
   }, [activeCommand, activeBashCommsFilename, pollFeedIncremental])
 
-  // Stream the active log via SSE while command is running
+  // Stream active agent log and bash comms via multiplexed SSE while command is running
   useEffect(() => {
-    if (!activeCommand || !activeLogFilename) return
-    const es = api.openTaskLogStream(taskName)
-    es.onmessage = (e: MessageEvent) => {
-      const data = e.data != null ? String(e.data) : ''
-      setContents((prev) => ({
-        ...prev,
-        [activeLogFilename]: (prev[activeLogFilename] ?? '') + data + (data && !data.endsWith('\n') ? '\n' : ''),
-      }))
-    }
-    es.onerror = () => {
-      es.close()
-    }
+    if (!activeCommand) return
+    const stream = api.connectTaskStream(taskName, {
+      onLog: (chunk) => {
+        if (!activeLogFilename) return
+        setContents((prev) => ({
+          ...prev,
+          [activeLogFilename]: (prev[activeLogFilename] ?? '') + chunk,
+        }))
+      },
+      onBash: (chunk) => {
+        if (!activeBashCommsFilename) return
+        setContents((prev) => ({
+          ...prev,
+          [activeBashCommsFilename]: (prev[activeBashCommsFilename] ?? '') + chunk,
+        }))
+      },
+    })
     return () => {
-      es.close()
+      stream.close()
     }
-  }, [taskName, activeCommand, activeLogFilename])
-
-  useEffect(() => {
-    if (!activeCommand || !activeBashCommsFilename) return
-    if (activeCommand !== 'bash' && activeCommand !== 'merge-from-main') return
-    let cancelled = false
-    const poll = async () => {
-      try {
-        const text = await api.getTaskCommsFile(taskName, activeBashCommsFilename)
-        if (cancelled) return
-        setContents((prev) => ({ ...prev, [activeBashCommsFilename]: text }))
-      } catch {
-        // ignore while the file is still being created
-      }
-    }
-    void poll()
-    const id = setInterval(poll, 550)
-    return () => {
-      cancelled = true
-      clearInterval(id)
-    }
-  }, [taskName, activeCommand, activeBashCommsFilename])
+  }, [taskName, activeCommand, activeLogFilename, activeBashCommsFilename])
 
   const handleStartCommand = async (command: string) => {
     setCommandError(null)

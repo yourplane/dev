@@ -21,6 +21,145 @@ async function cloudAuthFetch(url: string, init?: RequestInit): Promise<Response
   });
 }
 
+const TASK_STREAM_MAX_MS = 165_000;
+const TASK_STREAM_HEARTBEAT_MISS_MS = 5_000;
+
+export interface TaskStreamCallbacks {
+  onLog?: (chunk: string, offset: number) => void;
+  onBash?: (chunk: string, offset: number) => void;
+}
+
+export interface TaskStreamHandle {
+  close: () => void;
+}
+
+function parseSseBlock(block: string): { event: string; data: string } {
+  let event = 'message';
+  const dataLines: string[] = [];
+  for (const line of block.split('\n')) {
+    if (line.startsWith('event:')) event = line.slice(6).trim();
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+  }
+  return { event, data: dataLines.join('\n') };
+}
+
+export function connectTaskStream(
+  taskName: string,
+  callbacks: TaskStreamCallbacks,
+  initialOffsets?: { log_offset?: number; bash_offset?: number },
+): TaskStreamHandle {
+  let closed = false;
+  let logOffset = initialOffsets?.log_offset ?? 0;
+  let bashOffset = initialOffsets?.bash_offset ?? 0;
+  let abortController: AbortController | null = null;
+  let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastHeartbeat = Date.now();
+
+  const clearTimers = () => {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = undefined;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
+  };
+
+  const handleEvent = (type: string, data: string) => {
+    if (type === 'heartbeat') {
+      lastHeartbeat = Date.now();
+      return;
+    }
+    if (type === 'reconnect') {
+      try {
+        const parsed = JSON.parse(data) as { log_offset?: number; bash_offset?: number };
+        if (typeof parsed.log_offset === 'number') logOffset = parsed.log_offset;
+        if (typeof parsed.bash_offset === 'number') bashOffset = parsed.bash_offset;
+      } catch {
+        // keep current offsets
+      }
+      abortController?.abort();
+      return;
+    }
+    try {
+      const parsed = JSON.parse(data) as { chunk?: string; offset?: number };
+      if (type === 'log' && parsed.chunk != null) {
+        if (typeof parsed.offset === 'number') logOffset = parsed.offset;
+        callbacks.onLog?.(parsed.chunk, logOffset);
+      } else if (type === 'bash' && parsed.chunk != null) {
+        if (typeof parsed.offset === 'number') bashOffset = parsed.offset;
+        callbacks.onBash?.(parsed.chunk, bashOffset);
+      }
+    } catch {
+      // ignore malformed events
+    }
+  };
+
+  const connect = async () => {
+    if (closed) return;
+    abortController?.abort();
+    abortController = new AbortController();
+    lastHeartbeat = Date.now();
+    const params = new URLSearchParams({
+      log_offset: String(logOffset),
+      bash_offset: String(bashOffset),
+    });
+    const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/stream?${params}`;
+    let res: Response;
+    try {
+      res = await cloudAuthFetch(url, { signal: abortController.signal });
+    } catch {
+      if (!closed) setTimeout(() => void connect(), 500);
+      return;
+    }
+    if (!res.ok || !res.body) {
+      if (!closed) setTimeout(() => void connect(), 500);
+      return;
+    }
+    reconnectTimer = setTimeout(() => {
+      abortController?.abort();
+    }, TASK_STREAM_MAX_MS);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx = buffer.indexOf('\n\n');
+        while (idx >= 0) {
+          const block = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          if (block.trim()) {
+            const { event, data } = parseSseBlock(block);
+            handleEvent(event, data);
+          }
+          idx = buffer.indexOf('\n\n');
+        }
+      }
+    } catch {
+      // aborted or network error
+    }
+    if (!closed) setTimeout(() => void connect(), 0);
+  };
+
+  heartbeatTimer = setInterval(() => {
+    if (Date.now() - lastHeartbeat > TASK_STREAM_HEARTBEAT_MISS_MS) {
+      abortController?.abort();
+    }
+  }, 1000);
+
+  void connect();
+
+  return {
+    close: () => {
+      closed = true;
+      clearTimers();
+      abortController?.abort();
+    },
+  };
+}
+
 async function request<T>(
   path: string,
   options?: RequestInit & { parseJson?: boolean }
@@ -472,12 +611,15 @@ export const api = {
   },
 
   /**
-   * Open an EventSource for the active log stream (SSE). Use when a command is running and
-   * active_log_filename is set. Close the returned EventSource when done.
+   * Connect to the multiplexed task SSE stream (agent log + bash). Uses fetch + ReadableStream
+   * so Authorization headers work in cloud mode. Call close() when done.
    */
-  openTaskLogStream(taskName: string): EventSource {
-    const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/logs/stream`;
-    return new EventSource(url);
+  connectTaskStream(
+    taskName: string,
+    callbacks: TaskStreamCallbacks,
+    initialOffsets?: { log_offset?: number; bash_offset?: number },
+  ): TaskStreamHandle {
+    return connectTaskStream(taskName, callbacks, initialOffsets);
   },
 
   startTaskCommand(

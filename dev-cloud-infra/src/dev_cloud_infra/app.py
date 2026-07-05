@@ -82,7 +82,7 @@ class DevCloudStack(Stack):
             code=lambda_.Code.from_asset(
                 os.path.join(os.path.dirname(__file__), "..", "..", "dist", "lambda"),
             ),
-            timeout=Duration.seconds(30),
+            timeout=Duration.minutes(5),
             memory_size=512,
             environment={
                 "DEV_CLOUD_TABLE": table.table_name,
