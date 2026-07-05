@@ -34,6 +34,13 @@ function MarkdownInline({ children }: { children: string }) {
 
 export type { SubmittedAnswers }
 
+const ARCHITECTURAL_IMPLICATIONS_LABEL = 'Architectural Implications'
+
+function optionComplexityClass(complexity?: QuestionOption['complexity']): string {
+  if (!complexity) return ''
+  return `question-complexity-${complexity}`
+}
+
 function CollapsibleSection({
   label,
   children,
@@ -58,18 +65,6 @@ function CollapsibleSection({
       </button>
       {expanded ? <div className="question-collapsible-body">{children}</div> : null}
     </div>
-  )
-}
-
-function ComplexityIndicator({ level }: { level: NonNullable<QuestionOption['complexity']> }) {
-  const label = complexityLabel(level)
-  return (
-    <span
-      className={`question-complexity-dot question-complexity-${level}`}
-      title={label}
-      aria-label={label}
-      role="img"
-    />
   )
 }
 
@@ -330,7 +325,11 @@ function QuestionField({
       {question.options.length > 0 ? (
         <div className="question-options" role="radiogroup" aria-label={question.text}>
           {question.options.map((option, i) => (
-            <label key={`${qid}-${i}`} className="question-option">
+            <label
+              key={`${qid}-${i}`}
+              className={['question-option', optionComplexityClass(option.complexity)].filter(Boolean).join(' ')}
+              title={option.complexity ? complexityLabel(option.complexity) : undefined}
+            >
               <input
                 type="radio"
                 name={`question-${qid}`}
@@ -340,14 +339,14 @@ function QuestionField({
               />
               <span className="question-option-content">
                 <span className="question-option-group">
-                  <span className="question-option-label-row">
-                    <span className="question-option-label">
-                      <MarkdownInline>{option.label}</MarkdownInline>
-                    </span>
-                    {option.complexity ? <ComplexityIndicator level={option.complexity} /> : null}
+                  <span className="question-option-label">
+                    <MarkdownInline>{option.label}</MarkdownInline>
                   </span>
                   {option.implications?.trim() ? (
-                    <CollapsibleSection label="Implications" className="question-attached-collapsible">
+                    <CollapsibleSection
+                      label={ARCHITECTURAL_IMPLICATIONS_LABEL}
+                      className="question-attached-collapsible question-option-implications"
+                    >
                       <MarkdownInline>{option.implications}</MarkdownInline>
                     </CollapsibleSection>
                   ) : null}
@@ -403,18 +402,24 @@ function QuestionSummary({
       </div>
       {hasSelected ? (
         <div className="question-summary-selected">
-          <div className="question-summary-selection-group">
+          <div
+            className={[
+              'question-summary-selection-group',
+              optionComplexityClass(selectedOption?.complexity),
+            ].filter(Boolean).join(' ')}
+            title={selectedOption?.complexity ? complexityLabel(selectedOption.complexity) : undefined}
+          >
             <div className="question-summary-selection-row">
               <strong>Selected:</strong>{' '}
               <span className="question-summary-selected-label">
                 <MarkdownInline>{selected}</MarkdownInline>
               </span>
-              {selectedOption?.complexity ? (
-                <ComplexityIndicator level={selectedOption.complexity} />
-              ) : null}
             </div>
             {selectedOption?.implications?.trim() ? (
-              <CollapsibleSection label="Implications" className="question-attached-collapsible">
+              <CollapsibleSection
+                label={ARCHITECTURAL_IMPLICATIONS_LABEL}
+                className="question-attached-collapsible question-option-implications"
+              >
                 <MarkdownInline>{selectedOption.implications}</MarkdownInline>
               </CollapsibleSection>
             ) : null}

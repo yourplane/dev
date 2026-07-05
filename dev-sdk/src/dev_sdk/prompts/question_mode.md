@@ -47,7 +47,7 @@ Respond with **only** a single ` ```json ` fenced block (no other text before or
         "Plain option (backward compatible)",
         {
           "label": "Option with metadata",
-          "implications": "What choosing this means for architecture or scope.",
+          "implications": "Architectural impact only (structure, dependencies, maintenance).",
           "complexity": "low"
         }
       ]
@@ -61,9 +61,9 @@ Respond with **only** a single ` ```json ` fenced block (no other text before or
 - Each question needs `text` (string) and `options` (array).
 - `id` and `rationale` are optional per question.
 - `options` entries may be plain strings **or** objects with:
-  - `label` (required string)
-  - `implications` (optional string) — architectural/scope impact of this choice
-  - `complexity` (optional) — must be one of `"low"`, `"medium"`, or `"high"`
+  - `label` (required string) — include product/scope tradeoffs here; keep this concise but complete for the user
+  - `implications` (optional string) — **architectural impact only** (structure, layers, dependencies, new components, maintenance burden). Do not repeat product or scope points already clear from `label`. The UI shows this under "Architectural Implications".
+  - `complexity` (optional) — must be one of `"low"`, `"medium"`, or `"high"` (shown as a left-edge color accent on the option row)
 - Use `rationale`, `implications`, and `complexity` when they help the user understand tradeoffs; omit them for straightforward questions.
 
 When you have no questions, use: `{ "intro": "…", "questions": [] }`.

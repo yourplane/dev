@@ -167,9 +167,9 @@ describe('QuestionAnswerForm', () => {
       />,
     )
     expect(screen.getByText('Why am I asking this?')).toBeInTheDocument()
-    expect(screen.getByLabelText('Low complexity')).toBeInTheDocument()
-    expect(screen.getByLabelText('High complexity')).toBeInTheDocument()
-    expect(screen.getAllByText('Implications')).toHaveLength(1)
+    expect(screen.getByTitle('Low complexity')).toBeInTheDocument()
+    expect(screen.getByTitle('High complexity')).toBeInTheDocument()
+    expect(screen.getAllByText('Architectural Implications')).toHaveLength(1)
   })
 
   it('keeps rationale and implications visible in locked summary', async () => {
@@ -195,8 +195,8 @@ describe('QuestionAnswerForm', () => {
     )
     await waitFor(() => {
       expect(screen.getByText('Why am I asking this?')).toBeInTheDocument()
-      expect(screen.getByLabelText('High complexity')).toBeInTheDocument()
-      expect(screen.getByText('Implications')).toBeInTheDocument()
+      expect(screen.getByTitle('High complexity')).toBeInTheDocument()
+      expect(screen.getByText('Architectural Implications')).toBeInTheDocument()
     })
   })
 })
