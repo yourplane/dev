@@ -1662,13 +1662,23 @@
 .question-field legend.question-text {
   font-weight: 600;
   padding: 0 0.25rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.75rem;
+  display: block;
+  width: 100%;
+}
+
+.question-text-content {
+  display: block;
+}
+
+.question-field legend.question-text .question-attached-collapsible {
+  font-weight: normal;
 }
 
 .question-options {
   display: flex;
   flex-direction: column;
-  gap: 0.4rem;
+  gap: 0.65rem;
   margin-bottom: 0.5rem;
 }
 
@@ -1689,11 +1699,17 @@
   min-width: 0;
 }
 
+.question-option-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
 .question-option-label-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 0.4rem 0.6rem;
+  gap: 0.35rem 0.5rem;
 }
 
 .question-option-label {
@@ -1701,36 +1717,58 @@
   min-width: 0;
 }
 
-.question-complexity-badge {
+.question-complexity-dot {
   display: inline-block;
-  font-size: 0.72rem;
-  font-weight: 600;
-  line-height: 1.2;
-  padding: 0.15rem 0.45rem;
-  border-radius: 999px;
-  white-space: nowrap;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  flex-shrink: 0;
 }
 
 .question-complexity-low {
-  color: #166534;
-  background: #dcfce7;
-  border: 1px solid #86efac;
+  background: #22c55e;
+  box-shadow: 0 0 0 1px #86efac;
 }
 
 .question-complexity-medium {
-  color: #92400e;
-  background: #fef3c7;
-  border: 1px solid #fcd34d;
+  background: #eab308;
+  box-shadow: 0 0 0 1px #fcd34d;
 }
 
 .question-complexity-high {
-  color: #991b1b;
-  background: #fee2e2;
-  border: 1px solid #fca5a5;
+  background: #ef4444;
+  box-shadow: 0 0 0 1px #fca5a5;
 }
 
 .question-collapsible {
   margin-top: 0.35rem;
+}
+
+.question-attached-collapsible {
+  margin-top: 0.15rem;
+  margin-bottom: 0;
+}
+
+.question-summary-header {
+  margin-bottom: 0.35rem;
+}
+
+.question-summary-header .question-attached-collapsible {
+  margin-top: 0.15rem;
+}
+
+.question-summary-selection-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+
+.question-summary-selection-row {
+  margin: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
 }
 
 .question-collapsible-toggle {
@@ -1755,11 +1793,6 @@
 
 .question-summary-selected-label {
   display: inline;
-}
-
-.question-summary-selected .question-complexity-badge {
-  margin-left: 0.35rem;
-  vertical-align: middle;
 }
 
 .question-add-notes-btn {

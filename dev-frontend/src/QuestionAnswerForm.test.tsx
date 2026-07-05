@@ -167,8 +167,8 @@ describe('QuestionAnswerForm', () => {
       />,
     )
     expect(screen.getByText('Why am I asking this?')).toBeInTheDocument()
-    expect(screen.getByText('Low complexity')).toBeInTheDocument()
-    expect(screen.getByText('High complexity')).toBeInTheDocument()
+    expect(screen.getByLabelText('Low complexity')).toBeInTheDocument()
+    expect(screen.getByLabelText('High complexity')).toBeInTheDocument()
     expect(screen.getAllByText('Implications')).toHaveLength(1)
   })
 
@@ -195,7 +195,7 @@ describe('QuestionAnswerForm', () => {
     )
     await waitFor(() => {
       expect(screen.getByText('Why am I asking this?')).toBeInTheDocument()
-      expect(screen.getByText('High complexity')).toBeInTheDocument()
+      expect(screen.getByLabelText('High complexity')).toBeInTheDocument()
       expect(screen.getByText('Implications')).toBeInTheDocument()
     })
   })

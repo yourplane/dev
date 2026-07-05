@@ -38,14 +38,16 @@ function CollapsibleSection({
   label,
   children,
   defaultExpanded = false,
+  className,
 }: {
   label: string
   children: React.ReactNode
   defaultExpanded?: boolean
+  className?: string
 }) {
   const [expanded, setExpanded] = useState(defaultExpanded)
   return (
-    <div className="question-collapsible">
+    <div className={['question-collapsible', className].filter(Boolean).join(' ')}>
       <button
         type="button"
         className="question-collapsible-toggle"
@@ -59,11 +61,15 @@ function CollapsibleSection({
   )
 }
 
-function ComplexityBadge({ level }: { level: NonNullable<QuestionOption['complexity']> }) {
+function ComplexityIndicator({ level }: { level: NonNullable<QuestionOption['complexity']> }) {
+  const label = complexityLabel(level)
   return (
-    <span className={`question-complexity-badge question-complexity-${level}`}>
-      {complexityLabel(level)}
-    </span>
+    <span
+      className={`question-complexity-dot question-complexity-${level}`}
+      title={label}
+      aria-label={label}
+      role="img"
+    />
   )
 }
 
@@ -312,13 +318,15 @@ function QuestionField({
   return (
     <fieldset className="question-field">
       <legend className="question-text">
-        <MarkdownInline>{question.text}</MarkdownInline>
+        <span className="question-text-content">
+          <MarkdownInline>{question.text}</MarkdownInline>
+        </span>
+        {question.rationale?.trim() ? (
+          <CollapsibleSection label="Why am I asking this?" className="question-attached-collapsible">
+            <MarkdownInline>{question.rationale}</MarkdownInline>
+          </CollapsibleSection>
+        ) : null}
       </legend>
-      {question.rationale?.trim() ? (
-        <CollapsibleSection label="Why am I asking this?">
-          <MarkdownInline>{question.rationale}</MarkdownInline>
-        </CollapsibleSection>
-      ) : null}
       {question.options.length > 0 ? (
         <div className="question-options" role="radiogroup" aria-label={question.text}>
           {question.options.map((option, i) => (
@@ -331,17 +339,19 @@ function QuestionField({
                 onChange={() => onSelect(option.label)}
               />
               <span className="question-option-content">
-                <span className="question-option-label-row">
-                  <span className="question-option-label">
-                    <MarkdownInline>{option.label}</MarkdownInline>
+                <span className="question-option-group">
+                  <span className="question-option-label-row">
+                    <span className="question-option-label">
+                      <MarkdownInline>{option.label}</MarkdownInline>
+                    </span>
+                    {option.complexity ? <ComplexityIndicator level={option.complexity} /> : null}
                   </span>
-                  {option.complexity ? <ComplexityBadge level={option.complexity} /> : null}
+                  {option.implications?.trim() ? (
+                    <CollapsibleSection label="Implications" className="question-attached-collapsible">
+                      <MarkdownInline>{option.implications}</MarkdownInline>
+                    </CollapsibleSection>
+                  ) : null}
                 </span>
-                {option.implications?.trim() ? (
-                  <CollapsibleSection label="Implications">
-                    <MarkdownInline>{option.implications}</MarkdownInline>
-                  </CollapsibleSection>
-                ) : null}
               </span>
             </label>
           ))}
@@ -381,28 +391,34 @@ function QuestionSummary({
   if (!hasSelected && !hasNotes) return null
   return (
     <div className="question-summary-item">
-      <div className="question-summary-text">
-        <MarkdownInline>{question.text}</MarkdownInline>
+      <div className="question-summary-header">
+        <div className="question-summary-text">
+          <MarkdownInline>{question.text}</MarkdownInline>
+        </div>
+        {question.rationale?.trim() ? (
+          <CollapsibleSection label="Why am I asking this?" className="question-attached-collapsible">
+            <MarkdownInline>{question.rationale}</MarkdownInline>
+          </CollapsibleSection>
+        ) : null}
       </div>
-      {question.rationale?.trim() ? (
-        <CollapsibleSection label="Why am I asking this?">
-          <MarkdownInline>{question.rationale}</MarkdownInline>
-        </CollapsibleSection>
-      ) : null}
       {hasSelected ? (
         <div className="question-summary-selected">
-          <strong>Selected:</strong>{' '}
-          <span className="question-summary-selected-label">
-            <MarkdownInline>{selected}</MarkdownInline>
-          </span>
-          {selectedOption?.complexity ? (
-            <ComplexityBadge level={selectedOption.complexity} />
-          ) : null}
-          {selectedOption?.implications?.trim() ? (
-            <CollapsibleSection label="Implications">
-              <MarkdownInline>{selectedOption.implications}</MarkdownInline>
-            </CollapsibleSection>
-          ) : null}
+          <div className="question-summary-selection-group">
+            <div className="question-summary-selection-row">
+              <strong>Selected:</strong>{' '}
+              <span className="question-summary-selected-label">
+                <MarkdownInline>{selected}</MarkdownInline>
+              </span>
+              {selectedOption?.complexity ? (
+                <ComplexityIndicator level={selectedOption.complexity} />
+              ) : null}
+            </div>
+            {selectedOption?.implications?.trim() ? (
+              <CollapsibleSection label="Implications" className="question-attached-collapsible">
+                <MarkdownInline>{selectedOption.implications}</MarkdownInline>
+              </CollapsibleSection>
+            ) : null}
+          </div>
         </div>
       ) : null}
       {hasNotes ? (
