@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dev-cloud-control"
+version = "0.1.0"
+description = "Serverless control plane API for cloud dev"
+requires-python = ">=3.11"
+dependencies = [
+    "dev-sdk",
+    "boto3>=1.34",
+    "pydantic>=2.0",
+]
+
+[tool.uv.sources]
+dev-sdk = { workspace = true }
+
+[project.optional-dependencies]
+dev = ["pytest>=7.0", "moto[dynamodb,s3]>=5.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

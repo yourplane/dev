@@ -1,5 +1,164 @@
 /** Base URL for API requests. Default `/api` uses Vite proxy (single-port dev). Override with VITE_DEV_SERVER_URL to talk to backend directly. */
+import { authHeaders, ensureValidIdToken, isCloudMode } from './cloudAuth';
+
 export const apiBaseUrl = import.meta.env.VITE_DEV_SERVER_URL ?? '/api';
+
+function apiErrorMessage(httpStatus: number, detail: string): string {
+  if (isCloudMode()) {
+    if (httpStatus === 401 || httpStatus === 403) {
+      return detail || 'Not authorized. Try signing out and back in.';
+    }
+    return detail || `Cloud API error (HTTP ${httpStatus})`;
+  }
+  return `Could not reach dev-server at ${apiBaseUrl}. ${detail}`;
+}
+
+async function cloudAuthFetch(url: string, init?: RequestInit): Promise<Response> {
+  if (isCloudMode()) await ensureValidIdToken();
+  return fetch(url, {
+    ...init,
+    headers: { ...authHeaders(), ...init?.headers },
+  });
+}
+
+const TASK_STREAM_MAX_MS = 165_000;
+const TASK_STREAM_HEARTBEAT_MISS_MS = 5_000;
+
+export interface TaskStreamCallbacks {
+  onLog?: (chunk: string, offset: number) => void;
+  onBash?: (chunk: string, offset: number) => void;
+}
+
+export interface TaskStreamHandle {
+  close: () => void;
+}
+
+function parseSseBlock(block: string): { event: string; data: string } {
+  let event = 'message';
+  const dataLines: string[] = [];
+  for (const line of block.split('\n')) {
+    if (line.startsWith('event:')) event = line.slice(6).trim();
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+  }
+  return { event, data: dataLines.join('\n') };
+}
+
+export function connectTaskStream(
+  taskName: string,
+  callbacks: TaskStreamCallbacks,
+  initialOffsets?: { log_offset?: number; bash_offset?: number },
+): TaskStreamHandle {
+  let closed = false;
+  let logOffset = initialOffsets?.log_offset ?? 0;
+  let bashOffset = initialOffsets?.bash_offset ?? 0;
+  let abortController: AbortController | null = null;
+  let heartbeatTimer: ReturnType<typeof setInterval> | undefined;
+  let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+  let lastHeartbeat = Date.now();
+
+  const clearTimers = () => {
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    heartbeatTimer = undefined;
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    reconnectTimer = undefined;
+  };
+
+  const handleEvent = (type: string, data: string) => {
+    if (type === 'heartbeat') {
+      lastHeartbeat = Date.now();
+      return;
+    }
+    if (type === 'reconnect') {
+      try {
+        const parsed = JSON.parse(data) as { log_offset?: number; bash_offset?: number };
+        if (typeof parsed.log_offset === 'number') logOffset = parsed.log_offset;
+        if (typeof parsed.bash_offset === 'number') bashOffset = parsed.bash_offset;
+      } catch {
+        // keep current offsets
+      }
+      abortController?.abort();
+      return;
+    }
+    try {
+      const parsed = JSON.parse(data) as { chunk?: string; offset?: number };
+      if (type === 'log' && parsed.chunk != null) {
+        if (typeof parsed.offset === 'number') logOffset = parsed.offset;
+        callbacks.onLog?.(parsed.chunk, logOffset);
+      } else if (type === 'bash' && parsed.chunk != null) {
+        if (typeof parsed.offset === 'number') bashOffset = parsed.offset;
+        callbacks.onBash?.(parsed.chunk, bashOffset);
+      }
+    } catch {
+      // ignore malformed events
+    }
+  };
+
+  const connect = async () => {
+    if (closed) return;
+    abortController?.abort();
+    abortController = new AbortController();
+    lastHeartbeat = Date.now();
+    const params = new URLSearchParams({
+      log_offset: String(logOffset),
+      bash_offset: String(bashOffset),
+    });
+    const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/stream?${params}`;
+    let res: Response;
+    try {
+      res = await cloudAuthFetch(url, { signal: abortController.signal });
+    } catch {
+      if (!closed) setTimeout(() => void connect(), 500);
+      return;
+    }
+    if (!res.ok || !res.body) {
+      if (!closed) setTimeout(() => void connect(), 500);
+      return;
+    }
+    reconnectTimer = setTimeout(() => {
+      abortController?.abort();
+    }, TASK_STREAM_MAX_MS);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        let idx = buffer.indexOf('\n\n');
+        while (idx >= 0) {
+          const block = buffer.slice(0, idx);
+          buffer = buffer.slice(idx + 2);
+          if (block.trim()) {
+            const { event, data } = parseSseBlock(block);
+            handleEvent(event, data);
+          }
+          idx = buffer.indexOf('\n\n');
+        }
+      }
+    } catch {
+      // aborted or network error
+    }
+    if (!closed) setTimeout(() => void connect(), 0);
+  };
+
+  heartbeatTimer = setInterval(() => {
+    if (Date.now() - lastHeartbeat > TASK_STREAM_HEARTBEAT_MISS_MS) {
+      abortController?.abort();
+    }
+  }, 1000);
+
+  void connect();
+
+  return {
+    close: () => {
+      closed = true;
+      clearTimers();
+      abortController?.abort();
+    },
+  };
+}
 
 async function request<T>(
   path: string,
@@ -9,14 +168,16 @@ async function request<T>(
   const url = `${apiBaseUrl}${path}`;
   let res: Response;
   try {
-    res = await fetch(url, {
+    res = await cloudAuthFetch(url, {
       headers: { 'Content-Type': 'application/json', ...init.headers },
       ...init,
     });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     throw new Error(
-      `Could not reach dev-server at ${apiBaseUrl}. ${msg === 'Failed to fetch' ? 'Check that the backend is running (and that the Vite proxy target matches).' : msg}`
+      isCloudMode()
+        ? (msg === 'Failed to fetch' ? 'Could not reach the cloud API. Check your network connection.' : msg)
+        : `Could not reach dev-server at ${apiBaseUrl}. ${msg === 'Failed to fetch' ? 'Check that the backend is running (and that the Vite proxy target matches).' : msg}`
     );
   }
   const text = await res.text();
@@ -25,10 +186,11 @@ async function request<T>(
     try {
       const j = JSON.parse(text);
       if (typeof j.detail === 'string') detail = j.detail;
+      else if (typeof j.message === 'string') detail = j.message;
     } catch {
       // use raw text
     }
-    throw new Error(detail || `HTTP ${res.status}`);
+    throw new Error(apiErrorMessage(res.status, detail || `HTTP ${res.status}`));
   }
   if (!parseJson || text === '') return undefined as T;
   return JSON.parse(text) as T;
@@ -38,6 +200,15 @@ export interface CreateTaskBody {
   title: string;
   repo?: string | null;
   comment?: string | null;
+  environment_id?: string | null;
+}
+
+export interface EnvironmentInfo {
+  environment_id: string;
+  display_name: string;
+  online: boolean;
+  last_heartbeat: number;
+  registered_at: number;
 }
 
 export interface TaskWorkspaceInfo {
@@ -89,6 +260,37 @@ export const api = {
     return request('/repos');
   },
 
+  getEnvironments(): Promise<{ environments: EnvironmentInfo[] }> {
+    return request('/environments');
+  },
+
+  updateEnvironment(environmentId: string, displayName: string): Promise<void> {
+    return request(`/environments/${encodeURIComponent(environmentId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ display_name: displayName }),
+      parseJson: false,
+    });
+  },
+
+  deleteEnvironment(environmentId: string): Promise<void> {
+    return request(`/environments/${encodeURIComponent(environmentId)}`, {
+      method: 'DELETE',
+      parseJson: false,
+    });
+  },
+
+  getBots(): Promise<{ bots: Array<{ org: string; secret: string }> }> {
+    return request('/config/bots');
+  },
+
+  setBots(bots: Array<{ org: string; secret: string }>): Promise<void> {
+    return request('/config/bots', {
+      method: 'PUT',
+      body: JSON.stringify({ bots }),
+      parseJson: false,
+    });
+  },
+
   addRepo(name: string, url: string): Promise<Record<string, string>> {
     return request('/repos', {
       method: 'POST',
@@ -110,7 +312,7 @@ export const api = {
     const url = `${apiBaseUrl}/tasks`;
     let res: Response;
     try {
-      res = await fetch(url, {
+      res = await cloudAuthFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
@@ -118,19 +320,22 @@ export const api = {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       throw new Error(
-        `Could not reach dev-server at ${apiBaseUrl}. ${msg === 'Failed to fetch' ? 'Check that the backend is running (and that the Vite proxy target matches).' : msg}`
+        isCloudMode()
+          ? (msg === 'Failed to fetch' ? 'Could not reach the cloud API. Check your network connection.' : msg)
+          : `Could not reach dev-server at ${apiBaseUrl}. ${msg === 'Failed to fetch' ? 'Check that the backend is running (and that the Vite proxy target matches).' : msg}`
       );
     }
     if (!res.ok) {
       const text = await res.text();
       let detail = text;
       try {
-        const j = JSON.parse(text) as { detail?: string };
+        const j = JSON.parse(text) as { detail?: string; message?: string };
         if (typeof j.detail === 'string') detail = j.detail;
+        else if (typeof j.message === 'string') detail = j.message;
       } catch {
         // use raw text
       }
-      throw new Error(detail || `HTTP ${res.status}`);
+      throw new Error(apiErrorMessage(res.status, detail || `HTTP ${res.status}`));
     }
     const reader = res.body?.getReader();
     if (!reader) {
@@ -139,37 +344,7 @@ export const api = {
     const decoder = new TextDecoder();
     let buffer = '';
     let result: CreateTaskResponse | null = null;
-    while (true) {
-      const { done, value } = await reader.read();
-      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        const obj = JSON.parse(trimmed) as {
-          type: string;
-          message?: string;
-          task_name?: string;
-          task_dir?: string;
-          detail?: string;
-        };
-        if (obj.type === 'progress' && typeof obj.message === 'string') {
-          onProgress?.(obj.message);
-        }
-        if (obj.type === 'complete' && typeof obj.task_name === 'string' && typeof obj.task_dir === 'string') {
-          result = { task_name: obj.task_name, task_dir: obj.task_dir };
-        }
-        if (obj.type === 'error' && typeof obj.detail === 'string') {
-          throw new Error(obj.detail);
-        }
-      }
-      if (done) {
-        break;
-      }
-    }
-    if (buffer.trim()) {
-      const trimmed = buffer.trim();
+    const handleLine = (trimmed: string) => {
       const obj = JSON.parse(trimmed) as {
         type: string;
         message?: string;
@@ -186,6 +361,22 @@ export const api = {
       if (obj.type === 'error' && typeof obj.detail === 'string') {
         throw new Error(obj.detail);
       }
+    };
+    while (true) {
+      const { done, value } = await reader.read();
+      buffer += decoder.decode(value ?? new Uint8Array(), { stream: !done });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed) handleLine(trimmed);
+      }
+      if (done) {
+        break;
+      }
+    }
+    if (buffer.trim()) {
+      handleLine(buffer.trim());
     }
     if (!result) {
       throw new Error('Task creation finished without a result');
@@ -215,7 +406,7 @@ export const api = {
 
   async getTaskCommentDraft(taskName: string): Promise<string> {
     const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/drafts/comment`;
-    const res = await fetch(url);
+    const res = await cloudAuthFetch(url);
     if (!res.ok) {
       const text = await res.text();
       let detail = text;
@@ -240,7 +431,7 @@ export const api = {
 
   async getTaskBashDraft(taskName: string): Promise<string> {
     const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/drafts/bash`;
-    const res = await fetch(url);
+    const res = await cloudAuthFetch(url);
     if (!res.ok) {
       const text = await res.text();
       let detail = text;
@@ -382,7 +573,7 @@ export const api = {
 
   async getTaskLogFile(taskName: string, filename: string): Promise<string> {
     const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/logs/${encodeURIComponent(filename)}`;
-    const res = await fetch(url);
+    const res = await cloudAuthFetch(url);
     if (!res.ok) {
       const text = await res.text();
       let detail = text;
@@ -412,17 +603,24 @@ export const api = {
     active_log_filename: string | null;
     active_bash_comms_filename: string | null;
     command_error: string | null;
+    create_progress?: string[];
+    queued?: boolean;
+    cancelling?: boolean;
+    pending_state?: 'syncing' | 'worker_offline' | null;
   }> {
     return request(`/tasks/${encodeURIComponent(taskName)}/commands`);
   },
 
   /**
-   * Open an EventSource for the active log stream (SSE). Use when a command is running and
-   * active_log_filename is set. Close the returned EventSource when done.
+   * Connect to the multiplexed task SSE stream (agent log + bash). Uses fetch + ReadableStream
+   * so Authorization headers work in cloud mode. Call close() when done.
    */
-  openTaskLogStream(taskName: string): EventSource {
-    const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/logs/stream`;
-    return new EventSource(url);
+  connectTaskStream(
+    taskName: string,
+    callbacks: TaskStreamCallbacks,
+    initialOffsets?: { log_offset?: number; bash_offset?: number },
+  ): TaskStreamHandle {
+    return connectTaskStream(taskName, callbacks, initialOffsets);
   },
 
   startTaskCommand(
@@ -462,7 +660,7 @@ export const api = {
 
   async getTaskCommsFile(taskName: string, filename: string): Promise<string> {
     const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/comms/${encodeURIComponent(filename)}`;
-    const res = await fetch(url);
+    const res = await cloudAuthFetch(url);
     if (!res.ok) {
       const text = await res.text();
       let detail = text;
@@ -482,7 +680,7 @@ export const api = {
    */
   async downloadTaskCommsZip(taskName: string): Promise<void> {
     const url = `${apiBaseUrl}/tasks/${encodeURIComponent(taskName)}/comms/download`;
-    const res = await fetch(url);
+    const res = await cloudAuthFetch(url);
     if (!res.ok) {
       const text = await res.text();
       let detail = text;

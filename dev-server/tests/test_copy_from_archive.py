@@ -42,14 +42,14 @@ def client_with_archive(tasks_root: Path, archived_task: Path) -> TestClient:
         yield TestClient(app)
 
 
-@patch("dev_sdk.task_manager.subprocess.run")
+@patch("dev_sdk.task_manager.TaskManager._create_agent_chat")
 def test_copy_from_archive_creates_task(
-    mock_run: MagicMock,
+    mock_chat: MagicMock,
     client_with_archive: TestClient,
     tasks_root: Path,
     archived_task: Path,
 ) -> None:
-    mock_run.return_value = MagicMock(stdout="new-chat-id-789\n", stderr="", returncode=0)
+    mock_chat.return_value = "new-chat-id-789"
 
     resp = client_with_archive.post("/archive/my-task-mar-14-a1b2c3/copy")
 
@@ -66,14 +66,14 @@ def test_copy_from_archive_creates_task(
     assert archived_task.is_dir()
 
 
-@patch("dev_sdk.task_manager.subprocess.run")
+@patch("dev_sdk.task_manager.TaskManager._create_agent_chat")
 def test_copy_from_archive_conflict_when_task_exists(
-    mock_run: MagicMock,
+    mock_chat: MagicMock,
     client_with_archive: TestClient,
     tasks_root: Path,
 ) -> None:
     (tasks_root / "my-task").mkdir()
-    mock_run.return_value = MagicMock(stdout="chat-id\n", stderr="", returncode=0)
+    mock_chat.return_value = "chat-id"
 
     resp = client_with_archive.post("/archive/my-task-mar-14-a1b2c3/copy")
 

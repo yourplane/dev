@@ -27,6 +27,7 @@ from dev_sdk.agent_run import (
     run_plan_implement,
     run_question_mode,
 )
+from dev_sdk.stream_sse import SSE_HEADERS, STREAM_MAX_DURATION_SEC, run_task_stream
 from dev_sdk.comms import (
     add_comms,
     bash_comms_input_header,
@@ -1106,6 +1107,110 @@ def _sse_format(data: str) -> str:
     if not data:
         return ""
     return "".join(f"data: {line}\n" for line in data.splitlines()) + "\n\n"
+
+
+async def _stream_task_multiplex_gen(
+    task_name: str,
+    log_offset: int,
+    bash_offset: int,
+    *,
+    max_duration_sec: float = STREAM_MAX_DURATION_SEC,
+):
+    task_dir = _task_dir(task_name)
+    logs_path = task_dir / LOGS_DIR
+    cdir = comms_dir(task_dir)
+
+    def is_active() -> bool:
+        with _command_registry_lock:
+            return task_name in _command_registry
+
+    def read_log(offset: int) -> tuple[str, int] | None:
+        with _command_registry_lock:
+            entry = _command_registry.get(task_name)
+            if not entry:
+                return None
+            filename = entry.get("active_log_filename")
+        if not filename:
+            return None
+        path = logs_path / filename
+        if not path.is_file():
+            return "", offset
+        data = path.read_bytes()
+        total = len(data)
+        if offset >= total:
+            return "", total
+        return data[offset:].decode("utf-8", errors="replace"), total
+
+    def read_bash(offset: int) -> tuple[str, int] | None:
+        with _command_registry_lock:
+            entry = _command_registry.get(task_name)
+            if not entry:
+                return None
+            filename = entry.get("active_bash_comms_filename")
+        if not filename:
+            return None
+        path = cdir / filename
+        if not path.is_file():
+            return "", offset
+        data = path.read_bytes()
+        total = len(data)
+        if offset >= total:
+            return "", total
+        return data[offset:].decode("utf-8", errors="replace"), total
+
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    def write(chunk: str) -> None:
+        queue.put_nowait(chunk)
+
+    async def run_sync() -> None:
+        await asyncio.to_thread(
+            run_task_stream,
+            log_offset=log_offset,
+            bash_offset=bash_offset,
+            read_log=read_log,
+            read_bash=read_bash,
+            is_active=is_active,
+            write=write,
+            max_duration_sec=max_duration_sec,
+        )
+        queue.put_nowait(None)
+
+    runner = asyncio.create_task(run_sync())
+    try:
+        while True:
+            item = await queue.get()
+            if item is None:
+                break
+            yield item
+    finally:
+        await runner
+
+
+@app.get("/tasks/{task_name}/stream")
+def stream_task(
+    task_name: str,
+    log_offset: int = 0,
+    bash_offset: int = 0,
+    stream_duration: float | None = None,
+):
+    """Multiplexed SSE stream for active agent log and bash comms."""
+    with _command_registry_lock:
+        if task_name not in _command_registry:
+            raise HTTPException(status_code=404, detail="No command is running for this task.")
+    max_duration = STREAM_MAX_DURATION_SEC
+    if stream_duration is not None:
+        max_duration = min(STREAM_MAX_DURATION_SEC, max(0.5, stream_duration))
+    return StreamingResponse(
+        _stream_task_multiplex_gen(
+            task_name,
+            max(0, log_offset),
+            max(0, bash_offset),
+            max_duration_sec=max_duration,
+        ),
+        media_type="text/event-stream",
+        headers=dict(SSE_HEADERS),
+    )
 
 
 async def _stream_active_log_gen(task_name: str, task_dir: Path, logs_path: Path, filename: str):
