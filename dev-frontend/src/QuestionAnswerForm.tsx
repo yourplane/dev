@@ -3,12 +3,15 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from './api'
 import {
+  complexityLabel,
   draftIndicatesEditing,
+  findOptionByLabel,
   hasAnyAnswer,
   submittedAnswersEqual,
   submittedAnswersSignature,
   type QuestionAnswersDraft,
   type QuestionItem,
+  type QuestionOption,
   type QuestionPayload,
   type SubmittedAnswers,
 } from './questionForm'
@@ -30,6 +33,40 @@ function MarkdownInline({ children }: { children: string }) {
 }
 
 export type { SubmittedAnswers }
+
+const ARCHITECTURAL_IMPLICATIONS_LABEL = 'Architectural Implications'
+
+function optionComplexityClass(complexity?: QuestionOption['complexity']): string {
+  if (!complexity) return ''
+  return `question-complexity-${complexity}`
+}
+
+function CollapsibleSection({
+  label,
+  children,
+  defaultExpanded = false,
+  className,
+}: {
+  label: string
+  children: React.ReactNode
+  defaultExpanded?: boolean
+  className?: string
+}) {
+  const [expanded, setExpanded] = useState(defaultExpanded)
+  return (
+    <div className={['question-collapsible', className].filter(Boolean).join(' ')}>
+      <button
+        type="button"
+        className="question-collapsible-toggle"
+        aria-expanded={expanded}
+        onClick={() => setExpanded((prev) => !prev)}
+      >
+        {label}
+      </button>
+      {expanded ? <div className="question-collapsible-body">{children}</div> : null}
+    </div>
+  )
+}
 
 export function QuestionAnswerForm({
   taskName,
@@ -276,21 +313,44 @@ function QuestionField({
   return (
     <fieldset className="question-field">
       <legend className="question-text">
-        <MarkdownInline>{question.text}</MarkdownInline>
+        <span className="question-text-content">
+          <MarkdownInline>{question.text}</MarkdownInline>
+        </span>
+        {question.rationale?.trim() ? (
+          <CollapsibleSection label="Why am I asking this?" className="question-attached-collapsible">
+            <MarkdownInline>{question.rationale}</MarkdownInline>
+          </CollapsibleSection>
+        ) : null}
       </legend>
       {question.options.length > 0 ? (
         <div className="question-options" role="radiogroup" aria-label={question.text}>
           {question.options.map((option, i) => (
-            <label key={`${qid}-${i}`} className="question-option">
+            <label
+              key={`${qid}-${i}`}
+              className={['question-option', optionComplexityClass(option.complexity)].filter(Boolean).join(' ')}
+              title={option.complexity ? complexityLabel(option.complexity) : undefined}
+            >
               <input
                 type="radio"
                 name={`question-${qid}`}
-                value={option}
-                checked={selected === option}
-                onChange={() => onSelect(option)}
+                value={option.label}
+                checked={selected === option.label}
+                onChange={() => onSelect(option.label)}
               />
-              <span className="question-option-label">
-                <MarkdownInline>{option}</MarkdownInline>
+              <span className="question-option-content">
+                <span className="question-option-group">
+                  <span className="question-option-label">
+                    <MarkdownInline>{option.label}</MarkdownInline>
+                  </span>
+                  {option.implications?.trim() ? (
+                    <CollapsibleSection
+                      label={ARCHITECTURAL_IMPLICATIONS_LABEL}
+                      className="question-attached-collapsible question-option-implications"
+                    >
+                      <MarkdownInline>{option.implications}</MarkdownInline>
+                    </CollapsibleSection>
+                  ) : null}
+                </span>
               </span>
             </label>
           ))}
@@ -326,17 +386,45 @@ function QuestionSummary({
 }) {
   const hasSelected = selected.trim().length > 0
   const hasNotes = freeText.trim().length > 0
+  const selectedOption = hasSelected ? findOptionByLabel(question.options, selected) : undefined
   if (!hasSelected && !hasNotes) return null
   return (
     <div className="question-summary-item">
-      <div className="question-summary-text">
-        <MarkdownInline>{question.text}</MarkdownInline>
+      <div className="question-summary-header">
+        <div className="question-summary-text">
+          <MarkdownInline>{question.text}</MarkdownInline>
+        </div>
+        {question.rationale?.trim() ? (
+          <CollapsibleSection label="Why am I asking this?" className="question-attached-collapsible">
+            <MarkdownInline>{question.rationale}</MarkdownInline>
+          </CollapsibleSection>
+        ) : null}
       </div>
       {hasSelected ? (
-        <p className="question-summary-selected">
-          <strong>Selected:</strong>{' '}
-          <MarkdownInline>{selected}</MarkdownInline>
-        </p>
+        <div className="question-summary-selected">
+          <div
+            className={[
+              'question-summary-selection-group',
+              optionComplexityClass(selectedOption?.complexity),
+            ].filter(Boolean).join(' ')}
+            title={selectedOption?.complexity ? complexityLabel(selectedOption.complexity) : undefined}
+          >
+            <div className="question-summary-selection-row">
+              <strong>Selected:</strong>{' '}
+              <span className="question-summary-selected-label">
+                <MarkdownInline>{selected}</MarkdownInline>
+              </span>
+            </div>
+            {selectedOption?.implications?.trim() ? (
+              <CollapsibleSection
+                label={ARCHITECTURAL_IMPLICATIONS_LABEL}
+                className="question-attached-collapsible question-option-implications"
+              >
+                <MarkdownInline>{selectedOption.implications}</MarkdownInline>
+              </CollapsibleSection>
+            ) : null}
+          </div>
+        </div>
       ) : null}
       {hasNotes ? (
         <div className="question-summary-notes">
