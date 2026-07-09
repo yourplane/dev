@@ -12,7 +12,11 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 HOME_DEV="$(cd "$SCRIPT_DIR/.." && pwd)"
-DEV_REPO_BRANCH="${DEV_REPO_BRANCH:-task/cloud-dev}"
+
+if [[ -z "${DEV_REPO_BRANCH:-}" ]]; then
+  echo "Set DEV_REPO_BRANCH (git branch to pull on the worker)" >&2
+  exit 1
+fi
 
 prepare_user_systemd() {
   local uid
