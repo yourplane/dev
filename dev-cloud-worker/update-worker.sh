@@ -39,8 +39,8 @@ fi
 git config --global --add safe.directory "$HOME_DEV"
 
 log "Pulling $DEV_REPO_BRANCH in $HOME_DEV"
-git -C "$HOME_DEV" fetch origin "$DEV_REPO_BRANCH"
-git -C "$HOME_DEV" checkout -B "$DEV_REPO_BRANCH" "origin/$DEV_REPO_BRANCH"
+git -C "$HOME_DEV" fetch --depth 1 origin "$DEV_REPO_BRANCH"
+git -C "$HOME_DEV" checkout -B "$DEV_REPO_BRANCH" FETCH_HEAD
 
 export PATH="$HOME/.local/bin:$PATH"
 if [[ -f "$HOME_DEV/dev-cloud-infra/.deploy-outputs.json" ]]; then

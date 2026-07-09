@@ -129,7 +129,7 @@ COMMAND_ID="$(aws ssm send-command \
   --parameters "$(jq -n \
     --arg branch "$DEV_REPO_BRANCH" \
     --arg url "$CONTROL_PLANE_URL" \
-    '{commands: ["sudo -u ubuntu -H bash -lc \"export DEV_REPO_BRANCH=\($branch) CONTROL_PLANE_URL=\($url) HOME_DEV=\\$HOME/dev && git -C \\$HOME_DEV fetch origin \\$DEV_REPO_BRANCH && git -C \\$HOME_DEV checkout -B \\$DEV_REPO_BRANCH origin/\\$DEV_REPO_BRANCH && cd \\$HOME_DEV/dev-cloud-worker && ./update-worker.sh\""]}')" \
+    '{commands: ["sudo -u ubuntu -H bash -lc \"export DEV_REPO_BRANCH=\($branch) CONTROL_PLANE_URL=\($url) HOME_DEV=\\$HOME/dev && git -C \\$HOME_DEV fetch --depth 1 origin \\$DEV_REPO_BRANCH && git -C \\$HOME_DEV checkout -B \\$DEV_REPO_BRANCH FETCH_HEAD && cd \\$HOME_DEV/dev-cloud-worker && ./update-worker.sh\""]}')" \
   --query Command.CommandId \
   --output text)"
 
