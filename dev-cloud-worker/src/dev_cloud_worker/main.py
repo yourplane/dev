@@ -34,6 +34,8 @@ from dev_sdk.task_manager import TaskCancelled, TaskManager
 
 logger = logging.getLogger("dev_cloud_worker")
 POLL_INTERVAL_SEC = float(os.environ.get("DEV_CLOUD_POLL_INTERVAL", "1"))
+COMMS_SYNC_RETRIES = 3
+COMMS_SYNC_RETRY_DELAY_SEC = 0.5
 CONFIG_DIR = Path.home() / ".config" / "dev-cloud"
 ENV_ID_FILE = CONFIG_DIR / "environment_id"
 DISPLAY_NAME_FILE = CONFIG_DIR / "display_name"
@@ -220,6 +222,12 @@ class CommandExecutor:
         payload = command.get("payload") or {}
         cancel_flag = self._cancel_for(task_name)
         cancel_flag.clear()
+        if cmd == "cancel":
+            cancel_flag.set()
+            return
+
+        error: str | None = None
+        result: dict | None = None
         try:
             self.client.command_start(task_name)
             if cmd == "create-task":
@@ -230,29 +238,37 @@ class CommandExecutor:
                 self._unarchive(task_name, payload)
             elif cmd == "copy-from-archive":
                 self._copy_from_archive(task_name, payload)
-            elif cmd == "cancel":
-                cancel_flag.set()
-                return
             elif cmd in ("question", "plan-implement", "implement", "do"):
                 self._run_agent(task_name, cmd, payload.get("prompt"), cancel_flag)
             elif cmd == "bash":
                 self._run_bash(task_name, payload.get("prompt", ""), cancel_flag)
             else:
                 raise RuntimeError(f"Unknown command: {cmd}")
-            self.client.complete_command(task_name, result=self._task_result(task_name))
+            result = self._task_result(task_name)
         except TaskCancelled as e:
             logger.info("Command cancelled for %s: %s", task_name, e)
             if cmd == "create-task":
                 task_dir = self.tasks_root / task_name
                 if task_dir.is_dir():
                     shutil.rmtree(task_dir, ignore_errors=True)
-            self.client.complete_command(task_name, error="Cancelled")
+            error = "Cancelled"
         except Exception as e:
             logger.exception("Command failed for %s: %s", task_name, e)
-            self.client.complete_command(task_name, error=str(e))
+            error = str(e)
         finally:
             cancel_flag.clear()
-            self._sync_comms(task_name)
+
+        try:
+            self._sync_comms_with_retries(task_name)
+        except Exception as sync_err:
+            logger.exception("Comms sync failed for %s after retries: %s", task_name, sync_err)
+            error = f"Failed to sync comms: {sync_err}"
+            result = None
+
+        if error is not None:
+            self.client.complete_command(task_name, error=error)
+        else:
+            self.client.complete_command(task_name, result=result or {})
 
     def _task_result(self, task_name: str) -> dict:
         task_dir = self.tasks_root / task_name
@@ -426,6 +442,28 @@ class CommandExecutor:
 
     def _sync_comms(self, task_name: str) -> None:
         sync_task_comms(self.client, self.tasks_root, task_name)
+
+    def _sync_comms_with_retries(self, task_name: str) -> None:
+        last_error: Exception | None = None
+        for attempt in range(COMMS_SYNC_RETRIES):
+            try:
+                sync_task_comms(self.client, self.tasks_root, task_name)
+                return
+            except Exception as exc:
+                last_error = exc
+                if attempt < COMMS_SYNC_RETRIES - 1:
+                    delay = COMMS_SYNC_RETRY_DELAY_SEC * (2**attempt)
+                    logger.warning(
+                        "Comms sync attempt %d/%d failed for %s: %s; retrying in %.1fs",
+                        attempt + 1,
+                        COMMS_SYNC_RETRIES,
+                        task_name,
+                        exc,
+                        delay,
+                    )
+                    time.sleep(delay)
+        assert last_error is not None
+        raise last_error
 
 
 def sync_task_comms(client: WorkerClient, tasks_root: Path, task_name: str) -> None:
