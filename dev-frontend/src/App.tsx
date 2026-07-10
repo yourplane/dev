@@ -1753,7 +1753,7 @@ export function TaskCommsPageContent({
       const pending = Boolean(!res.active && res.command)
       setActiveCommand(running ? res.command : null)
       setPendingCommand(pending ? res.command : null)
-      setPendingCommandState(pending ? (res.pending_state ?? 'syncing') : null)
+      setPendingCommandState(res.pending_state ?? (pending ? 'syncing' : null))
       setCreateProgress(res.create_progress ?? [])
       setCancelling(Boolean(res.cancelling))
       setActiveLogFilename(res.active && res.active_log_filename ? res.active_log_filename : null)
@@ -2594,6 +2594,10 @@ export function TaskCommsPageContent({
               {cancelling ? (
                 <p className="command-status">
                   <span className="command-spinner" aria-hidden /> Cancelling…
+                </p>
+              ) : pendingCommandState === 'worker_offline' ? (
+                <p className="command-status">
+                  <span className="command-spinner" aria-hidden /> Worker offline — command interrupted, waiting for worker
                 </p>
               ) : (
                 <p className="command-status">
