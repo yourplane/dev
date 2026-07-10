@@ -486,3 +486,166 @@ def test_create_task_always_clears_new_task_draft(aws_env):
     )
     assert resp["statusCode"] == 200
     assert store.get_draft("new-task") is None
+
+
+def _make_offline(store: CloudStore, environment_id: str) -> None:
+    store._table.update_item(
+        Key={"pk": f"ENV#{environment_id}", "sk": "META"},
+        UpdateExpression="SET last_heartbeat = :ts",
+        ExpressionAttributeValues={":ts": "1"},
+    )
+
+
+def test_cancel_active_command_when_worker_offline_instant_clears(aws_env):
+    router = Router()
+    store = CloudStore()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Offline cancel", "environment_id": "env-1", "repo": None},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    router.dispatch(_event("POST", f"/worker/tasks/{task_name}/command/start"))
+    _make_offline(store, "env-1")
+
+    cancel = router.dispatch(_event("POST", f"/tasks/{task_name}/commands/cancel"))
+    assert cancel["statusCode"] == 204
+
+    status = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/commands"))["body"])
+    assert status["active"] is False
+    assert status["cancelling"] is False
+    assert status["command_error"] == "Cancelled"
+    task = store.get_task(task_name)
+    assert task.active_command is None
+    assert task.last_command_error == "Cancelled"
+
+
+def test_command_status_auto_clears_cancelling_when_worker_offline(aws_env):
+    router = Router()
+    store = CloudStore()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Grace cancel", "environment_id": "env-1", "repo": None},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    router.dispatch(_event("POST", f"/worker/tasks/{task_name}/command/start"))
+    router.dispatch(_event("POST", f"/tasks/{task_name}/commands/cancel"))
+
+    status = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/commands"))["body"])
+    assert status["cancelling"] is True
+
+    _make_offline(store, "env-1")
+    status = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/commands"))["body"])
+    assert status["active"] is False
+    assert status["cancelling"] is False
+    assert status["command_error"] == "Cancelled"
+    task = store.get_task(task_name)
+    assert task.active_command is None
+
+
+def test_command_status_shows_worker_offline_for_started_command(aws_env):
+    router = Router()
+    store = CloudStore()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Offline running", "environment_id": "env-1", "repo": None},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    router.dispatch(_event("POST", f"/worker/tasks/{task_name}/command/start"))
+    _make_offline(store, "env-1")
+
+    status = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/commands"))["body"])
+    assert status["active"] is True
+    assert status["pending_state"] == "worker_offline"
+
+
+def test_worker_poll_redelivers_claimed_not_started_command(aws_env):
+    router = Router()
+    store = CloudStore()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Retry claim", "environment_id": "env-1", "repo": None},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    router.dispatch(_event("POST", f"/worker/tasks/{task_name}/sync", {"push": []}))
+
+    retry_poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    data = json.loads(retry_poll["body"])
+    assert len(data["work"]) == 1
+    assert data["work"][0]["task_name"] == task_name
+    assert data["work"][0]["command"]["command"] == "create-task"
+    assert data["work"][0]["command"]["started"] is False
+    assert data["active_commands"] == []
+
+
+def test_worker_poll_returns_active_commands_for_started_commands(aws_env):
+    router = Router()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Started orphan", "environment_id": "env-1", "repo": None},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    router.dispatch(_event("POST", f"/worker/tasks/{task_name}/command/start"))
+
+    poll2 = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    data = json.loads(poll2["body"])
+    assert data["work"] == []
+    assert len(data["active_commands"]) == 1
+    assert data["active_commands"][0]["task_name"] == task_name
+    assert data["active_commands"][0]["command"]["started"] is True
+
+
+def test_worker_command_complete_orphan_with_reboot_message(aws_env):
+    router = Router()
+    store = CloudStore()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Orphan complete", "environment_id": "env-1", "repo": None},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    router.dispatch(_event("POST", f"/worker/tasks/{task_name}/command/start"))
+
+    from dev_cloud_control.handler import WORKER_REBOOT_MESSAGE
+
+    router.dispatch(
+        _event(
+            "POST",
+            f"/worker/tasks/{task_name}/command/complete",
+            {"error": WORKER_REBOOT_MESSAGE},
+        )
+    )
+    status = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/commands"))["body"])
+    assert status["active"] is False
+    assert status["command_error"] == WORKER_REBOOT_MESSAGE
+    task = store.get_task(task_name)
+    assert task.active_command is None
+    assert task.last_command_error == WORKER_REBOOT_MESSAGE
