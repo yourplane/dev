@@ -34,6 +34,9 @@ from dev_sdk.task_manager import TaskCancelled, TaskManager
 
 logger = logging.getLogger("dev_cloud_worker")
 POLL_INTERVAL_SEC = float(os.environ.get("DEV_CLOUD_POLL_INTERVAL", "1"))
+WORKER_REBOOT_MESSAGE = (
+    "Worker rebooted — command cancelled; workspace may have uncommitted changes"
+)
 CONFIG_DIR = Path.home() / ".config" / "dev-cloud"
 ENV_ID_FILE = CONFIG_DIR / "environment_id"
 DISPLAY_NAME_FILE = CONFIG_DIR / "display_name"
@@ -203,6 +206,35 @@ class CommandExecutor:
         self.manager = TaskManager(self.tasks_root)
         self._cancel_flags: dict[str, threading.Event] = {}
         self._cancel_lock = threading.Lock()
+        self._running_tasks: set[str] = set()
+        self._running_lock = threading.Lock()
+
+    def try_start(self, task_name: str) -> bool:
+        with self._running_lock:
+            if task_name in self._running_tasks:
+                return False
+            self._running_tasks.add(task_name)
+            return True
+
+    def is_running(self, task_name: str) -> bool:
+        with self._running_lock:
+            return task_name in self._running_tasks
+
+    def reconcile_orphans(self, active_commands: list[dict]) -> None:
+        for item in active_commands:
+            task_name = item.get("task_name")
+            if not task_name or self.is_running(task_name):
+                continue
+            command = item.get("command") or {}
+            if command.get("cancel_requested"):
+                error = "Cancelled"
+            else:
+                error = WORKER_REBOOT_MESSAGE
+            try:
+                self.client.complete_command(task_name, error=error)
+                logger.info("Reconciled orphaned command for %s: %s", task_name, error)
+            except Exception:
+                logger.exception("Failed to reconcile orphaned command for %s", task_name)
 
     def _cancel_for(self, task_name: str) -> threading.Event:
         with self._cancel_lock:
@@ -252,6 +284,8 @@ class CommandExecutor:
             self.client.complete_command(task_name, error=str(e))
         finally:
             cancel_flag.clear()
+            with self._running_lock:
+                self._running_tasks.discard(task_name)
             self._sync_comms(task_name)
 
     def _task_result(self, task_name: str) -> dict:
@@ -487,6 +521,7 @@ def run_loop() -> None:
                 except Exception:
                     logger.exception("Comms sync failed for %s", task_name)
             work_data = client.poll(claim_work=True)
+            executor.reconcile_orphans(work_data.get("active_commands", []))
             for d in work_data.get("deletions", []):
                 task_name = d["task_name"]
                 filename = d["filename"]
@@ -499,6 +534,8 @@ def run_loop() -> None:
                 command = item["command"]
                 if command.get("command") == "cancel":
                     executor.request_cancel(task_name)
+                    continue
+                if not executor.try_start(task_name):
                     continue
                 threading.Thread(
                     target=run_command,
