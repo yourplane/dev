@@ -7,8 +7,6 @@ import logging
 import os
 import queue
 import re
-import signal
-import subprocess
 import threading
 import time
 import zipfile
@@ -27,11 +25,10 @@ from dev_sdk.agent_run import (
     run_plan_implement,
     run_question_mode,
 )
+from dev_sdk.bash_runner import BashRunResult, BashStreamHooks, run_bash_stream
 from dev_sdk.stream_sse import SSE_HEADERS, STREAM_MAX_DURATION_SEC, run_task_stream
 from dev_sdk.comms import (
     add_comms,
-    bash_comms_input_header,
-    begin_streaming_bash_comms,
     comms_dir,
     index_path,
     read_index,
@@ -59,8 +56,8 @@ from dev_sdk.create_pr import (
 )
 from dev_sdk.merge_from_main import (
     MergeFromMainError,
-    has_conflicted_merge_in_progress,
-    merge_shell_command,
+    MergeFromMainHooks,
+    run_merge_from_main,
     validate_merge_from_main_can_start,
 )
 from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repos
@@ -70,85 +67,31 @@ from dev_sdk.task_manager import TaskManager
 SUPPORTED_COMMANDS = tuple(cmd.value for cmd in TaskCommand)
 logger = logging.getLogger("dev_server")
 
-_DEFAULT_BASH_MAX_OUTPUT_BYTES = 2_000_000
-_DEFAULT_BASH_TIMEOUT_SEC = 3600.0
 
-_bash_comms_append_lock = threading.Lock()
+def _bash_registry_hooks(task_name: str) -> BashStreamHooks:
+    def on_comms_path(path: Path) -> None:
+        with _command_registry_lock:
+            if task_name in _command_registry:
+                _command_registry[task_name]["active_bash_comms_filename"] = path.name
 
-
-def _append_bytes_to_bash_comms(path: Path, data: bytes) -> None:
-    with _bash_comms_append_lock:
-        with open(path, "ab") as f:
-            f.write(data)
+    return BashStreamHooks(on_comms_path=on_comms_path)
 
 
-def _append_bash_comms_footer(
-    path: Path,
+def _run_bash_stream_for_task(
+    task_dir: Path,
+    task_name: str,
     *,
-    truncated: bool,
-    cancelled: bool,
-    timed_out: bool,
-    exit_code: int | None,
-    timeout_sec: float,
-    interrupted: bool = False,
-) -> None:
-    with _bash_comms_append_lock:
-        with open(path, "a", encoding="utf-8") as f:
-            if truncated:
-                f.write("\n[… output truncated (DEV_BASH_MAX_OUTPUT_BYTES) …]")
-            f.write("\n---\n")
-            if interrupted:
-                f.write("Interrupted.\n")
-            elif cancelled:
-                f.write("Cancelled by user.\n")
-            elif timed_out:
-                f.write(f"Timed out after {timeout_sec:g}s (DEV_BASH_TIMEOUT_SEC).\n")
-            else:
-                f.write(f"Exit code: {exit_code if exit_code is not None else 'unknown'}\n")
-
-
-def _terminate_process_group(proc: subprocess.Popen, *, use_kill: bool = False) -> None:
-    """Send SIGTERM (or SIGKILL) to the child's process group."""
-    try:
-        sig = signal.SIGKILL if use_kill else signal.SIGTERM
-        os.killpg(proc.pid, sig)
-    except (ProcessLookupError, PermissionError):
-        pass
-
-
-def _popen_bash_for_streaming(shell_command: str, *, cwd: str) -> subprocess.Popen[str]:
-    """
-    Spawn `bash -c` with stdout/stderr merged to a PIPE.
-
-    Uses ``bufsize=0`` so Python does not wrap the pipe in a large BufferedReader
-    (default ``bufsize`` blocks ``read()`` until ~8KiB accumulates or the pipe closes).
-
-    Without a TTY, libc stdio defaults to fully buffered stdout on the child; prefer
-    coreutils ``stdbuf`` line buffering when available so programs flush often enough.
-    Set DEV_BASH_NO_STDBUF=1 to skip ``stdbuf`` (e.g. minimal images without coreutils).
-    """
-    use_stdbuf = os.environ.get("DEV_BASH_NO_STDBUF", "").strip().lower() not in ("1", "true", "yes")
-    argv_candidates: list[list[str]] = []
-    if use_stdbuf:
-        argv_candidates.append(["stdbuf", "-oL", "-eL", "bash", "-c", shell_command])
-    argv_candidates.append(["bash", "-c", shell_command])
-    last_fe: FileNotFoundError | None = None
-    for argv in argv_candidates:
-        try:
-            return subprocess.Popen(
-                argv,
-                cwd=cwd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                stdin=subprocess.DEVNULL,
-                start_new_session=True,
-                bufsize=0,
-            )
-        except FileNotFoundError as e:
-            last_fe = e
-            continue
-    assert last_fe is not None
-    raise last_fe
+    shell_command: str,
+    cwd: Path,
+    cancel_requested: threading.Event,
+) -> BashRunResult:
+    return run_bash_stream(
+        task_dir,
+        shell_command,
+        cwd=cwd,
+        cancel_event=cancel_requested,
+        hooks=_bash_registry_hooks(task_name),
+    )
 
 
 def _run_bash_in_thread(
@@ -159,7 +102,7 @@ def _run_bash_in_thread(
 ) -> None:
     """Run bash -c in task_dir; stream stdout into comms file; append footer; clear registry when done."""
     try:
-        _stream_bash_command(
+        _run_bash_stream_for_task(
             task_dir,
             task_name,
             shell_command=shell_command,
@@ -181,139 +124,15 @@ def _stream_bash_command(
     cwd: Path,
     cancel_requested: threading.Event,
 ) -> tuple[int | None, bool, bool, bool]:
-    """
-    Run bash -c with streaming comms in task_dir. Updates active_bash_comms_filename on registry.
-
-    Returns (exit_code, cancelled, timed_out, truncated).
-    """
-    try:
-        max_bytes = int(os.environ.get("DEV_BASH_MAX_OUTPUT_BYTES", str(_DEFAULT_BASH_MAX_OUTPUT_BYTES)))
-    except ValueError:
-        max_bytes = _DEFAULT_BASH_MAX_OUTPUT_BYTES
-    try:
-        timeout_sec = float(os.environ.get("DEV_BASH_TIMEOUT_SEC", str(_DEFAULT_BASH_TIMEOUT_SEC)))
-    except ValueError:
-        timeout_sec = _DEFAULT_BASH_TIMEOUT_SEC
-
-    try:
-        proc = _popen_bash_for_streaming(shell_command, cwd=str(cwd))
-    except OSError as exc:
-        logger.warning("bash spawn failed for task %s: %s", task_name, exc)
-        add_comms(
-            task_dir,
-            "user",
-            f"{bash_comms_input_header(shell_command)}\n---\nFailed to start process: {exc}\n",
-            kind="bash",
-        )
-        return None, False, False, False
-
-    path: Path | None = None
-    footer_written = False
-    truncated = False
-    cancelled = False
-    timed_out = False
-    start = time.monotonic()
-    trunc_cell: list[bool] = [False]
-    stdout = proc.stdout
-    assert stdout is not None
-
-    try:
-        path = begin_streaming_bash_comms(task_dir, shell_command)
-        with _command_registry_lock:
-            if task_name in _command_registry:
-                _command_registry[task_name]["active_bash_comms_filename"] = path.name
-
-        collected = bytearray()
-
-        def read_stdout() -> None:
-            while True:
-                chunk = stdout.read(4096)
-                if not chunk:
-                    break
-                room = max_bytes - len(collected)
-                if room <= 0:
-                    trunc_cell[0] = True
-                    break
-                take = min(len(chunk), room)
-                portion = chunk[:take]
-                collected.extend(portion)
-                _append_bytes_to_bash_comms(path, portion)
-                if take < len(chunk):
-                    trunc_cell[0] = True
-                    break
-
-        reader = threading.Thread(target=read_stdout, daemon=True)
-        reader.start()
-
-        try:
-            while proc.poll() is None:
-                if cancel_requested.is_set():
-                    cancelled = True
-                    _terminate_process_group(proc, use_kill=False)
-                    break
-                if timeout_sec > 0 and (time.monotonic() - start) > timeout_sec:
-                    timed_out = True
-                    _terminate_process_group(proc, use_kill=True)
-                    break
-                if trunc_cell[0] or len(collected) >= max_bytes:
-                    truncated = True
-                    _terminate_process_group(proc, use_kill=True)
-                    break
-                time.sleep(0.1)
-            reader.join(timeout=30.0)
-            if proc.poll() is None:
-                _terminate_process_group(proc, use_kill=True)
-                proc.wait(timeout=15)
-            else:
-                proc.wait(timeout=15)
-        finally:
-            try:
-                stdout.close()
-            except OSError:
-                pass
-
-        truncated = truncated or trunc_cell[0]
-        exit_code = proc.returncode
-        _append_bash_comms_footer(
-            path,
-            truncated=truncated,
-            cancelled=cancelled,
-            timed_out=timed_out,
-            exit_code=exit_code,
-            timeout_sec=timeout_sec,
-        )
-        footer_written = True
-        return exit_code, cancelled, timed_out, truncated
-    except Exception:
-        logger.exception("bash run failed for task %s", task_name)
-        if path is not None and not footer_written:
-            try:
-                _append_bash_comms_footer(
-                    path,
-                    truncated=False,
-                    cancelled=False,
-                    timed_out=False,
-                    exit_code=None,
-                    timeout_sec=timeout_sec,
-                    interrupted=True,
-                )
-            except OSError:
-                logger.exception("failed to write bash interrupted footer for task %s", task_name)
-        return None, cancelled, timed_out, truncated
-    finally:
-        if path is not None and not footer_written:
-            try:
-                _append_bash_comms_footer(
-                    path,
-                    truncated=False,
-                    cancelled=False,
-                    timed_out=False,
-                    exit_code=None,
-                    timeout_sec=timeout_sec,
-                    interrupted=True,
-                )
-            except OSError:
-                logger.exception("failed to finalize bash comms for task %s", task_name)
+    """Backward-compatible wrapper returning (exit_code, cancelled, timed_out, truncated)."""
+    result = _run_bash_stream_for_task(
+        task_dir,
+        task_name,
+        shell_command=shell_command,
+        cwd=cwd,
+        cancel_requested=cancel_requested,
+    )
+    return result.exit_code, result.cancelled, result.timed_out, result.truncated
 
 
 def _run_merge_from_main_in_thread(
@@ -322,50 +141,36 @@ def _run_merge_from_main_in_thread(
     cancel_requested: threading.Event,
 ) -> None:
     """Fetch/merge/push origin/main, or resume conflict resolution via agent."""
-    try:
-        repo_root = validate_merge_from_main_can_start(task_dir)
-
-        def on_agent_start(stream_log_path: Path) -> None:
-            with _command_registry_lock:
-                if task_name in _command_registry:
-                    _command_registry[task_name]["active_log_filename"] = stream_log_path.name
-                    _command_registry[task_name]["active_bash_comms_filename"] = None
-
-        if has_conflicted_merge_in_progress(repo_root):
-            run_merge_conflict_resolution(
-                task_dir,
-                on_start=on_agent_start,
-                cancel_event=cancel_requested,
-            )
-            return
-
-        shell_command = merge_shell_command(repo_root, task_dir)
-        exit_code, cancelled, _timed_out, _truncated = _stream_bash_command(
-            task_dir,
-            task_name,
-            shell_command=shell_command,
-            cwd=task_dir,
-            cancel_requested=cancel_requested,
-        )
-        if cancel_requested.is_set() or cancelled:
-            return
-        if exit_code == 0 and not has_conflicted_merge_in_progress(repo_root):
-            return
-        if has_conflicted_merge_in_progress(repo_root):
-            run_merge_conflict_resolution(
-                task_dir,
-                on_start=on_agent_start,
-                cancel_event=cancel_requested,
-            )
-    except MergeFromMainError as e:
+    def on_agent_start(stream_log_path: Path) -> None:
         with _command_registry_lock:
-            _last_command_error[task_name] = str(e)
-    except AgentRunError as e:
+            if task_name in _command_registry:
+                _command_registry[task_name]["active_log_filename"] = stream_log_path.name
+                _command_registry[task_name]["active_bash_comms_filename"] = None
+
+    def set_last_error(msg: str) -> None:
         with _command_registry_lock:
-            _last_command_error[task_name] = str(e)
-    else:
+            _last_command_error[task_name] = msg
+
+    def clear_last_error() -> None:
         with _command_registry_lock:
             _last_command_error.pop(task_name, None)
+
+    hooks = MergeFromMainHooks(
+        stream_bash=lambda td, cmd, cwd, ev: _run_bash_stream_for_task(
+            td, task_name, shell_command=cmd, cwd=cwd, cancel_requested=ev
+        ),
+        run_conflict_resolution=lambda td, ev, on_start: run_merge_conflict_resolution(
+            td,
+            on_start=on_start,
+            cancel_event=ev,
+        ),
+        on_validation_error=set_last_error,
+        on_agent_error=set_last_error,
+        on_success_clear_error=clear_last_error,
+        on_agent_start=on_agent_start,
+    )
+    try:
+        run_merge_from_main(task_dir, cancel_event=cancel_requested, hooks=hooks)
     finally:
         with _command_registry_lock:
             _command_registry.pop(task_name, None)
