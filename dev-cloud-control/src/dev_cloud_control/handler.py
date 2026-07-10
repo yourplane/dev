@@ -31,6 +31,9 @@ from dev_cloud_control.store import (
 from dev_sdk.stream_sse import SSE_HEADERS, STREAM_MAX_DURATION_SEC, run_task_stream
 
 SUPPORTED_COMMANDS = ("question", "plan-implement", "implement", "do", "bash")
+WORKER_REBOOT_MESSAGE = (
+    "Worker rebooted — command cancelled; workspace may have uncommitted changes"
+)
 
 
 def _command_execution_started(active: dict | None) -> bool:
@@ -57,6 +60,15 @@ def _append_cancelling_progress(progress: list[str]) -> list[str]:
     if not out or out[-1] != "Cancelling…":
         out.append("Cancelling…")
     return out
+
+
+def _force_clear_active_command(task: TaskRecord) -> dict[str, Any]:
+    progress = _append_cancelling_progress(list(task.create_progress or []))
+    return {
+        "active_command": None,
+        "create_progress": progress,
+        "last_command_error": "Cancelled",
+    }
 
 
 def _json_default(obj: Any) -> Any:
@@ -139,6 +151,9 @@ class Router:
         pending_state = self._pending_command_state(task)
         started = _command_execution_started(active)
         if started and active:
+            pending_state = None
+            if not _environment_online(self.store, task.environment_id):
+                pending_state = "worker_offline"
             return {
                 "active": True,
                 "command": active.get("command"),
@@ -148,7 +163,7 @@ class Router:
                 "create_progress": progress,
                 "queued": False,
                 "cancelling": _command_cancelling(active),
-                "pending_state": None,
+                "pending_state": pending_state,
             }
         cmd = None
         if queued:
@@ -831,10 +846,19 @@ class Router:
 
     # --- commands ---
 
+    def _maybe_auto_clear_offline_cancelling(self, task_name: str, task: TaskRecord) -> TaskRecord:
+        if not task.active_command or not _command_cancelling(task.active_command):
+            return task
+        if _environment_online(self.store, task.environment_id):
+            return task
+        self.store.update_task(task_name, **_force_clear_active_command(task))
+        return self.store.get_task(task_name) or task
+
     def get_command_status(self, event: dict, task_name: str) -> dict:
         task = self.store.get_task(task_name)
         if not task:
             return _json(404, {"detail": "Task not found"})
+        task = self._maybe_auto_clear_offline_cancelling(task_name, task)
         return _json(200, self._command_status_body(task))
 
     def start_command(self, event: dict, task_name: str) -> dict:
@@ -874,15 +898,12 @@ class Router:
             )
             return _no_content()
         if task.active_command:
+            if not _environment_online(self.store, task.environment_id):
+                self.store.update_task(task_name, **_force_clear_active_command(task))
+                return _no_content()
             active = dict(task.active_command)
             if _command_cancelling(active):
-                progress = _append_cancelling_progress(list(task.create_progress or []))
-                self.store.update_task(
-                    task_name,
-                    active_command=None,
-                    create_progress=progress,
-                    last_command_error="Cancelled",
-                )
+                self.store.update_task(task_name, **_force_clear_active_command(task))
                 return _no_content()
             active["cancel_requested"] = True
             active["cancelling"] = True
@@ -1172,6 +1193,7 @@ class Router:
             claim_work = claim_work.lower() not in ("0", "false", "no")
 
         work: list[dict] = []
+        active_commands: list[dict] = []
         deletions: list[dict] = []
         sync_tasks: list[str] = []
         for task_name in self.store.list_tasks():
@@ -1196,16 +1218,28 @@ class Router:
                         create_progress=[],
                         last_command_error=None,
                     )
+            elif (
+                claim_work
+                and task.active_command
+                and not task.active_command.get("started")
+            ):
+                if _environment_online(self.store, env_id) and _task_comms_synced(task):
+                    cmd = dict(task.active_command)
             elif task.active_command and task.active_command.get("cancel_requested"):
                 cmd = {"command": "cancel", "payload": {}}
             if cmd:
                 work.append({"task_name": task_name, "command": cmd})
+            if task.active_command and task.active_command.get("started"):
+                active_commands.append(
+                    {"task_name": task_name, "command": dict(task.active_command)}
+                )
         return _json(
             200,
             {
                 "environment_id": env_id,
                 "display_name": display_name,
                 "work": work,
+                "active_commands": active_commands,
                 "deletions": deletions,
                 "sync_tasks": sync_tasks,
                 "repos": self.store.get_repos(),
