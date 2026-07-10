@@ -2339,6 +2339,8 @@ export function TaskCommsPageContent({
       await api.postTaskComms(taskName, content)
       setCommentText('')
       lastSavedCommentRef.current = ''
+      setCommentDraftStatus('saved')
+      api.setTaskCommentDraft(taskName, '').catch(() => {})
       await pollFeedIncremental({ prefetchNew: true })
       setScrollToBottomAfterLoad(true)
     } catch (err) {

@@ -191,6 +191,8 @@ export function QuestionAnswerForm({
       setLastSubmitted(submitted)
       setEditing(false)
       setLocked(true)
+      setDraftStatus('saved')
+      api.setQuestionAnswersDraft(taskName, sourceFilename, {}).catch(() => {})
       onSubmitted?.()
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : String(e))

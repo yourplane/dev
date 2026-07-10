@@ -76,6 +76,11 @@ describe('QuestionAnswerForm', () => {
     })
     const { api } = await import('./api')
     expect(api.postQuestionAnswers).toHaveBeenCalled()
+    expect(api.setQuestionAnswersDraft).toHaveBeenCalledWith(
+      't',
+      '002-agent-question.md',
+      {},
+    )
   })
 
   it('defaults to locked summary when persisted answers exist and no draft', async () => {
