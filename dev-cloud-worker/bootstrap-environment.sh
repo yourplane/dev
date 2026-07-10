@@ -7,7 +7,7 @@
 #
 # Usage (on the workstation, as the target user — typically ubuntu):
 #   export CONTROL_PLANE_URL=https://YOUR_CLOUDFRONT/api
-#   export DEV_REPO_BRANCH=task/cloud-dev   # optional
+#   export DEV_REPO_BRANCH=your-branch      # required
 #   ./bootstrap-environment.sh
 #
 # From a operator machine via SSM:
@@ -19,7 +19,10 @@ set -euo pipefail
 CONTROL_PLANE_URL="${CONTROL_PLANE_URL:-}"
 DEV_CLOUD_DISPLAY_NAME="${DEV_CLOUD_DISPLAY_NAME:-dev-environment}"
 DEV_REPO_URL="${DEV_REPO_URL:-https://github.com/yourplane/dev.git}"
-DEV_REPO_BRANCH="${DEV_REPO_BRANCH:-task/cloud-dev}"
+if [[ -z "${DEV_REPO_BRANCH:-}" ]]; then
+  echo "Set DEV_REPO_BRANCH (git branch to clone on the worker)" >&2
+  exit 1
+fi
 DEV_TASKS_ROOT="${DEV_TASKS_ROOT:-$HOME/tasks}"
 HOME_DEV="${HOME_DEV:-$HOME/dev}"
 
