@@ -31,14 +31,6 @@ const FEED_PAGE_SIZE = 50
 const ARCHIVE_PAGE_SIZE = 50
 
 export function Layout() {
-  const [signedIn, setSignedIn] = useState(() => Boolean(getIdToken()))
-
-  const handleSignOut = () => {
-    signOut()
-    setSignedIn(false)
-    window.location.href = '/'
-  }
-
   return (
     <div className="app">
       <header className="header">
@@ -48,11 +40,6 @@ export function Layout() {
           <Link to="/new" className="nav-link">New task</Link>
           <Link to="/archive" className="nav-link">Archive</Link>
           {isCloudMode() && <Link to="/settings" className="nav-link">Settings</Link>}
-          {isCloudMode() && signedIn && (
-            <button type="button" className="cloud-sign-out-btn" onClick={handleSignOut}>
-              Sign out
-            </button>
-          )}
         </nav>
       </header>
       <main className="main">
@@ -3071,6 +3058,21 @@ function SettingsPage() {
             {saving ? 'Saving…' : 'Save bots'}
           </button>
         </div>
+      </div>
+
+      <div className="settings-section">
+        <h3>Account</h3>
+        <p className="settings-hint">End your cloud session on this device.</p>
+        <button
+          type="button"
+          className="settings-btn settings-btn-danger"
+          onClick={() => {
+            signOut()
+            window.location.href = '/'
+          }}
+        >
+          Sign out
+        </button>
       </div>
     </section>
   )
