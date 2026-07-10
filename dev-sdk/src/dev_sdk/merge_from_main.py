@@ -1,15 +1,20 @@
 """Merge origin/main into the task's feature branch (fetch, merge, push).
 
-Used by dev-server merge-from-main command. Raises MergeFromMainError on
-validation failure before git steps run.
+Used by dev-server and cloud-worker merge-from-main command. Raises
+MergeFromMainError on validation failure before git steps run.
 """
 
 from __future__ import annotations
 
 import shlex
 import subprocess
+import threading
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
+from dev_sdk.agent_run import AgentRunError
+from dev_sdk.bash_runner import BashRunResult
 from dev_sdk.create_pr import _ensure_clean_tree, _find_single_git_repo_under
 
 
@@ -71,3 +76,67 @@ def merge_shell_command(repo_root: Path, task_root: Path) -> str:
         'git push -u origin "$(git rev-parse --abbrev-ref HEAD)"'
         ")"
     )
+
+
+@dataclass
+class MergeFromMainHooks:
+    """Runtime-specific hooks for merge-from-main orchestration."""
+
+    stream_bash: Callable[
+        [Path, str, Path, threading.Event],
+        BashRunResult,
+    ]
+    run_conflict_resolution: Callable[
+        [Path, threading.Event, Callable[[Path], None] | None],
+        None,
+    ]
+    on_validation_error: Callable[[str], None] | None = None
+    on_agent_error: Callable[[str], None] | None = None
+    on_success_clear_error: Callable[[], None] | None = None
+    on_agent_start: Callable[[Path], None] | None = None
+
+
+def run_merge_from_main(
+    task_dir: Path,
+    *,
+    cancel_event: threading.Event,
+    hooks: MergeFromMainHooks,
+) -> None:
+    """
+    Fetch/merge/push origin/main, or resume conflict resolution via agent.
+
+    Validation and git/agent steps are shared; hooks wire bash streaming and
+    conflict-resolution agent to each runtime.
+    """
+    try:
+        repo_root = validate_merge_from_main_can_start(task_dir)
+
+        def agent_start(stream_log_path: Path) -> None:
+            if hooks.on_agent_start is not None:
+                hooks.on_agent_start(stream_log_path)
+
+        if has_conflicted_merge_in_progress(repo_root):
+            hooks.run_conflict_resolution(task_dir, cancel_event, agent_start)
+            return
+
+        shell_command = merge_shell_command(repo_root, task_dir)
+        result = hooks.stream_bash(task_dir, shell_command, task_dir, cancel_event)
+        if cancel_event.is_set() or result.cancelled:
+            return
+        if result.exit_code == 0 and not has_conflicted_merge_in_progress(repo_root):
+            return
+        if has_conflicted_merge_in_progress(repo_root):
+            hooks.run_conflict_resolution(task_dir, cancel_event, agent_start)
+    except MergeFromMainError as e:
+        if hooks.on_validation_error is not None:
+            hooks.on_validation_error(str(e))
+        else:
+            raise
+    except AgentRunError as e:
+        if hooks.on_agent_error is not None:
+            hooks.on_agent_error(str(e))
+        else:
+            raise
+    else:
+        if hooks.on_success_clear_error is not None:
+            hooks.on_success_clear_error()
