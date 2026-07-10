@@ -1,7 +1,16 @@
+export type ComplexityLevel = 'low' | 'medium' | 'high'
+
+export interface QuestionOption {
+  label: string
+  implications?: string
+  complexity?: ComplexityLevel
+}
+
 export interface QuestionItem {
   id?: string
   text: string
-  options: string[]
+  rationale?: string
+  options: QuestionOption[]
 }
 
 export interface QuestionPayload {
@@ -25,6 +34,35 @@ export interface QuestionAnswersDraft {
 export interface ParsedAnswersMarkdown {
   source: string
   answers: SubmittedAnswers
+}
+
+export function normalizeOptions(raw: unknown[]): QuestionOption[] {
+  const options: QuestionOption[] = []
+  for (const item of raw) {
+    if (typeof item === 'string') {
+      options.push({ label: item })
+      continue
+    }
+    if (typeof item !== 'object' || item === null) continue
+    const obj = item as Record<string, unknown>
+    if (typeof obj.label !== 'string') continue
+    const option: QuestionOption = { label: obj.label }
+    if (typeof obj.implications === 'string' && obj.implications.trim()) {
+      option.implications = obj.implications
+    }
+    if (obj.complexity === 'low' || obj.complexity === 'medium' || obj.complexity === 'high') {
+      option.complexity = obj.complexity
+    }
+    options.push(option)
+  }
+  return options
+}
+
+export function findOptionByLabel(
+  options: QuestionOption[],
+  label: string,
+): QuestionOption | undefined {
+  return options.find((o) => o.label === label)
 }
 
 export function parseAnswersMarkdown(content: string): ParsedAnswersMarkdown | null {
@@ -118,16 +156,29 @@ export function tryParseQuestionPayload(content: string): QuestionPayload | null
     const obj = data as Record<string, unknown>
     if (typeof obj.intro !== 'string') return null
     if (!Array.isArray(obj.questions)) return null
+    const questions: QuestionItem[] = []
     for (const q of obj.questions) {
       if (typeof q !== 'object' || q === null) return null
       const item = q as Record<string, unknown>
       if (typeof item.text !== 'string') return null
       if (!Array.isArray(item.options)) return null
-      if (!item.options.every((o) => typeof o === 'string')) return null
+      const options = normalizeOptions(item.options)
+      if (options.length !== item.options.length) return null
+      const question: QuestionItem = {
+        text: item.text,
+        options,
+      }
+      if (typeof item.id === 'string' && item.id.trim()) {
+        question.id = item.id.trim()
+      }
+      if (typeof item.rationale === 'string' && item.rationale.trim()) {
+        question.rationale = item.rationale
+      }
+      questions.push(question)
     }
     return normalizeQuestionIds({
       intro: obj.intro,
-      questions: obj.questions as QuestionItem[],
+      questions,
     })
   } catch {
     return null
@@ -145,4 +196,15 @@ export function hasAnyAnswer(
     if ((freeText[id] ?? '').trim()) return true
   }
   return false
+}
+
+export function complexityLabel(level: ComplexityLevel): string {
+  switch (level) {
+    case 'low':
+      return 'Low complexity'
+    case 'medium':
+      return 'Medium complexity'
+    case 'high':
+      return 'High complexity'
+  }
 }

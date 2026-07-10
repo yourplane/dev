@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from dev_sdk.comms import read_index
-from dev_sdk.task_manager import TaskManager
+from dev_sdk.task_manager import TaskCancelled, TaskManager
 
 
 @pytest.fixture
@@ -19,6 +19,74 @@ def tmp_tasks_root(tmp_path: Path) -> Path:
 @pytest.fixture
 def manager(tmp_tasks_root: Path) -> TaskManager:
     return TaskManager(tasks_root=tmp_tasks_root)
+
+
+class _FakeProc:
+    """Minimal stand-in for subprocess.Popen used by TaskManager tests."""
+
+    def __init__(
+        self,
+        *,
+        stdout_lines: list[str] | None = None,
+        returncode: int = 0,
+        stderr: str = "",
+        stdout_bytes: bytes = b"",
+        stderr_bytes: bytes = b"",
+        on_start: "callable[[], None] | None" = None,
+    ) -> None:
+        self._stdout_lines = list(stdout_lines or [])
+        self.returncode = returncode
+        self.stderr = _FakeStream(stderr)
+        self.stdout = _FakeStream("".join(self._stdout_lines))
+        self._stdout_bytes = stdout_bytes
+        self._stderr_bytes = stderr_bytes
+        self._killed = False
+        self._on_start = on_start
+
+    def start_side_effects(self) -> None:
+        if self._on_start:
+            self._on_start()
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self.returncode
+
+    def terminate(self) -> None:
+        self._killed = True
+
+    def kill(self) -> None:
+        self._killed = True
+
+    def communicate(self, timeout: float | None = None):
+        return self._stdout_bytes, self._stderr_bytes
+
+
+class _FakeStream:
+    def __init__(self, text: str) -> None:
+        self._buf = text.splitlines(keepends=True) if text else []
+        self._full = text
+
+    def readline(self) -> str:
+        if self._buf:
+            return self._buf.pop(0)
+        return ""
+
+    def read(self) -> str:
+        return self._full
+
+
+def _popen_factory(cases: dict[tuple[str, ...], _FakeProc]):
+    def factory(cmd, **kwargs):
+        key = tuple(cmd)
+        for pattern, proc in cases.items():
+            if all(p in key for p in pattern):
+                proc.start_side_effects()
+                return proc
+        raise NotImplementedError(f"Unexpected subprocess: {cmd}")
+
+    return factory
 
 
 def test_parse_chat_id_single_line(manager: TaskManager) -> None:
@@ -53,23 +121,23 @@ def test_write_chat_id_file(manager: TaskManager, tmp_tasks_root: Path) -> None:
     assert path.read_text().strip() == "chat-uuid-123"
 
 
-@patch("dev_sdk.task_manager.subprocess.run")
+def _start_task_cases(tmp_tasks_root: Path, task_name: str = "my-task", chat_id: str = "my-chat-id-456") -> dict:
+    return {
+        ("cursor", "create-chat"): _FakeProc(stdout_lines=[f"{chat_id}\n"]),
+        ("git", "clone"): _FakeProc(
+            on_start=lambda: (tmp_tasks_root / task_name / "repo").mkdir(parents=True)
+        ),
+        ("git", "checkout"): _FakeProc(),
+    }
+
+
+@patch("dev_sdk.task_manager.subprocess.Popen")
 def test_start_task(
-    mock_run: MagicMock,
+    mock_popen: MagicMock,
     manager: TaskManager,
     tmp_tasks_root: Path,
 ) -> None:
-    def run_side_effect(cmd, **kwargs):
-        if cmd[0] == "cursor" and "create-chat" in cmd:
-            return MagicMock(stdout="Chat created.\nmy-chat-id-456\n", stderr="", returncode=0)
-        if cmd[0] == "git" and cmd[1] == "clone":
-            (tmp_tasks_root / "my-task" / "repo").mkdir(parents=True)
-            return MagicMock(returncode=0)
-        if cmd[0] == "git" and cmd[1] == "checkout" and cmd[2] == "-b":
-            return MagicMock(returncode=0)
-        raise NotImplementedError(cmd)
-
-    mock_run.side_effect = run_side_effect
+    mock_popen.side_effect = _popen_factory(_start_task_cases(tmp_tasks_root))
 
     manager.start_task(
         title="My Task",
@@ -92,26 +160,21 @@ def test_start_task(
     assert "workspace root is not a git project" in rules_file.read_text()
     assert "one level deeper" in rules_file.read_text()
 
-    create_chat_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "cursor"]
-    assert len(create_chat_calls) == 1
-    clone_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "git" and c[0][0][1] == "clone"]
-    assert len(clone_calls) == 1
-    checkout_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "git" and c[0][0][1] == "checkout"]
-    assert len(checkout_calls) == 1
+    all_cmds = [call.args[0] for call in mock_popen.call_args_list]
+    assert sum(1 for c in all_cmds if c[0] == "cursor") == 1
+    assert sum(1 for c in all_cmds if c[0] == "git" and c[1] == "clone") == 1
+    assert sum(1 for c in all_cmds if c[0] == "git" and c[1] == "checkout") == 1
 
 
-@patch("dev_sdk.task_manager.subprocess.run")
+@patch("dev_sdk.task_manager.subprocess.Popen")
 def test_start_task_no_repo_skips_clone_and_git_workspace_rule(
-    mock_run: MagicMock,
+    mock_popen: MagicMock,
     manager: TaskManager,
     tmp_tasks_root: Path,
 ) -> None:
-    def run_side_effect(cmd, **kwargs):
-        if cmd[0] == "cursor" and "create-chat" in cmd:
-            return MagicMock(stdout="ops-chat\n", stderr="", returncode=0)
-        raise AssertionError(f"unexpected subprocess: {cmd}")
-
-    mock_run.side_effect = run_side_effect
+    mock_popen.side_effect = _popen_factory(
+        {("cursor", "create-chat"): _FakeProc(stdout_lines=["ops-chat\n"])}
+    )
 
     manager.start_task(
         title="Ops",
@@ -123,8 +186,8 @@ def test_start_task_no_repo_skips_clone_and_git_workspace_rule(
     task_dir = tmp_tasks_root / "ops-task"
     assert (task_dir / ".cursor" / "rules" / "task-comms.mdc").exists()
     assert not (task_dir / ".cursor" / "rules" / "git-workspace.mdc").exists()
-    git_calls = [c for c in mock_run.call_args_list if c[0][0][0] == "git"]
-    assert git_calls == []
+    all_cmds = [call.args[0] for call in mock_popen.call_args_list]
+    assert not any(c[0] == "git" for c in all_cmds)
 
 
 def test_describe_clone_layout_empty(manager: TaskManager, tmp_tasks_root: Path) -> None:
@@ -150,26 +213,15 @@ def test_describe_clone_layout_shows_origin(manager: TaskManager, tmp_tasks_root
     assert label and "example/sample" in label
 
 
-@patch("dev_sdk.task_manager.subprocess.run")
+@patch("dev_sdk.task_manager.subprocess.Popen")
 def test_start_task_calls_on_progress(
-    mock_run: MagicMock,
+    mock_popen: MagicMock,
     manager: TaskManager,
     tmp_tasks_root: Path,
 ) -> None:
+    mock_popen.side_effect = _popen_factory(_start_task_cases(tmp_tasks_root))
+
     messages: list[str] = []
-
-    def run_side_effect(cmd, **kwargs):
-        if cmd[0] == "cursor" and "create-chat" in cmd:
-            return MagicMock(stdout="chat-id\n", stderr="", returncode=0)
-        if cmd[0] == "git" and cmd[1] == "clone":
-            (tmp_tasks_root / "my-task" / "repo").mkdir(parents=True)
-            return MagicMock(returncode=0)
-        if cmd[0] == "git" and cmd[1] == "checkout" and cmd[2] == "-b":
-            return MagicMock(returncode=0)
-        raise NotImplementedError(cmd)
-
-    mock_run.side_effect = run_side_effect
-
     manager.start_task(
         title="My Task",
         task_name="my-task",
@@ -184,23 +236,27 @@ def test_start_task_calls_on_progress(
     assert "Feature branch created." in messages
 
 
-def test_start_task_creates_directory(manager: TaskManager, tmp_tasks_root: Path) -> None:
-    with patch("dev_sdk.task_manager.subprocess.run") as mock_run:
-        def run_side_effect(cmd, **kwargs):
-            if cmd[0] == "cursor":
-                return MagicMock(stdout="chat-123\n", stderr="", returncode=0)
-            if cmd[0] == "git":
-                (tmp_tasks_root / "foo" / "y").mkdir(parents=True, exist_ok=True)
-                return MagicMock(returncode=0)
-            return MagicMock(returncode=0)
-
-        mock_run.side_effect = run_side_effect
-        manager.start_task(
-            title="Foo",
-            task_name="foo",
-            comment="Bar",
-            repo_url="https://github.com/x/y.git",
-        )
+@patch("dev_sdk.task_manager.subprocess.Popen")
+def test_start_task_creates_directory(
+    mock_popen: MagicMock,
+    manager: TaskManager,
+    tmp_tasks_root: Path,
+) -> None:
+    mock_popen.side_effect = _popen_factory(
+        {
+            ("cursor", "create-chat"): _FakeProc(stdout_lines=["chat-123\n"]),
+            ("git", "clone"): _FakeProc(
+                on_start=lambda: (tmp_tasks_root / "foo" / "y").mkdir(parents=True, exist_ok=True)
+            ),
+            ("git", "checkout"): _FakeProc(),
+        }
+    )
+    manager.start_task(
+        title="Foo",
+        task_name="foo",
+        comment="Bar",
+        repo_url="https://github.com/x/y.git",
+    )
     assert (tmp_tasks_root / "foo").is_dir()
     assert (tmp_tasks_root / "foo" / "comms").is_dir()
     assert (tmp_tasks_root / "foo" / "agent-chat-id").exists()
@@ -208,7 +264,7 @@ def test_start_task_creates_directory(manager: TaskManager, tmp_tasks_root: Path
 
 def test_start_task_duplicate_name_raises(manager: TaskManager, tmp_tasks_root: Path) -> None:
     (tmp_tasks_root / "existing").mkdir(parents=True)
-    with patch("dev_sdk.task_manager.subprocess.run"):
+    with patch("dev_sdk.task_manager.subprocess.Popen"):
         with pytest.raises(FileExistsError):
             manager.start_task(
                 title="Existing",
@@ -216,6 +272,44 @@ def test_start_task_duplicate_name_raises(manager: TaskManager, tmp_tasks_root: 
                 comment="Desc",
                 repo_url="https://github.com/a/b.git",
             )
+
+
+@patch("dev_sdk.task_manager.subprocess.Popen")
+def test_start_task_cancel_aborts_before_subprocess(
+    mock_popen: MagicMock,
+    manager: TaskManager,
+    tmp_tasks_root: Path,
+) -> None:
+    """If cancel is already set, no subprocesses run and TaskCancelled is raised."""
+    calls: list[list[str]] = []
+
+    def factory(cmd, **kwargs):
+        calls.append(cmd)
+        return _FakeProc()
+
+    mock_popen.side_effect = factory
+
+    with pytest.raises(TaskCancelled):
+        manager.start_task(
+            title="Cancelme",
+            task_name="cancelme",
+            comment=None,
+            repo_url="https://github.com/x/y.git",
+            cancel_check=lambda: True,
+        )
+    assert not any(c[0] == "git" for c in calls)
+
+
+@patch("dev_sdk.task_manager.subprocess.Popen")
+def test_agent_chat_no_output_raises(
+    mock_popen: MagicMock,
+    manager: TaskManager,
+) -> None:
+    """If agent create-chat emits nothing and exits, raise a clear error."""
+    mock_popen.return_value = _FakeProc(stdout_lines=[], returncode=0)
+
+    with pytest.raises(RuntimeError, match="did not produce a chat ID|exited with code"):
+        manager._create_agent_chat()
 
 
 def test_list_tasks_empty(manager: TaskManager) -> None:
@@ -332,9 +426,13 @@ def test_unarchive_task_not_found_raises(manager: TaskManager, tmp_tasks_root: P
         manager.unarchive_task("nonexistent-mar-14-abcdef")
 
 
-@patch("dev_sdk.task_manager.subprocess.run")
+def _archive_case_chat(chat_id: str = "new-chat-id-789") -> dict:
+    return {("cursor", "create-chat"): _FakeProc(stdout_lines=[f"{chat_id}\n"])}
+
+
+@patch("dev_sdk.task_manager.subprocess.Popen")
 def test_copy_task_from_archive(
-    mock_run: MagicMock,
+    mock_popen: MagicMock,
     manager: TaskManager,
     tmp_tasks_root: Path,
 ) -> None:
@@ -352,7 +450,7 @@ def test_copy_task_from_archive(
     (archived / ".logs").mkdir()
     (archived / ".logs" / "dev-plan-stream-20260314.log").write_text("log content")
     (archived / "agent-chat-id").write_text("old-chat-id")
-    mock_run.return_value = MagicMock(stdout="new-chat-id-789\n", stderr="", returncode=0)
+    mock_popen.side_effect = _popen_factory(_archive_case_chat())
 
     dest = manager.copy_task_from_archive("my-task-mar-14-a1b2c3")
 
@@ -367,9 +465,9 @@ def test_copy_task_from_archive(
     assert archived.is_dir()
 
 
-@patch("dev_sdk.task_manager.subprocess.run")
+@patch("dev_sdk.task_manager.subprocess.Popen")
 def test_copy_task_from_archive_copies_repo(
-    mock_run: MagicMock,
+    mock_popen: MagicMock,
     manager: TaskManager,
     tmp_tasks_root: Path,
 ) -> None:
@@ -384,7 +482,7 @@ def test_copy_task_from_archive_copies_repo(
     repo_dir.mkdir()
     (repo_dir / ".git").mkdir()
     (repo_dir / "README").write_text("repo content")
-    mock_run.return_value = MagicMock(stdout="chat-id\n", stderr="", returncode=0)
+    mock_popen.side_effect = _popen_factory(_archive_case_chat("chat-id"))
 
     dest = manager.copy_task_from_archive("foo-mar-14-abcdef")
 
@@ -393,9 +491,9 @@ def test_copy_task_from_archive_copies_repo(
     assert (dest / "myrepo" / "README").read_text() == "repo content"
 
 
-@patch("dev_sdk.task_manager.subprocess.run")
+@patch("dev_sdk.task_manager.subprocess.Popen")
 def test_copy_task_from_archive_target_exists_raises(
-    mock_run: MagicMock,
+    mock_popen: MagicMock,
     manager: TaskManager,
     tmp_tasks_root: Path,
 ) -> None:
@@ -418,9 +516,9 @@ def test_copy_task_from_archive_not_found_raises(manager: TaskManager, tmp_tasks
         manager.copy_task_from_archive("nonexistent-mar-14-abcdef")
 
 
-@patch("dev_sdk.task_manager.subprocess.run")
+@patch("dev_sdk.task_manager.subprocess.Popen")
 def test_copy_task_from_archive_task_name_override(
-    mock_run: MagicMock,
+    mock_popen: MagicMock,
     manager: TaskManager,
     tmp_tasks_root: Path,
 ) -> None:
@@ -431,7 +529,7 @@ def test_copy_task_from_archive_task_name_override(
     archived.mkdir()
     (archived / "comms").mkdir()
     (archived / "comms" / "index.txt").write_text("")
-    mock_run.return_value = MagicMock(stdout="chat-id\n", stderr="", returncode=0)
+    mock_popen.side_effect = _popen_factory(_archive_case_chat("chat-id"))
 
     dest = manager.copy_task_from_archive("original-mar-14-a1b2c3", task_name_override="new-name")
 
@@ -439,9 +537,9 @@ def test_copy_task_from_archive_task_name_override(
     assert dest.is_dir()
 
 
-@patch("dev_sdk.task_manager.subprocess.run")
+@patch("dev_sdk.task_manager.subprocess.Popen")
 def test_copy_task_from_archive_ops_does_not_add_git_workspace_rule(
-    mock_run: MagicMock,
+    mock_popen: MagicMock,
     manager: TaskManager,
     tmp_tasks_root: Path,
 ) -> None:
@@ -455,7 +553,7 @@ def test_copy_task_from_archive_ops_does_not_add_git_workspace_rule(
     (archived / "comms" / "index.txt").write_text("")
     (archived / ".cursor" / "rules").mkdir(parents=True)
     (archived / ".cursor" / "rules" / "task-comms.mdc").write_text("comms rule")
-    mock_run.return_value = MagicMock(stdout="new-chat\n", stderr="", returncode=0)
+    mock_popen.side_effect = _popen_factory(_archive_case_chat("new-chat"))
 
     dest = manager.copy_task_from_archive("ops-mar-14-a1b2c3")
 
@@ -463,9 +561,9 @@ def test_copy_task_from_archive_ops_does_not_add_git_workspace_rule(
     assert not (dest / ".cursor" / "rules" / "git-workspace.mdc").exists()
 
 
-@patch("dev_sdk.task_manager.subprocess.run")
+@patch("dev_sdk.task_manager.subprocess.Popen")
 def test_copy_task_from_archive_backfills_git_workspace_when_repo_copied(
-    mock_run: MagicMock,
+    mock_popen: MagicMock,
     manager: TaskManager,
     tmp_tasks_root: Path,
 ) -> None:
@@ -480,7 +578,7 @@ def test_copy_task_from_archive_backfills_git_workspace_when_repo_copied(
     repo_dir = archived / "proj"
     repo_dir.mkdir()
     (repo_dir / ".git").mkdir()
-    mock_run.return_value = MagicMock(stdout="cid\n", stderr="", returncode=0)
+    mock_popen.side_effect = _popen_factory(_archive_case_chat("cid"))
 
     dest = manager.copy_task_from_archive("with-repo-mar-14-a1b2c3")
 

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import secrets
 import shutil
 import subprocess
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -28,9 +30,57 @@ class ArchivedTaskEntry(NamedTuple):
 logger = logging.getLogger("dev_sdk")
 
 ProgressCallback = Callable[[str], None]
+CancelCheck = Callable[[], bool]
 
 # Archive dir name suffix: -<month>-<day>-<6 hex chars>, e.g. -mar-14-a1b2c3
 _ARCHIVE_SUFFIX_RE = re.compile(r"-[a-z]{3}-\d{1,2}-[a-f0-9]{6}$")
+
+
+class TaskCancelled(RuntimeError):
+    """Raised when a cancel signal is received during a cancellable subprocess step."""
+
+
+def _run_cancellable(
+    cmd: list[str],
+    *,
+    cwd: Path | None = None,
+    cancel_check: CancelCheck | None = None,
+    check: bool = True,
+) -> subprocess.CompletedProcess[bytes]:
+    """Run a command as a subprocess while polling for cancellation.
+
+    If ``cancel_check`` returns True mid-flight the process is terminated and
+    ``TaskCancelled`` is raised. Otherwise this mirrors ``subprocess.run`` with
+    ``capture_output=True`` and (by default) ``check=True``.
+    """
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(cwd) if cwd is not None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    try:
+        while True:
+            try:
+                stdout, stderr = proc.communicate(timeout=0.2)
+                break
+            except subprocess.TimeoutExpired:
+                if cancel_check and cancel_check():
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                    raise TaskCancelled(f"Cancelled during {cmd[0]}")
+    finally:
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+    if check and proc.returncode != 0:
+        raise subprocess.CalledProcessError(proc.returncode, cmd, stdout, stderr)
+    return subprocess.CompletedProcess(cmd, proc.returncode or 0, stdout, stderr)
 
 
 class TaskManager:
@@ -46,11 +96,13 @@ class TaskManager:
         comment: str | None,
         repo_url: str | None,
         on_progress: ProgressCallback | None = None,
+        cancel_check: CancelCheck | None = None,
     ) -> None:
         """Create task dir, comms dir (and optional first user comment), agent chat, and clone repo.
 
         When ``repo_url`` is missing or blank after stripping, skip cloning, feature branch
-        checkout, and the ``git-workspace.mdc`` rule.
+        checkout, and the ``git-workspace.mdc`` rule. If ``cancel_check`` is provided,
+        subprocess steps poll it and abort with :class:`TaskCancelled` when it returns True.
         """
         will_clone = repo_url is not None and bool(repo_url.strip())
         logger.debug(
@@ -60,6 +112,11 @@ class TaskManager:
             will_clone,
             self.tasks_root / task_name,
         )
+
+        def _check_cancel() -> None:
+            if cancel_check and cancel_check():
+                raise TaskCancelled("Task creation cancelled")
+
         task_dir = self.tasks_root / task_name
         task_dir.mkdir(parents=True, exist_ok=False)
         if on_progress:
@@ -73,9 +130,10 @@ class TaskManager:
             if on_progress:
                 on_progress("Added initial comment to comms.")
 
+        _check_cancel()
         if on_progress:
             on_progress("Creating agent chat…")
-        chat_id = self._create_agent_chat()
+        chat_id = self._create_agent_chat(cancel_check=cancel_check)
         if on_progress:
             on_progress("Agent chat created.")
         self._write_chat_id_file(task_dir, chat_id)
@@ -86,12 +144,16 @@ class TaskManager:
             return
         clone_url = repo_url.strip()
         self._write_cursor_rules(task_dir)
+        _check_cancel()
         if on_progress:
             on_progress("Cloning repository…")
-        self._clone_repo(task_dir, clone_url)
+        self._clone_repo(task_dir, clone_url, cancel_check=cancel_check)
         if on_progress:
             on_progress("Repository cloned.")
-        self._checkout_feature_branch(task_dir, clone_url, task_name, on_progress=on_progress)
+        _check_cancel()
+        self._checkout_feature_branch(
+            task_dir, clone_url, task_name, on_progress=on_progress, cancel_check=cancel_check
+        )
         logger.debug("start_task: completed task_name=%s", task_name)
 
     def _ensure_comms_dir(self, task_dir: Path) -> None:
@@ -116,22 +178,82 @@ class TaskManager:
             encoding="utf-8",
         )
 
-    def _create_agent_chat(self) -> str:
+    def _create_agent_chat(self, cancel_check: CancelCheck | None = None) -> str:
+        """Spawn ``cursor agent create-chat`` and return the ID it prints.
+
+        The CLI prints the chat UUID on its first line but keeps stdout open
+        indefinitely (a background helper prevents natural exit). We read the
+        first non-empty line from a helper thread, then terminate the process.
+        """
         cmd = ["cursor", "agent", "create-chat"]
         logger.debug("Creating agent chat: cmd=%s", cmd)
+        env = os.environ.copy()
+        env["PATH"] = f"{Path.home() / '.local' / 'bin'}:{env.get('PATH', '')}"
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            env=env,
+        )
+        holder: dict[str, str] = {}
+        stderr_holder: dict[str, str] = {}
+
+        def read_first_line() -> None:
+            try:
+                assert proc.stdout is not None
+                while True:
+                    line = proc.stdout.readline()
+                    if not line:
+                        return
+                    if line.strip():
+                        holder["line"] = line
+                        return
+            except OSError:
+                return
+
+        def read_stderr() -> None:
+            try:
+                assert proc.stderr is not None
+                stderr_holder["text"] = proc.stderr.read() or ""
+            except OSError:
+                return
+
+        reader = threading.Thread(target=read_first_line, daemon=True)
+        reader.start()
+        stderr_reader = threading.Thread(target=read_stderr, daemon=True)
+        stderr_reader.start()
+        deadline = time.time() + 30
         try:
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True,
-            )
-            chat_id = self._parse_chat_id(result.stdout.strip())
+            while reader.is_alive() and time.time() < deadline:
+                if cancel_check and cancel_check():
+                    raise TaskCancelled("Cancelled during agent create-chat")
+                if proc.poll() is not None and not reader.is_alive():
+                    break
+                reader.join(timeout=0.2)
+            if "line" not in holder:
+                stderr = stderr_holder.get("text", "").strip()
+                if proc.poll() is not None and proc.returncode != 0:
+                    raise RuntimeError(
+                        f"cursor agent create-chat exited with code {proc.returncode}: {stderr}"
+                    )
+                raise RuntimeError(
+                    "cursor agent create-chat did not produce a chat ID within 30s"
+                    + (f": {stderr}" if stderr else "")
+                )
+            chat_id = self._parse_chat_id(holder["line"].strip())
             logger.debug("Agent chat created: chat_id=%s", chat_id)
             return chat_id
-        except (subprocess.CalledProcessError, ValueError) as e:
-            logger.warning("Agent chat failed: %s", e)
-            raise
+        finally:
+            if proc.poll() is None:
+                try:
+                    proc.terminate()
+                    try:
+                        proc.wait(timeout=5)
+                    except subprocess.TimeoutExpired:
+                        proc.kill()
+                except OSError:
+                    pass
 
     def _parse_chat_id(self, output: str) -> str:
         """Extract chat ID from agent create-chat output (e.g. UUID or last line)."""
@@ -164,15 +286,19 @@ class TaskManager:
             encoding="utf-8",
         )
 
-    def _clone_repo(self, task_dir: Path, repo_url: str) -> None:
+    def _clone_repo(
+        self,
+        task_dir: Path,
+        repo_url: str,
+        cancel_check: CancelCheck | None = None,
+    ) -> None:
         """Clone repo into task_dir; git uses the repo name from the URL as the directory."""
         logger.debug("Cloning repo: repo_url=%s cwd=%s", repo_url, task_dir)
         try:
-            subprocess.run(
+            _run_cancellable(
                 ["git", "clone", repo_url],
                 cwd=task_dir,
-                check=True,
-                capture_output=True,
+                cancel_check=cancel_check,
             )
             logger.debug("Repo cloned: repo_url=%s", repo_url)
         except subprocess.CalledProcessError as e:
@@ -185,6 +311,7 @@ class TaskManager:
         repo_url: str,
         task_name: str,
         on_progress: ProgressCallback | None = None,
+        cancel_check: CancelCheck | None = None,
     ) -> None:
         """Create and checkout a feature branch in the cloned repo (branch name: task/<task_name>)."""
         repo_name = self._repo_name_from_url(repo_url)
@@ -194,11 +321,10 @@ class TaskManager:
         if on_progress:
             on_progress("Checking out feature branch…")
         try:
-            subprocess.run(
+            _run_cancellable(
                 ["git", "checkout", "-b", branch_name],
                 cwd=repo_path,
-                check=True,
-                capture_output=True,
+                cancel_check=cancel_check,
             )
             logger.debug("Feature branch created: branch=%s", branch_name)
         except subprocess.CalledProcessError as e:

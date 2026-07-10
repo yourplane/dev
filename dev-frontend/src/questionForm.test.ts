@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
+  complexityLabel,
   draftIndicatesEditing,
+  findOptionByLabel,
   getPersistedAnswersForSource,
   hasAnyAnswer,
+  normalizeOptions,
   normalizeQuestionIds,
   parseAnswersMarkdown,
   submittedAnswersEqual,
@@ -21,6 +24,55 @@ describe('questionForm', () => {
     expect(payload).not.toBeNull()
     expect(payload?.intro).toBe('Hello')
     expect(payload?.questions[0].id).toBe('q1')
+    expect(payload?.questions[0].options).toEqual([
+      { label: 'A' },
+      { label: 'B' },
+    ])
+  })
+
+  it('parses rationale and object options with complexity', () => {
+    const content = JSON.stringify({
+      intro: 'Tradeoffs',
+      questions: [{
+        text: 'Which?',
+        rationale: 'Layering matters.',
+        options: [
+          'Simple',
+          { label: 'Heavy', implications: 'New service.', complexity: 'high' },
+        ],
+      }],
+    })
+    const payload = tryParseQuestionPayload(content)
+    expect(payload?.questions[0].rationale).toBe('Layering matters.')
+    expect(payload?.questions[0].options[1]).toEqual({
+      label: 'Heavy',
+      implications: 'New service.',
+      complexity: 'high',
+    })
+  })
+
+  it('returns null for invalid option objects', () => {
+    const content = JSON.stringify({
+      intro: '',
+      questions: [{ text: 'Q?', options: [{ implications: 'missing label' }] }],
+    })
+    expect(tryParseQuestionPayload(content)).toBeNull()
+  })
+
+  it('normalizeOptions accepts strings and objects', () => {
+    expect(normalizeOptions(['A', { label: 'B', complexity: 'low' }])).toEqual([
+      { label: 'A' },
+      { label: 'B', complexity: 'low' },
+    ])
+  })
+
+  it('findOptionByLabel returns matching option', () => {
+    const options = [{ label: 'A' }, { label: 'B', complexity: 'medium' as const }]
+    expect(findOptionByLabel(options, 'B')?.complexity).toBe('medium')
+  })
+
+  it('complexityLabel maps levels to readable text', () => {
+    expect(complexityLabel('high')).toBe('High complexity')
   })
 
   it('returns null for invalid JSON', () => {
@@ -32,7 +84,7 @@ describe('questionForm', () => {
   })
 
   it('hasAnyAnswer detects selections and free text', () => {
-    const questions = [{ id: 'q1', text: 'Q?', options: ['A'] }]
+    const questions = [{ id: 'q1', text: 'Q?', options: [{ label: 'A' }] }]
     expect(hasAnyAnswer(questions, {}, {})).toBe(false)
     expect(hasAnyAnswer(questions, { q1: 'A' }, {})).toBe(true)
     expect(hasAnyAnswer(questions, {}, { q1: 'note' })).toBe(true)
@@ -84,7 +136,7 @@ Need pooling
   })
 
   it('draftIndicatesEditing treats editing flag and in-progress answers as editable', () => {
-    const questions = [{ id: 'q1', text: 'Q?', options: ['A'] }]
+    const questions = [{ id: 'q1', text: 'Q?', options: [{ label: 'A' }] }]
     expect(draftIndicatesEditing({ selections: {}, freeText: {}, expandedFreeText: {} }, questions)).toBe(false)
     expect(draftIndicatesEditing({ selections: {}, freeText: {}, expandedFreeText: {}, editing: true }, questions)).toBe(true)
     expect(draftIndicatesEditing({ selections: { q1: 'A' }, freeText: {}, expandedFreeText: {} }, questions)).toBe(true)

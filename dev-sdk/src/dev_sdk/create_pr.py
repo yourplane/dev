@@ -16,6 +16,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from dev_sdk.bots_config import secret_name_for_owner
 from dev_sdk.comms import comms_dir
 
 
@@ -203,14 +204,8 @@ def _git_auth_bots_path() -> Path:
     return Path.home() / ".config" / "git-auth" / "bots.json"
 
 
-def _secret_name_for_github_owner(owner: str) -> str:
-    """
-    Resolve AWS Secrets Manager secret id for a GitHub owner (org or user).
-
-    Reads ~/.config/git-auth/bots.json: {"bots": [{"org": "...", "secret": "..."}, ...]}.
-    Matching on org vs owner is case-insensitive. Missing file, invalid JSON, or no
-    matching entry is an error (no fallback).
-    """
+def _load_bots_from_file() -> list[dict[str, str]]:
+    """Load bots config from ~/.config/git-auth/bots.json."""
     path = _git_auth_bots_path()
     if not path.is_file():
         raise CreatePRError(
@@ -226,25 +221,23 @@ def _secret_name_for_github_owner(owner: str) -> str:
     bots = raw.get("bots")
     if not isinstance(bots, list):
         raise CreatePRError(f"Missing or invalid \"bots\" array in {path}")
-
-    owner_lower = owner.lower()
+    out: list[dict[str, str]] = []
     for entry in bots:
         if not isinstance(entry, dict):
             continue
         org = entry.get("org")
         secret = entry.get("secret")
-        if not isinstance(org, str) or not isinstance(secret, str):
-            continue
-        if org.lower() == owner_lower:
-            s = secret.strip()
-            if not s:
-                raise CreatePRError(f"Empty \"secret\" for org {org!r} in {path}")
-            return s
+        if isinstance(org, str) and isinstance(secret, str) and org.strip() and secret.strip():
+            out.append({"org": org.strip(), "secret": secret.strip()})
+    return out
 
-    raise CreatePRError(
-        f"No GitHub bot secret configured for owner {owner!r} in {path}. "
-        "Add a matching {{\"org\": ..., \"secret\": ...}} entry under \"bots\"."
-    )
+
+def _secret_name_for_github_owner(owner: str) -> str:
+    """Resolve AWS Secrets Manager secret id for a GitHub owner via local bots.json."""
+    try:
+        return secret_name_for_owner(_load_bots_from_file(), owner)
+    except ValueError as e:
+        raise CreatePRError(str(e))
 
 
 def _owner_repo_from_repo_root(repo_root: Path) -> tuple[str, str]:
@@ -381,6 +374,182 @@ def _create_pull_request_api(
     }
     data = json.dumps(payload).encode("utf-8")
     return _github_request(token, "POST", url, data=data)
+
+
+def _get_github_token_boto(secret_name: str) -> str:
+    """Obtain GitHub token from AWS Secrets Manager using boto3 (cloud control plane)."""
+    try:
+        import boto3
+    except ImportError as e:
+        raise CreatePRError("boto3 required for cloud PR actions") from e
+
+    client = boto3.client("secretsmanager")
+    try:
+        resp = client.get_secret_value(SecretId=secret_name)
+    except Exception as e:
+        raise CreatePRError(f"Failed to get secret {secret_name!r}: {e}")
+    secret_str = resp.get("SecretString")
+    if not secret_str:
+        raise CreatePRError("Secret has no SecretString.")
+    try:
+        data = json.loads(secret_str) if isinstance(secret_str, str) else secret_str
+    except (json.JSONDecodeError, TypeError) as e:
+        raise CreatePRError(f"Invalid secret JSON: {e}")
+
+    app_id = data.get("app_id") or data.get("appId")
+    installation_id = data.get("installation_id") or data.get("installationId")
+    key_content = data.get("private_key") or data.get("key")
+    if not app_id or not installation_id or not key_content:
+        raise CreatePRError(
+            "Secret must contain app_id, installation_id, and private_key (or key)."
+        )
+    if not isinstance(key_content, str):
+        raise CreatePRError("Secret private_key must be a string.")
+    try:
+        return _get_github_app_installation_token(
+            str(app_id).strip(), str(installation_id).strip(), key_content.strip()
+        )
+    except (urllib.error.HTTPError, OSError, RuntimeError) as e:
+        raise CreatePRError(f"Failed to get GitHub App installation token: {e}")
+
+
+def _branch_exists_on_remote(token: str, owner: str, repo: str, branch: str) -> bool:
+    """Return True if branch exists on origin (GitHub)."""
+    branch_enc = urllib.parse.quote(branch, safe="")
+    url = f"https://api.github.com/repos/{owner}/{repo}/branches/{branch_enc}"
+    status, _ = _github_request(token, "GET", url)
+    return status == 200
+
+
+def create_pull_request_from_metadata(
+    *,
+    owner: str,
+    repo: str,
+    branch: str,
+    title: str,
+    bots: list[dict[str, str]],
+    get_token=None,
+) -> str:
+    """
+    Create a PR using task metadata (cloud control plane).
+
+    Does not push; fails if branch is not on remote. PR body is title only per requirements.
+    """
+    if branch == "main":
+        raise CreatePRError("Create PR from a feature branch, not main.")
+    try:
+        secret_name = secret_name_for_owner(bots, owner)
+    except ValueError as e:
+        raise CreatePRError(str(e))
+    token_fn = get_token or _get_github_token_boto
+    token = token_fn(secret_name)
+    if not _branch_exists_on_remote(token, owner, repo, branch):
+        raise CreatePRError(
+            f"Branch {branch!r} is not on remote. Push the branch before creating a PR."
+        )
+    head = branch
+    status, resp_body = _create_pull_request_api(token, owner, repo, head, title, body="")
+    if status != 201:
+        try:
+            data = json.loads(resp_body)
+            raise CreatePRError(data.get("message", resp_body))
+        except (ValueError, TypeError):
+            raise CreatePRError(f"GitHub API error: {resp_body}")
+    pr = json.loads(resp_body)
+    return pr["html_url"]
+
+
+def find_pull_request_from_metadata(
+    *,
+    owner: str,
+    repo: str,
+    branch: str,
+    title: str,
+    bots: list[dict[str, str]],
+    get_token=None,
+) -> str | None:
+    """Find open PR for branch/title using metadata (no local git)."""
+    if branch == "main":
+        return None
+    try:
+        secret_name = secret_name_for_owner(bots, owner)
+    except ValueError as e:
+        raise CreatePRError(str(e))
+    token_fn = get_token or _get_github_token_boto
+    token = token_fn(secret_name)
+    head = f"{owner}:{branch}"
+    status, resp_body = _list_pull_requests_api(token, owner, repo, head=head, base="main")
+    if status != 200:
+        try:
+            data = json.loads(resp_body)
+            raise CreatePRError(data.get("message", resp_body))
+        except (ValueError, TypeError):
+            raise CreatePRError(f"GitHub API error: {resp_body}")
+    pulls = json.loads(resp_body)
+    if not isinstance(pulls, list):
+        raise CreatePRError("GitHub API error: expected list")
+    open_pulls = [p for p in pulls if isinstance(p, dict) and p.get("state") == "open"]
+    exact = [p for p in open_pulls if p.get("title") == title]
+    if len(exact) == 1:
+        return exact[0].get("html_url")
+    if len(exact) > 1:
+        raise CreatePRError(f"Expected at most one PR for {title}, found {len(exact)}")
+    if not open_pulls:
+        return None
+    pr_url = open_pulls[0].get("html_url")
+    return pr_url if isinstance(pr_url, str) else None
+
+
+def pull_pr_comments_from_metadata(
+    *,
+    owner: str,
+    repo: str,
+    branch: str,
+    title: str,
+    bots: list[dict[str, str]],
+    known_keys: set[str],
+    get_token=None,
+) -> tuple[str, int, list[dict]]:
+    """
+    Pull new PR comments using metadata. Returns (pr_url, new_count, comment_items).
+    Caller persists comms in cloud store.
+    """
+    pr_url = find_pull_request_from_metadata(
+        owner=owner, repo=repo, branch=branch, title=title, bots=bots, get_token=get_token
+    )
+    if pr_url is None:
+        raise CreatePRError("No existing PR found for this task.")
+    pr_number = _parse_pr_number(pr_url)
+    try:
+        secret_name = secret_name_for_owner(bots, owner)
+    except ValueError as e:
+        raise CreatePRError(str(e))
+    token_fn = get_token or _get_github_token_boto
+    token = token_fn(secret_name)
+
+    review_comments_url = f"https://api.github.com/repos/{owner}/{repo}/pulls/{pr_number}/comments"
+    issue_comments_url = f"https://api.github.com/repos/{owner}/{repo}/issues/{pr_number}/comments"
+    review_comments = _list_paginated_items(token, review_comments_url)
+    issue_comments = _list_paginated_items(token, issue_comments_url)
+
+    new_items: list[dict] = []
+    for item in review_comments:
+        cid = item.get("id")
+        if not isinstance(cid, int):
+            continue
+        key = f"review:{cid}"
+        if key in known_keys:
+            continue
+        new_items.append({"kind": "review", "key": key, "payload": item})
+    for item in issue_comments:
+        cid = item.get("id")
+        if not isinstance(cid, int):
+            continue
+        key = f"issue:{cid}"
+        if key in known_keys:
+            continue
+        new_items.append({"kind": "issue", "key": key, "payload": item})
+    return pr_url, len(new_items), new_items
 
 
 def create_pull_request(task_root: Path, *, allow_dirty: bool = False) -> str:

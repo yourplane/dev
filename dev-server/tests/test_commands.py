@@ -11,7 +11,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from dev_sdk.agent_run import AgentRunError
-from dev_server.main import _popen_bash_for_streaming, app
+from dev_sdk.bash_runner import popen_bash_for_streaming
+from dev_server.main import app
 
 
 @pytest.fixture
@@ -36,7 +37,7 @@ def test_bash_popen_for_streaming_uses_unbuffered_pipe(monkeypatch: pytest.Monke
         return orig_popen(*args, **kwargs)
 
     monkeypatch.setattr(subprocess, "Popen", capture_popen)
-    proc = _popen_bash_for_streaming("exit 0", cwd="/tmp")
+    proc = popen_bash_for_streaming("exit 0", cwd="/tmp")
     proc.wait(timeout=5)
     assert kwargs_seen.get("bufsize") == 0
 
@@ -537,12 +538,13 @@ def test_start_merge_from_main_returns_201_and_status_active(
         block.wait()
 
     with patch("dev_server.main.validate_merge_from_main_can_start", return_value=repo_root):
-        with patch("dev_server.main.has_conflicted_merge_in_progress", return_value=True):
-            with patch("dev_server.main.run_merge_conflict_resolution", side_effect=blocking_agent):
-                resp = client_with_tasks.post(
-                    "/tasks/mytask/commands",
-                    json={"command": "merge-from-main"},
-                )
+        with patch("dev_sdk.merge_from_main.validate_merge_from_main_can_start", return_value=repo_root):
+            with patch("dev_sdk.merge_from_main.has_conflicted_merge_in_progress", return_value=True):
+                with patch("dev_server.main.run_merge_conflict_resolution", side_effect=blocking_agent):
+                    resp = client_with_tasks.post(
+                        "/tasks/mytask/commands",
+                        json={"command": "merge-from-main"},
+                    )
     assert resp.status_code == 201
     assert resp.json()["command"] == "merge-from-main"
 
@@ -572,19 +574,22 @@ def test_merge_from_main_runs_git_bash_from_task_dir(
         shell_command: str,
         cwd: Path,
         cancel_requested: threading.Event,
-    ) -> tuple[int | None, bool, bool, bool]:
+    ) -> object:
+        from dev_sdk.bash_runner import BashRunResult
+
         seen["task_dir"] = task_dir_arg
         seen["cwd"] = cwd
         seen["shell_command"] = shell_command
-        return 0, False, False, False
+        return BashRunResult(0, False, False, False, None)
 
     with patch("dev_server.main.validate_merge_from_main_can_start", return_value=repo_root):
-        with patch("dev_server.main.has_conflicted_merge_in_progress", return_value=False):
-            with patch("dev_server.main._stream_bash_command", side_effect=fake_stream):
-                resp = client_with_tasks.post(
-                    "/tasks/mytask/commands",
-                    json={"command": "merge-from-main"},
-                )
+        with patch("dev_sdk.merge_from_main.validate_merge_from_main_can_start", return_value=repo_root):
+            with patch("dev_sdk.merge_from_main.has_conflicted_merge_in_progress", return_value=False):
+                with patch("dev_server.main._run_bash_stream_for_task", side_effect=fake_stream):
+                    resp = client_with_tasks.post(
+                        "/tasks/mytask/commands",
+                        json={"command": "merge-from-main"},
+                    )
     assert resp.status_code == 201
     time.sleep(0.3)
     assert seen["task_dir"] == task_dir

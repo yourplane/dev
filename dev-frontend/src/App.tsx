@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api, apiBaseUrl, type TaskWorkspaceInfo } from './api'
+import { api, apiBaseUrl, type TaskWorkspaceInfo, type EnvironmentInfo } from './api'
 import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
 import {
   buildFeedNavTargets,
@@ -13,6 +13,7 @@ import {
   segmentCountFromLogContent,
   type FeedNavTarget,
 } from './feedScrollNav'
+import { isCloudMode, getIdToken, signIn, signOut, completeNewPassword, restoreCloudSession } from './cloudAuth'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import { QuestionAnswerForm } from './QuestionAnswerForm'
 import { getPersistedAnswersForSource, tryParseQuestionPayload, userAnswersContentsKey, type SubmittedAnswers } from './questionForm'
@@ -47,6 +48,7 @@ export function Layout() {
           <Link to="/" className="nav-link">Tasks</Link>
           <Link to="/new" className="nav-link">New task</Link>
           <Link to="/archive" className="nav-link">Archive</Link>
+          {isCloudMode() && <Link to="/settings" className="nav-link">Settings</Link>}
         </nav>
       </header>
       <main className="main">
@@ -54,6 +56,7 @@ export function Layout() {
           <Route index element={<TaskListPage />} />
           <Route path="new" element={<CreateTaskPage />} />
           <Route path="archive" element={<ArchivePage />} />
+          {isCloudMode() && <Route path="settings" element={<SettingsPage />} />}
           <Route path="task/:taskName" element={<TaskCommsPage />} />
         </Routes>
       </main>
@@ -427,6 +430,8 @@ function CreateTaskForm({
   onCancel: () => void
 }) {
   const [repos, setRepos] = useState<Record<string, string>>({})
+  const [environments, setEnvironments] = useState<EnvironmentInfo[]>([])
+  const [environmentId, setEnvironmentId] = useState('')
   const [reposLoading, setReposLoading] = useState(true)
   const [title, setTitle] = useState('')
   const [repo, setRepo] = useState('')
@@ -454,9 +459,19 @@ function CreateTaskForm({
 
   useEffect(() => {
     let cancelled = false
-    api.getRepos().then((r) => {
-      if (!cancelled) setRepos(r)
-    }).finally(() => {
+    const loads: Promise<unknown>[] = [api.getRepos().then((r) => { if (!cancelled) setRepos(r) })]
+    if (isCloudMode()) {
+      loads.push(
+        api.getEnvironments().then((r) => {
+          if (cancelled) return
+          setEnvironments(r.environments)
+          const online = r.environments.find((e) => e.online)
+          if (online) setEnvironmentId(online.environment_id)
+          else if (r.environments[0]) setEnvironmentId(r.environments[0].environment_id)
+        }),
+      )
+    }
+    Promise.all(loads).finally(() => {
       if (!cancelled) setReposLoading(false)
     })
     return () => { cancelled = true }
@@ -559,6 +574,7 @@ function CreateTaskForm({
     setError(null)
     if (!title.trim()) { setError('Title is required'); return }
     if (repo !== CREATE_TASK_NO_REPO && !repo.trim()) { setError('Select a repo'); return }
+    if (isCloudMode() && !environmentId) { setError('Select an environment'); return }
     setCreateStatusMessage(null)
     setSubmitting(true)
     try {
@@ -567,6 +583,7 @@ function CreateTaskForm({
           title: title.trim(),
           repo: repo === CREATE_TASK_NO_REPO ? null : repo.trim(),
           comment: comment.trim() || undefined,
+          environment_id: isCloudMode() ? environmentId : undefined,
         },
         (msg) => setCreateStatusMessage(msg),
       )
@@ -589,6 +606,22 @@ function CreateTaskForm({
       </div>
       <form onSubmit={handleSubmit}>
         {error && <p className="inline-error">{error}</p>}
+        {isCloudMode() && (
+          <label>
+            <span>Environment <span className="required">*</span></span>
+            {environments.length === 0 ? (
+              <span className="hint">No environments registered yet. Start a worker on your server.</span>
+            ) : (
+              <select value={environmentId} onChange={(e) => setEnvironmentId(e.target.value)} required>
+                {environments.map((env) => (
+                  <option key={env.environment_id} value={env.environment_id}>
+                    {env.display_name} {env.online ? '(online)' : '(offline)'}
+                  </option>
+                ))}
+              </select>
+            )}
+          </label>
+        )}
         <label>
           <span>Title <span className="required">*</span></span>
           <input
@@ -716,6 +749,7 @@ function CreateTaskForm({
 }
 
 const COMMAND_LABEL: Record<string, string> = {
+  'create-task': 'Create task',
   question: 'Question',
   'plan-implement': 'Plan',
   implement: 'Implement',
@@ -1579,6 +1613,9 @@ export function TaskCommsPageContent({
   const [posting, setPosting] = useState(false)
   const [postError, setPostError] = useState<string | null>(null)
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
+  const [pendingCommand, setPendingCommand] = useState<string | null>(null)
+  const [pendingCommandState, setPendingCommandState] = useState<'syncing' | 'worker_offline' | null>(null)
+  const [createProgress, setCreateProgress] = useState<string[]>([])
   const [activeLogFilename, setActiveLogFilename] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
   const [lastAgentCommand, setLastAgentCommand] = useState<AgentModeCommand>(readLastAgentCommand)
@@ -1747,14 +1784,18 @@ export function TaskCommsPageContent({
   const loadCommandStatus = useCallback(async () => {
     try {
       const res = await api.getTaskCommandStatus(taskName)
-      const nextActive = res.active && res.command ? res.command : null
-      setActiveCommand(nextActive)
-      if (!nextActive) setCancelling(false)
+      const running = Boolean(res.active && res.command)
+      const pending = Boolean(!res.active && res.command)
+      setActiveCommand(running ? res.command : null)
+      setPendingCommand(pending ? res.command : null)
+      setPendingCommandState(res.pending_state ?? (pending ? 'syncing' : null))
+      setCreateProgress(res.create_progress ?? [])
+      setCancelling(Boolean(res.cancelling))
       setActiveLogFilename(res.active && res.active_log_filename ? res.active_log_filename : null)
       setActiveBashCommsFilename(
         res.active && res.active_bash_comms_filename ? res.active_bash_comms_filename : null,
       )
-      if (nextActive) {
+      if (running || pending) {
         setCommandError(null)
       } else if (res.command_error) {
         setCommandError(res.command_error)
@@ -2086,7 +2127,7 @@ export function TaskCommsPageContent({
   useEffect(() => {
     const interval = setInterval(() => {
       if (tabVisibleRef.current) loadCommandStatus()
-    }, 3000)
+    }, 1000)
     return () => clearInterval(interval)
   }, [loadCommandStatus])
 
@@ -2106,6 +2147,8 @@ export function TaskCommsPageContent({
     window.addEventListener('pageshow', onPageShow)
     return () => window.removeEventListener('pageshow', onPageShow)
   }, [])
+
+  const commandInFlight = activeCommand ?? pendingCommand
 
   useEffect(() => {
     if (prevActiveCommandRef.current !== null && activeCommand === null) {
@@ -2137,45 +2180,29 @@ export function TaskCommsPageContent({
     }
   }, [activeCommand, activeBashCommsFilename, pollFeedIncremental])
 
-  // Stream the active log via SSE while command is running
+  // Stream active agent log and bash comms via multiplexed SSE while command is running
   useEffect(() => {
-    if (!activeCommand || !activeLogFilename) return
-    const es = api.openTaskLogStream(taskName)
-    es.onmessage = (e: MessageEvent) => {
-      const data = e.data != null ? String(e.data) : ''
-      setContents((prev) => ({
-        ...prev,
-        [activeLogFilename]: (prev[activeLogFilename] ?? '') + data + (data && !data.endsWith('\n') ? '\n' : ''),
-      }))
-    }
-    es.onerror = () => {
-      es.close()
-    }
+    if (!activeCommand) return
+    const stream = api.connectTaskStream(taskName, {
+      onLog: (chunk) => {
+        if (!activeLogFilename) return
+        setContents((prev) => ({
+          ...prev,
+          [activeLogFilename]: (prev[activeLogFilename] ?? '') + chunk,
+        }))
+      },
+      onBash: (chunk) => {
+        if (!activeBashCommsFilename) return
+        setContents((prev) => ({
+          ...prev,
+          [activeBashCommsFilename]: (prev[activeBashCommsFilename] ?? '') + chunk,
+        }))
+      },
+    })
     return () => {
-      es.close()
+      stream.close()
     }
-  }, [taskName, activeCommand, activeLogFilename])
-
-  useEffect(() => {
-    if (!activeCommand || !activeBashCommsFilename) return
-    if (activeCommand !== 'bash' && activeCommand !== 'merge-from-main') return
-    let cancelled = false
-    const poll = async () => {
-      try {
-        const text = await api.getTaskCommsFile(taskName, activeBashCommsFilename)
-        if (cancelled) return
-        setContents((prev) => ({ ...prev, [activeBashCommsFilename]: text }))
-      } catch {
-        // ignore while the file is still being created
-      }
-    }
-    void poll()
-    const id = setInterval(poll, 550)
-    return () => {
-      cancelled = true
-      clearInterval(id)
-    }
-  }, [taskName, activeCommand, activeBashCommsFilename])
+  }, [taskName, activeCommand, activeLogFilename, activeBashCommsFilename])
 
   const handleStartCommand = async (command: string) => {
     setCommandError(null)
@@ -2197,13 +2224,11 @@ export function TaskCommsPageContent({
 
   const handleCancelCommand = async () => {
     setCommandError(null)
-    setCancelling(true)
     try {
       await api.cancelTaskCommand(taskName)
-      // Leave cancelling true; loadCommandStatus will set it false when poll sees command inactive
+      await loadCommandStatus()
     } catch (e) {
       setCommandError(e instanceof Error ? e.message : String(e))
-      setCancelling(false)
     }
   }
 
@@ -2704,24 +2729,63 @@ export function TaskCommsPageContent({
       ) : null}
       <div className="task-commands">
         {activeCommand ? (
-          <div className="command-status-row">
-            {cancelling ? (
-              <p className="command-status">
-                <span className="command-spinner" aria-hidden /> Cancelling…
-              </p>
-            ) : (
-              <p className="command-status">
-                <span className="command-spinner" aria-hidden /> Running: {COMMAND_LABEL[activeCommand] ?? activeCommand}
-              </p>
+          <div className="command-status-block">
+            <div className="command-status-row">
+              {cancelling ? (
+                <p className="command-status">
+                  <span className="command-spinner" aria-hidden /> Cancelling…
+                </p>
+              ) : pendingCommandState === 'worker_offline' ? (
+                <p className="command-status">
+                  <span className="command-spinner" aria-hidden /> Worker offline — command interrupted, waiting for worker
+                </p>
+              ) : (
+                <p className="command-status">
+                  <span className="command-spinner" aria-hidden /> Running: {COMMAND_LABEL[activeCommand] ?? activeCommand}
+                </p>
+              )}
+              <button
+                type="button"
+                className="command-btn command-cancel-btn"
+                disabled={cancelling}
+                onClick={handleCancelCommand}
+              >
+                {cancelling ? 'Cancelling…' : 'Cancel'}
+              </button>
+            </div>
+            {activeCommand === 'create-task' && createProgress.length > 0 && (
+              <ul className="create-task-progress-list" aria-live="polite">
+                {createProgress.map((msg, i) => (
+                  <li key={`${i}-${msg}`}>{msg}</li>
+                ))}
+              </ul>
             )}
-            <button
-              type="button"
-              className="command-btn command-cancel-btn"
-              disabled={cancelling}
-              onClick={handleCancelCommand}
-            >
-              {cancelling ? 'Cancelling…' : 'Cancel'}
-            </button>
+          </div>
+        ) : pendingCommand ? (
+          <div className="command-status-block">
+            <div className="command-status-row">
+              <p className="command-status">
+                <span className="command-spinner" aria-hidden />{' '}
+                {pendingCommandState === 'worker_offline'
+                  ? 'Worker offline — command queued'
+                  : 'Syncing to worker…'}
+              </p>
+              <button
+                type="button"
+                className="command-btn command-cancel-btn"
+                disabled={cancelling}
+                onClick={handleCancelCommand}
+              >
+                Cancel
+              </button>
+            </div>
+            {pendingCommand === 'create-task' && createProgress.length > 0 && (
+              <ul className="create-task-progress-list" aria-live="polite">
+                {createProgress.map((msg, i) => (
+                  <li key={`${i}-${msg}`}>{msg}</li>
+                ))}
+              </ul>
+            )}
           </div>
         ) : (
           <div className="command-buttons">
@@ -2765,7 +2829,7 @@ export function TaskCommsPageContent({
               type="button"
               className={`comms-entry-mode-btn${entryMode === 'prompt' ? ' comms-entry-mode-btn-active' : ''}`}
               onClick={() => setEntryMode('prompt')}
-              disabled={!!activeCommand}
+              disabled={!!commandInFlight}
             >
               Prompt
             </button>
@@ -2773,7 +2837,7 @@ export function TaskCommsPageContent({
               type="button"
               className={`comms-entry-mode-btn${entryMode === 'bash' ? ' comms-entry-mode-btn-active' : ''}`}
               onClick={() => setEntryMode('bash')}
-              disabled={!!activeCommand}
+              disabled={!!commandInFlight}
             >
               Bash
             </button>
@@ -2802,7 +2866,7 @@ export function TaskCommsPageContent({
             onChange={(e) => setCommentText(e.target.value)}
             placeholder="Write a comment…"
             rows={3}
-            disabled={posting || !!activeCommand}
+            disabled={posting || !!commandInFlight}
           />
         ) : (
           <>
@@ -2814,7 +2878,7 @@ export function TaskCommsPageContent({
                 className="comms-bash-history-select"
                 aria-label="Insert a recent bash command"
                 value={bashHistoryPicker}
-                disabled={bashHistory.length === 0 || !!activeCommand || !!startingCommand}
+                disabled={bashHistory.length === 0 || !!commandInFlight || !!startingCommand}
                 onChange={(e) => {
                   const v = e.target.value
                   setBashHistoryPicker('')
@@ -2842,7 +2906,7 @@ export function TaskCommsPageContent({
                 className="comms-bash-history-arrow"
                 aria-label="Older bash command"
                 title="Older command"
-                disabled={bashHistory.length === 0 || !!activeCommand || !!startingCommand}
+                disabled={bashHistory.length === 0 || !!commandInFlight || !!startingCommand}
                 onClick={bashHistoryOlder}
               >
                 ↑
@@ -2852,7 +2916,7 @@ export function TaskCommsPageContent({
                 className="comms-bash-history-arrow"
                 aria-label="Newer bash command"
                 title="Newer command"
-                disabled={bashHistoryBrowseIdx === null || !!activeCommand || !!startingCommand}
+                disabled={bashHistoryBrowseIdx === null || !!commandInFlight || !!startingCommand}
                 onClick={bashHistoryNewer}
               >
                 ↓
@@ -2867,7 +2931,7 @@ export function TaskCommsPageContent({
               }}
               placeholder="$ "
               rows={4}
-              disabled={!!activeCommand || !!startingCommand}
+              disabled={!!commandInFlight || !!startingCommand}
               spellCheck={false}
               autoCapitalize="none"
               autoCorrect="off"
@@ -2881,8 +2945,8 @@ export function TaskCommsPageContent({
             type="submit"
             disabled={
               entryMode === 'prompt'
-                ? posting || !commentText.trim() || !!activeCommand
-                : !shellInput.trim() || !!startingCommand || !!activeCommand
+                ? posting || !commentText.trim() || !!commandInFlight
+                : !shellInput.trim() || !!startingCommand || !!commandInFlight
             }
           >
             {entryMode === 'prompt'
@@ -2893,7 +2957,7 @@ export function TaskCommsPageContent({
             <button
               type="button"
               className="do-btn command-btn"
-              disabled={posting || !commentText.trim() || !!startingCommand || !!activeCommand}
+              disabled={posting || !commentText.trim() || !!startingCommand || !!commandInFlight}
               onClick={handleDoFromComment}
             >
               {startingCommand === 'do' ? 'Starting…' : 'Do'}
@@ -2949,10 +3013,415 @@ export function TaskCommsPageContent({
   )
 }
 
+function SettingsPage() {
+  const [repos, setRepos] = useState<Record<string, string>>({})
+  const [bots, setBots] = useState<Array<{ org: string; secret: string }>>([])
+  const [environments, setEnvironments] = useState<EnvironmentInfo[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [addName, setAddName] = useState('')
+  const [addUrl, setAddUrl] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [removing, setRemoving] = useState<string | null>(null)
+  const [deletingEnv, setDeletingEnv] = useState<string | null>(null)
+
+  useEffect(() => {
+    document.title = 'Dev – Settings'
+    return () => { document.title = DEFAULT_TAB_TITLE }
+  }, [])
+
+  const load = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const [r, b, e] = await Promise.all([api.getRepos(), api.getBots(), api.getEnvironments()])
+      setRepos(r)
+      setBots(b.bots)
+      setEnvironments(e.environments)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { load() }, [load])
+
+  const saveBots = async () => {
+    setSaving(true)
+    setError(null)
+    try {
+      await api.setBots(bots)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleAddRepo = async (e: React.FormEvent) => {
+    e.preventDefault()
+    const n = addName.trim()
+    const u = addUrl.trim()
+    if (!n || !u) {
+      setError('Repo name and URL are required.')
+      return
+    }
+    setAdding(true)
+    setError(null)
+    try {
+      await api.addRepo(n, u)
+      setAddName('')
+      setAddUrl('')
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  const handleRemoveRepo = async (name: string) => {
+    if (!confirm(`Remove "${name}" from your repo list?`)) return
+    setRemoving(name)
+    setError(null)
+    try {
+      await api.removeRepo(name)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setRemoving(null)
+    }
+  }
+
+  const handleDeleteEnvironment = async (env: EnvironmentInfo) => {
+    if (!confirm(`Remove environment "${env.display_name}"?`)) return
+    setDeletingEnv(env.environment_id)
+    setError(null)
+    try {
+      await api.deleteEnvironment(env.environment_id)
+      await load()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDeletingEnv(null)
+    }
+  }
+
+  if (loading) return <p className="hint">Loading settings…</p>
+
+  return (
+    <section className="settings-page">
+      <h2>Cloud settings</h2>
+      {error && <p className="inline-error settings-error" role="alert">{error}</p>}
+
+      <div className="settings-section">
+        <h3>Environments</h3>
+        <p className="settings-hint">Workers register automatically when they poll the control plane.</p>
+        {environments.length === 0 ? (
+          <p className="hint">No environments registered yet.</p>
+        ) : (
+          <ul className="settings-list">
+            {environments.map((env) => (
+              <li key={env.environment_id} className="settings-list-row">
+                <div className="settings-list-main">
+                  <span className="settings-list-title">{env.display_name}</span>
+                  <span className={`settings-badge ${env.online ? 'settings-badge-online' : 'settings-badge-offline'}`}>
+                    {env.online ? 'online' : 'offline'}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="settings-btn settings-btn-danger"
+                  disabled={deletingEnv !== null}
+                  onClick={() => handleDeleteEnvironment(env)}
+                >
+                  {deletingEnv === env.environment_id ? 'Removing…' : 'Remove'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="settings-section">
+        <h3>Repos</h3>
+        {Object.keys(repos).length === 0 ? (
+          <p className="hint">No repos configured.</p>
+        ) : (
+          <ul className="settings-list">
+            {Object.entries(repos).map(([name, url]) => (
+              <li key={name} className="settings-list-row">
+                <div className="settings-list-main">
+                  <span className="settings-list-title">{name}</span>
+                  <span className="settings-list-sub">{url}</span>
+                </div>
+                <button
+                  type="button"
+                  className="settings-btn settings-btn-danger"
+                  disabled={removing !== null}
+                  onClick={() => handleRemoveRepo(name)}
+                >
+                  {removing === name ? 'Removing…' : 'Remove'}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form className="settings-add-form" onSubmit={handleAddRepo}>
+          <label className="settings-field">
+            <span>Shorthand</span>
+            <input value={addName} onChange={(e) => setAddName(e.target.value)} placeholder="my-repo" />
+          </label>
+          <label className="settings-field">
+            <span>URL</span>
+            <input value={addUrl} onChange={(e) => setAddUrl(e.target.value)} placeholder="https://github.com/org/repo.git" />
+          </label>
+          <button type="submit" className="settings-btn settings-btn-primary" disabled={adding}>
+            {adding ? 'Adding…' : 'Add repo'}
+          </button>
+        </form>
+      </div>
+
+      <div className="settings-section">
+        <h3>GitHub bots</h3>
+        <p className="settings-hint">Map GitHub orgs to Secrets Manager secret names for PR actions.</p>
+        {bots.map((b, i) => (
+          <div key={i} className="settings-bots-row">
+            <input
+              className="settings-input"
+              placeholder="org"
+              value={b.org}
+              onChange={(e) => {
+                const next = [...bots]
+                next[i] = { ...b, org: e.target.value }
+                setBots(next)
+              }}
+            />
+            <input
+              className="settings-input"
+              placeholder="secret name"
+              value={b.secret}
+              onChange={(e) => {
+                const next = [...bots]
+                next[i] = { ...b, secret: e.target.value }
+                setBots(next)
+              }}
+            />
+          </div>
+        ))}
+        <div className="settings-actions">
+          <button type="button" className="settings-btn settings-btn-secondary" onClick={() => setBots([...bots, { org: '', secret: '' }])}>
+            Add bot
+          </button>
+          <button type="button" className="settings-btn settings-btn-primary" onClick={saveBots} disabled={saving}>
+            {saving ? 'Saving…' : 'Save bots'}
+          </button>
+        </div>
+      </div>
+
+      <div className="settings-section">
+        <h3>Account</h3>
+        <p className="settings-hint">End your cloud session on this device.</p>
+        <button
+          type="button"
+          className="settings-btn settings-btn-danger"
+          onClick={() => {
+            signOut()
+            window.location.href = '/'
+          }}
+        >
+          Sign out
+        </button>
+      </div>
+    </section>
+  )
+}
+
+function CloudLoginGate({ children }: { children: React.ReactNode }) {
+  const [email, setEmail] = useState('')
+  const [password, setPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [challengeSession, setChallengeSession] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [authReady, setAuthReady] = useState(!isCloudMode())
+  const [token, setToken] = useState<string | null>(() => (isCloudMode() ? null : getIdToken()))
+
+  useEffect(() => {
+    if (!isCloudMode()) return
+    let cancelled = false
+    void restoreCloudSession().then((ok) => {
+      if (!cancelled) {
+        setToken(ok ? getIdToken() : null)
+        setAuthReady(true)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  if (!isCloudMode()) return <>{children}</>
+  if (!authReady) {
+    return (
+      <div className="cloud-login-page">
+        <div className="cloud-login-card">
+          <p className="cloud-login-subtitle">Restoring session…</p>
+        </div>
+      </div>
+    )
+  }
+  if (token) {
+    return <>{children}</>
+  }
+
+  const handleLogin = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    setSubmitting(true)
+    try {
+      const result = await signIn(email, password)
+      if (result.type === 'new_password_required') {
+        setChallengeSession(result.session)
+        setNewPassword('')
+        setConfirmPassword('')
+        return
+      }
+      setToken(getIdToken())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const handleNewPassword = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    if (newPassword.length < 12) {
+      setError('Password must be at least 12 characters.')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setError('Passwords do not match.')
+      return
+    }
+    if (!challengeSession) {
+      setError('Session expired. Sign in again.')
+      return
+    }
+    setSubmitting(true)
+    try {
+      await completeNewPassword(challengeSession, email, newPassword)
+      setToken(getIdToken())
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <div className="cloud-login-page">
+      <div className="cloud-login-card">
+        <div className="cloud-login-brand">
+          <h1 className="cloud-login-title">Dev</h1>
+          <p className="cloud-login-subtitle">Cloud task management</p>
+        </div>
+
+        {challengeSession ? (
+          <form className="cloud-login-form" onSubmit={handleNewPassword}>
+            <h2 className="cloud-login-heading">Set a new password</h2>
+            <p className="cloud-login-hint">
+              Your account requires a permanent password before you can continue.
+            </p>
+            {error && <p className="inline-error cloud-login-error" role="alert">{error}</p>}
+            <label className="cloud-login-field">
+              <span>New password</span>
+              <input
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                autoComplete="new-password"
+                minLength={12}
+                required
+              />
+            </label>
+            <label className="cloud-login-field">
+              <span>Confirm password</span>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                autoComplete="new-password"
+                minLength={12}
+                required
+              />
+            </label>
+            <button type="submit" className="cloud-login-submit" disabled={submitting}>
+              {submitting ? 'Saving…' : 'Continue'}
+            </button>
+            <button
+              type="button"
+              className="cloud-login-back"
+              onClick={() => {
+                setChallengeSession(null)
+                setError(null)
+                setNewPassword('')
+                setConfirmPassword('')
+              }}
+            >
+              Back to sign in
+            </button>
+          </form>
+        ) : (
+          <form className="cloud-login-form" onSubmit={handleLogin}>
+            <h2 className="cloud-login-heading">Sign in</h2>
+            <p className="cloud-login-hint">
+              Use the email and password from your Cognito account.
+            </p>
+            {error && <p className="inline-error cloud-login-error" role="alert">{error}</p>}
+            <label className="cloud-login-field">
+              <span>Email</span>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="username"
+                placeholder="you@example.com"
+                required
+              />
+            </label>
+            <label className="cloud-login-field">
+              <span>Password</span>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+              />
+            </label>
+            <button type="submit" className="cloud-login-submit" disabled={submitting}>
+              {submitting ? 'Signing in…' : 'Sign in'}
+            </button>
+          </form>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   return (
     <BrowserRouter>
-      <Layout />
+      <CloudLoginGate>
+        <Layout />
+      </CloudLoginGate>
     </BrowserRouter>
   )
 }

@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dev-cloud-infra"
+version = "0.1.0"
+description = "AWS CDK infrastructure for cloud dev"
+requires-python = ">=3.11"
+dependencies = [
+    "aws-cdk-lib>=2.170.0",
+    "constructs>=10.0.0",
+]
+
+[project.scripts]
+dev-cloud-cdk = "dev_cloud_infra.app:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

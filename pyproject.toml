@@ -11,12 +11,14 @@ dependencies = ["dev", "dev-server"]
 [project.optional-dependencies]
 dev = ["tox", "pytest", "pytest-cov", "ruff"]
 
+[tool.uv.workspace]
+members = ["dev-sdk", "dev-cli", "dev-server", "dev-cloud-control", "dev-cloud-infra", "dev-cloud-worker"]
+
 [tool.uv.sources]
 dev = { workspace = true }
 dev-server = { workspace = true }
-
-[tool.uv.workspace]
-members = ["dev-sdk", "dev-cli", "dev-server"]
+dev-sdk = { workspace = true }
+dev-cloud-control = { workspace = true }
 
 [tool.ruff.lint]
 # E402: module-level import not at top of file (no mid-file imports).

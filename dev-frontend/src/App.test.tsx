@@ -31,6 +31,7 @@ vi.mock('./api', () => ({
     postTaskComms: vi.fn(),
     getTaskCommandStatus: vi.fn(),
     openTaskLogStream: vi.fn(),
+    connectTaskStream: vi.fn(() => ({ close: vi.fn() })),
     startTaskCommand: vi.fn(),
     cancelTaskCommand: vi.fn(),
     createTaskPr: vi.fn(),
@@ -373,12 +374,8 @@ describe('App', () => {
   it('collapses non-live agent logs by default; expands only the active stream log', async () => {
     const noop = () => {}
     const { api } = await import('./api')
-    const fakeEs = {
-      close: vi.fn(),
-      onmessage: null as null | ((e: MessageEvent) => void),
-      onerror: null as null | (() => void),
-    }
-    vi.mocked(api.openTaskLogStream).mockReturnValue(fakeEs as unknown as EventSource)
+    const fakeStream = { close: vi.fn() }
+    vi.mocked(api.connectTaskStream).mockReturnValue(fakeStream)
     vi.mocked(api.getTaskFeed).mockResolvedValue({
       entries: [
         { type: 'log', id: '001-old.jsonl', created_at: 1 },
