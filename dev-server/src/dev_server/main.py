@@ -48,6 +48,7 @@ from dev_sdk.drafts import (
 )
 from dev_sdk.feed import LOGS_DIR, FeedCursor, read_comms_deletable_map, read_feed, read_feed_page
 from dev_sdk.question_answers import AnswerItem, build_answers_markdown
+from dev_sdk.branch_status import get_branch_status_from_task
 from dev_sdk.create_pr import (
     CreatePRError,
     create_pull_request,
@@ -390,8 +391,14 @@ class NewTaskDraftRequest(BaseModel):
     comment: str | None = None
 
 
+class BranchStatusResponse(BaseModel):
+    ahead: int
+    behind: int
+
+
 class TaskWorkspaceResponse(BaseModel):
     repo_label: str | None = None
+    branch_status: BranchStatusResponse | None = None
 
 
 class TaskCommentDraftRequest(BaseModel):
@@ -634,7 +641,12 @@ def get_task_workspace(task_name: str) -> TaskWorkspaceResponse:
     """Return a label for the nested clone (e.g. origin URL), or null if there is none."""
     task_dir = _task_dir(task_name)
     label = TaskManager.describe_clone_layout(task_dir)
-    return TaskWorkspaceResponse(repo_label=label)
+    branch_status = None
+    if label is not None:
+        raw = get_branch_status_from_task(task_dir)
+        if raw is not None:
+            branch_status = BranchStatusResponse(**raw)
+    return TaskWorkspaceResponse(repo_label=label, branch_status=branch_status)
 
 
 @app.post("/tasks")

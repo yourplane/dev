@@ -38,6 +38,16 @@ const FEED_POLL_INTERVAL_MS = 15000
 const FEED_PAGE_SIZE = 50
 const ARCHIVE_PAGE_SIZE = 50
 
+function formatBranchStatus(status: { ahead: number; behind: number }): string {
+  if (status.ahead === 0 && status.behind === 0) {
+    return 'Up to date with main'
+  }
+  const parts: string[] = []
+  if (status.ahead > 0) parts.push(`${status.ahead} ahead`)
+  if (status.behind > 0) parts.push(`${status.behind} behind`)
+  return `${parts.join(', ')} main`
+}
+
 export function Layout() {
   return (
     <div className="app">
@@ -1752,23 +1762,54 @@ export function TaskCommsPageContent({
     [activeLogFilename],
   )
 
-  useEffect(() => {
-    let cancelled = false
-    setWorkspaceInfo(null)
-    api
-      .getTaskWorkspace(taskName)
-      .then((ws) => {
-        if (!cancelled) setWorkspaceInfo(ws)
-      })
-      .catch(() => {
-        if (!cancelled) {
+  const refreshWorkspaceAndPr = useCallback(
+    async (runId: number) => {
+      if (!tabVisibleRef.current) return
+      try {
+        const ws = await api.getTaskWorkspace(taskName)
+        if (prRehydrateRunIdRef.current === runId) {
+          setWorkspaceInfo(ws)
+        }
+      } catch {
+        if (prRehydrateRunIdRef.current === runId) {
           setWorkspaceInfo({ repo_label: '—' })
         }
-      })
+      }
+      try {
+        const res = await api.getTaskPr(taskName)
+        if (prRehydrateRunIdRef.current === runId) {
+          setPrUrl(res.pr_url)
+        }
+      } catch (e) {
+        if (prRehydrateRunIdRef.current === runId) {
+          setPrError(e instanceof Error ? e.message : String(e))
+        }
+      }
+    },
+    [taskName],
+  )
+
+  useEffect(() => {
+    let cancelled = false
+    const runId = prRehydrateRunIdRef.current + 1
+    prRehydrateRunIdRef.current = runId
+    setWorkspaceInfo(null)
+    setPrError(null)
+    setPrCommentsStatus(null)
+
+    const tick = () => {
+      if (cancelled) return
+      void refreshWorkspaceAndPr(runId)
+    }
+    tick()
+    const interval = setInterval(() => {
+      if (tabVisibleRef.current) tick()
+    }, FEED_POLL_INTERVAL_MS)
     return () => {
       cancelled = true
+      clearInterval(interval)
     }
-  }, [taskName])
+  }, [taskName, refreshWorkspaceAndPr])
 
   useEffect(() => {
     if (workspaceInfo?.repo_label === null) {
@@ -2286,30 +2327,6 @@ export function TaskCommsPageContent({
       setPullingPrComments(false)
     }
   }
-
-  useEffect(() => {
-    let cancelled = false
-    const runId = prRehydrateRunIdRef.current + 1
-    prRehydrateRunIdRef.current = runId
-
-    setPrError(null)
-    setPrCommentsStatus(null)
-    api.getTaskPr(taskName)
-      .then((res) => {
-        if (cancelled) return
-        if (prRehydrateRunIdRef.current !== runId) return
-        setPrUrl(res.pr_url)
-      })
-      .catch((e) => {
-        if (cancelled) return
-        if (prRehydrateRunIdRef.current !== runId) return
-        setPrError(e instanceof Error ? e.message : String(e))
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [taskName])
 
   useEffect(() => {
     hasScrolledInitialRef.current = false
@@ -2833,6 +2850,9 @@ export function TaskCommsPageContent({
         {commandError && <p className="inline-error">{commandError}</p>}
         {prError && <p className="inline-error">{prError}</p>}
         {prCommentsStatus && <p>{prCommentsStatus}</p>}
+        {workspaceInfo?.branch_status != null && (
+          <p className="branch-status">{formatBranchStatus(workspaceInfo.branch_status)}</p>
+        )}
         {prUrl && (
           <p className="pr-result">
             <a href={prUrl} target="_blank" rel="noopener noreferrer">Open PR</a>
