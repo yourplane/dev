@@ -409,6 +409,103 @@ def test_worker_sync_pulls_comms_index(aws_env):
     assert answers_filename in index_item["content"]
 
 
+def _create_active_task(router: Router) -> str:
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Draft test", "environment_id": "env-1", "repo": None},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    router.dispatch(_event("POST", f"/worker/tasks/{task_name}/command/complete", {"result": {}}))
+    return task_name
+
+
+def test_post_comms_clears_comment_draft(aws_env):
+    router = Router()
+    store = CloudStore()
+    task_name = _create_active_task(router)
+    store.set_draft(f"comment-{task_name}", "draft text")
+
+    resp = router.dispatch(
+        _event("POST", f"/tasks/{task_name}/comms", {"content": "posted comment"})
+    )
+    assert resp["statusCode"] == 201
+    assert store.get_draft(f"comment-{task_name}") is None
+
+
+def test_post_question_answers_clears_draft(aws_env):
+    router = Router()
+    store = CloudStore()
+    task_name = _create_active_task(router)
+    sk = f"question-answers-{task_name}-001-agent-question.md"
+    store.set_draft(sk, {"selections": {"q1": "A"}, "freeText": {}})
+
+    resp = router.dispatch(
+        _event(
+            "POST",
+            f"/tasks/{task_name}/comms/question-answers",
+            {
+                "source": "001-agent-question.md",
+                "answers": [{"id": "q1", "text": "Q?", "selected": "A", "free_text": ""}],
+            },
+        )
+    )
+    assert resp["statusCode"] == 201
+    assert store.get_draft(sk) is None
+
+
+def test_set_question_answers_draft_empty_fields_clears_draft(aws_env):
+    router = Router()
+    store = CloudStore()
+    task_name = _create_active_task(router)
+    sk = f"question-answers-{task_name}-002-agent-question.md"
+    store.set_draft(sk, {"selections": {"q1": "A"}, "freeText": {}})
+
+    resp = router.dispatch(
+        _event(
+            "PUT",
+            f"/tasks/{task_name}/drafts/question-answers/002-agent-question.md",
+            {"selections": {}, "freeText": {}, "expandedFreeText": {}},
+        )
+    )
+    assert resp["statusCode"] == 204
+    assert store.get_draft(sk) is None
+
+
+def test_start_do_clears_comment_draft(aws_env):
+    router = Router()
+    store = CloudStore()
+    task_name = _create_active_task(router)
+    store.set_draft(f"comment-{task_name}", "do prompt draft")
+
+    resp = router.dispatch(
+        _event("POST", f"/tasks/{task_name}/commands", {"command": "do", "prompt": "DO-PROMPT"})
+    )
+    assert resp["statusCode"] == 201
+    assert store.get_draft(f"comment-{task_name}") is None
+
+
+def test_create_task_always_clears_new_task_draft(aws_env):
+    router = Router()
+    store = CloudStore()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    store.set_draft("new-task", {"title": "Saved", "repo": None, "comment": ""})
+
+    resp = router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "No comment task", "environment_id": "env-1", "repo": None},
+        )
+    )
+    assert resp["statusCode"] == 200
+    assert store.get_draft("new-task") is None
+
+
 def _make_offline(store: CloudStore, environment_id: str) -> None:
     store._table.update_item(
         Key={"pk": f"ENV#{environment_id}", "sk": "META"},
@@ -570,3 +667,50 @@ def test_worker_command_complete_orphan_with_reboot_message(aws_env):
     task = store.get_task(task_name)
     assert task.active_command is None
     assert task.last_command_error == WORKER_REBOOT_MESSAGE
+
+
+def test_start_merge_from_main_queues_command(aws_env):
+    router = Router()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(_event("POST", "/repos", {"name": "dev", "url": "https://github.com/o/r.git"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Merge task", "environment_id": "env-1", "repo": "dev"},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    router.dispatch(
+        _event("POST", f"/worker/tasks/{task_name}/command/complete", {"result": {}})
+    )
+    resp = router.dispatch(
+        _event("POST", f"/tasks/{task_name}/commands", {"command": "merge-from-main"})
+    )
+    assert resp["statusCode"] == 201
+    body = json.loads(resp["body"])
+    assert body["command"] == "merge-from-main"
+    assert body["status"] == "queued"
+
+
+def test_start_merge_from_main_rejects_task_without_repo(aws_env):
+    router = Router()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "No repo", "environment_id": "env-1", "repo": None},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    router.dispatch(
+        _event("POST", f"/worker/tasks/{task_name}/command/complete", {"result": {}})
+    )
+    resp = router.dispatch(
+        _event("POST", f"/tasks/{task_name}/commands", {"command": "merge-from-main"})
+    )
+    assert resp["statusCode"] == 400
+    assert "no cloned repository" in json.loads(resp["body"])["detail"].lower()

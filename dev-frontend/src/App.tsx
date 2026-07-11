@@ -4,6 +4,14 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api, apiBaseUrl, type TaskWorkspaceInfo, type EnvironmentInfo } from './api'
 import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
+import {
+  buildFeedNavTargets,
+  findCurrentNavIndex,
+  isNearPageBottom,
+  navTargetId,
+  scrollToNavTarget,
+  type FeedNavTarget,
+} from './feedScrollNav'
 import { isCloudMode, getIdToken, signIn, signOut, completeNewPassword, restoreCloudSession } from './cloudAuth'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import { QuestionAnswerForm } from './QuestionAnswerForm'
@@ -972,6 +980,8 @@ const FeedEntryRow = memo(function FeedEntryRow({
         <button
           type="button"
           className="feed-entry-header"
+          data-feed-nav-type="header"
+          data-feed-nav-key={entryKey}
           onClick={() => toggleCollapsed(entry, entryKey)}
           aria-expanded={!isCollapsed}
         >
@@ -1641,6 +1651,9 @@ export function TaskCommsPageContent({
   feedTotalRef.current = feedTotal
   const hasOlderRef = useRef(hasOlder)
   hasOlderRef.current = hasOlder
+  const pendingNavAfterLoadRef = useRef<{ prevFirstId: string } | null>(null)
+  const loadingOlderRef = useRef(loadingOlder)
+  loadingOlderRef.current = loadingOlder
 
   const bashHistory = useMemo(() => {
     const cmds: string[] = []
@@ -1967,6 +1980,79 @@ export function TaskCommsPageContent({
       setLoadingOlder(false)
     }
   }, [taskName, applyFeedPage, loadingOlder])
+
+  const SCROLL_NEAR_BOTTOM_PX = 80
+  const SCROLL_BEHIND_THRESHOLD_PX = 24
+  const LOCKED_SCROLL_THROTTLE_MS = 80
+  const PROGRAMMATIC_SCROLL_MS = 150
+  const PROGRAMMATIC_SCROLL_SMOOTH_MS = 800
+
+  const buildNavTargets = useCallback((): FeedNavTarget[] => {
+    return buildFeedNavTargets(feedEntries, (entryKey, entry) => getEntryCollapsed(entry, entryKey))
+  }, [feedEntries, getEntryCollapsed])
+
+  const runProgrammaticScroll = useCallback((durationMs: number, fn: () => void) => {
+    programmaticScrollRef.current = true
+    fn()
+    setTimeout(() => {
+      programmaticScrollRef.current = false
+    }, durationMs)
+  }, [])
+
+  const applyLockAfterNavStep = useCallback(
+    (direction: 'up' | 'down') => {
+      if (direction === 'up') {
+        setLockedToBottom(false)
+      } else if (isNearPageBottom(SCROLL_NEAR_BOTTOM_PX)) {
+        setLockedToBottom(true)
+      }
+    },
+    [],
+  )
+
+  const scrollToNavTargetWithLock = useCallback(
+    (target: FeedNavTarget, direction: 'up' | 'down') => {
+      runProgrammaticScroll(PROGRAMMATIC_SCROLL_SMOOTH_MS, () => {
+        scrollToNavTarget(target, 'smooth')
+        setTimeout(() => applyLockAfterNavStep(direction), PROGRAMMATIC_SCROLL_SMOOTH_MS)
+      })
+    },
+    [applyLockAfterNavStep, runProgrammaticScroll],
+  )
+
+  const scrollOneEntry = useCallback(
+    async (direction: 'up' | 'down') => {
+      const targets = buildNavTargets()
+      if (targets.length === 0) return
+
+      let currentIdx = findCurrentNavIndex(targets, SCROLL_NEAR_BOTTOM_PX)
+      if (currentIdx < 0) currentIdx = direction === 'down' ? -1 : 0
+
+      if (direction === 'up') {
+        if (currentIdx <= 0 && hasOlderRef.current && !loadingOlderRef.current) {
+          pendingNavAfterLoadRef.current = { prevFirstId: navTargetId(targets[0]) }
+          await loadOlderFeed()
+          return
+        }
+        const nextIdx = Math.max(0, currentIdx - 1)
+        if (nextIdx === currentIdx) return
+        scrollToNavTargetWithLock(targets[nextIdx], direction)
+        return
+      }
+
+      const nextIdx = Math.min(targets.length - 1, currentIdx + 1)
+      if (nextIdx === currentIdx) return
+      scrollToNavTargetWithLock(targets[nextIdx], direction)
+    },
+    [buildNavTargets, loadOlderFeed, scrollToNavTargetWithLock],
+  )
+
+  const scrollOneEntryUp = () => {
+    void scrollOneEntry('up')
+  }
+  const scrollOneEntryDown = () => {
+    void scrollOneEntry('down')
+  }
 
   const pollFeedIncremental = useCallback(
     async (opts?: { prefetchNew?: boolean }) => {
@@ -2343,6 +2429,8 @@ export function TaskCommsPageContent({
       await api.postTaskComms(taskName, content)
       setCommentText('')
       lastSavedCommentRef.current = ''
+      setCommentDraftStatus('saved')
+      api.setTaskCommentDraft(taskName, '').catch(() => {})
       await pollFeedIncremental({ prefetchNew: true })
       setScrollToBottomAfterLoad(true)
     } catch (err) {
@@ -2372,20 +2460,18 @@ export function TaskCommsPageContent({
     }
   }
 
-  const PROGRAMMATIC_SCROLL_MS = 150
-  const PROGRAMMATIC_SCROLL_SMOOTH_MS = 800
-
   useEffect(() => {
     if (feedReady && feedEntries.length > 0) {
+      const scrollToBottom = () => {
+        programmaticScrollRef.current = true
+        window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
+        setTimeout(() => {
+          programmaticScrollRef.current = false
+        }, PROGRAMMATIC_SCROLL_MS)
+      }
       if (scrollToBottomAfterLoad) {
         setScrollToBottomAfterLoad(false)
-        const scrollToBottom = () => {
-          programmaticScrollRef.current = true
-          window.scrollTo({ top: document.documentElement.scrollHeight, behavior: 'instant' })
-          setTimeout(() => {
-            programmaticScrollRef.current = false
-          }, PROGRAMMATIC_SCROLL_MS)
-        }
+        setLockedToBottom(true)
         requestAnimationFrame(() => {
           requestAnimationFrame(() => {
             scrollToBottom()
@@ -2393,15 +2479,29 @@ export function TaskCommsPageContent({
           })
         })
       } else if (!hasScrolledInitialRef.current) {
-        lastCommsEntryRef.current?.scrollIntoView({ behavior: 'instant' })
+        setLockedToBottom(true)
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            scrollToBottom()
+            setTimeout(scrollToBottom, 50)
+            setTimeout(scrollToBottom, 200)
+          })
+        })
         hasScrolledInitialRef.current = true
       }
     }
   }, [feedReady, scrollToBottomAfterLoad, feedEntries.length])
 
-  const SCROLL_NEAR_BOTTOM_PX = 80
-  const SCROLL_BEHIND_THRESHOLD_PX = 24
-  const LOCKED_SCROLL_THROTTLE_MS = 80
+  useEffect(() => {
+    const pending = pendingNavAfterLoadRef.current
+    if (!pending || loadingOlder) return
+    pendingNavAfterLoadRef.current = null
+    const targets = buildNavTargets()
+    if (targets.length === 0) return
+    const oldIdx = targets.findIndex((t) => navTargetId(t) === pending.prevFirstId)
+    if (oldIdx <= 0) return
+    scrollToNavTargetWithLock(targets[oldIdx - 1], 'up')
+  }, [feedEntries, feedCollapse, loadingOlder, buildNavTargets, scrollToNavTargetWithLock])
 
   // Bottom lock: enter when really close to bottom, leave only when user scrolls up (ignore programmatic scrolls)
   useEffect(() => {
@@ -2437,6 +2537,19 @@ export function TaskCommsPageContent({
       feedLengthRef.current = len
     }
   }, [lockedToBottom, feedEntries.length])
+
+  // When locked, keep pinned to bottom as async content expands the page (e.g. initial load).
+  useEffect(() => {
+    if (!lockedToBottom || !feedReady || feedEntries.length === 0) return
+    const scrollHeight = document.documentElement.scrollHeight
+    const behind = window.scrollY + window.innerHeight < scrollHeight - SCROLL_BEHIND_THRESHOLD_PX
+    if (!behind) return
+    programmaticScrollRef.current = true
+    window.scrollTo({ top: scrollHeight, behavior: 'instant' })
+    setTimeout(() => {
+      programmaticScrollRef.current = false
+    }, PROGRAMMATIC_SCROLL_MS)
+  }, [lockedToBottom, feedReady, feedEntries.length, contents])
 
   const activeLogContent = activeLogFilename ? contents[activeLogFilename] : ''
 
@@ -2853,7 +2966,28 @@ export function TaskCommsPageContent({
           aria-label="Scroll to top"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="m17 11-5-5-5 5" />
+            <path d="m17 18-5-5-5 5" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className="task-comms-scroll-btn task-comms-scroll-btn-step"
+          onClick={scrollOneEntryUp}
+          aria-label="Scroll up one entry"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="m18 15-6-6-6 6" />
+          </svg>
+        </button>
+        <button
+          type="button"
+          className="task-comms-scroll-btn task-comms-scroll-btn-step"
+          onClick={scrollOneEntryDown}
+          aria-label="Scroll down one entry"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="m6 9 6 6 6-6" />
           </svg>
         </button>
         <button
@@ -2863,7 +2997,8 @@ export function TaskCommsPageContent({
           aria-label="Scroll to bottom"
         >
           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="m6 9 6 6 6-6" />
+            <path d="m7 6 5 5 5-5" />
+            <path d="m7 13 5 5 5-5" />
           </svg>
         </button>
       </div>

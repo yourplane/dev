@@ -602,12 +602,19 @@ dependencies = [
     { name = "requests" },
 ]
 
+[package.optional-dependencies]
+test = [
+    { name = "pytest" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "dev-cloud-control", editable = "dev-cloud-control" },
     { name = "dev-sdk", editable = "dev-sdk" },
+    { name = "pytest", marker = "extra == 'test'" },
     { name = "requests", specifier = ">=2.31" },
 ]
+provides-extras = ["test"]
 
 [[package]]
 name = "dev-sdk"
@@ -663,6 +670,7 @@ version = "0.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "dev" },
+    { name = "dev-cloud-worker" },
     { name = "dev-server" },
 ]
 
@@ -677,6 +685,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "dev", editable = "dev-cli" },
+    { name = "dev-cloud-worker", editable = "dev-cloud-worker" },
     { name = "dev-server", editable = "dev-server" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-cov", marker = "extra == 'dev'" },

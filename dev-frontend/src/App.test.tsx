@@ -43,6 +43,7 @@ vi.mock('./api', () => ({
 describe('App', () => {
   beforeEach(async () => {
     Element.prototype.scrollIntoView = vi.fn()
+    window.scrollTo = vi.fn()
     vi.resetModules()
     const { api } = await import('./api')
     vi.mocked(api.getTasks).mockResolvedValue({ tasks: [] })
@@ -129,6 +130,39 @@ describe('App', () => {
 
     await waitFor(() => {
       expect(vi.mocked(api.startTaskCommand)).toHaveBeenCalledWith('test-task', 'do', 'DO-PROMPT')
+    })
+
+    await waitFor(() => {
+      expect((textarea as HTMLTextAreaElement).value).toBe('')
+    })
+
+    await waitFor(() => {
+      expect(vi.mocked(api.setTaskCommentDraft)).toHaveBeenCalledWith('test-task', '')
+    })
+  })
+
+  it('clicking Post comment clears textarea and deletes persisted draft', async () => {
+    const noop = () => {}
+    const { api } = await import('./api')
+    vi.mocked(api.postTaskComms).mockResolvedValue({ filename: '003-user.md' })
+
+    render(
+      <MemoryRouter>
+        <TaskCommsPageContent taskName="test-task" navigate={noop} />
+      </MemoryRouter>
+    )
+
+    const textarea = await screen.findByPlaceholderText('Write a comment…')
+    const postButton = await screen.findByRole('button', { name: 'Post comment' })
+
+    fireEvent.change(textarea, { target: { value: 'MY-COMMENT' } })
+    await waitFor(() => {
+      expect((postButton as HTMLButtonElement).disabled).toBe(false)
+    })
+    fireEvent.click(postButton)
+
+    await waitFor(() => {
+      expect(vi.mocked(api.postTaskComms)).toHaveBeenCalledWith('test-task', 'MY-COMMENT')
     })
 
     await waitFor(() => {
