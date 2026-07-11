@@ -22,3 +22,6 @@ dev-cloud-worker = "dev_cloud_worker.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[project.optional-dependencies]
+test = ["pytest"]

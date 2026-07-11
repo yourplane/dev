@@ -649,3 +649,50 @@ def test_worker_command_complete_orphan_with_reboot_message(aws_env):
     task = store.get_task(task_name)
     assert task.active_command is None
     assert task.last_command_error == WORKER_REBOOT_MESSAGE
+
+
+def test_start_merge_from_main_queues_command(aws_env):
+    router = Router()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(_event("POST", "/repos", {"name": "dev", "url": "https://github.com/o/r.git"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Merge task", "environment_id": "env-1", "repo": "dev"},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    router.dispatch(
+        _event("POST", f"/worker/tasks/{task_name}/command/complete", {"result": {}})
+    )
+    resp = router.dispatch(
+        _event("POST", f"/tasks/{task_name}/commands", {"command": "merge-from-main"})
+    )
+    assert resp["statusCode"] == 201
+    body = json.loads(resp["body"])
+    assert body["command"] == "merge-from-main"
+    assert body["status"] == "queued"
+
+
+def test_start_merge_from_main_rejects_task_without_repo(aws_env):
+    router = Router()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "No repo", "environment_id": "env-1", "repo": None},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    router.dispatch(
+        _event("POST", f"/worker/tasks/{task_name}/command/complete", {"result": {}})
+    )
+    resp = router.dispatch(
+        _event("POST", f"/tasks/{task_name}/commands", {"command": "merge-from-main"})
+    )
+    assert resp["statusCode"] == 400
+    assert "no cloned repository" in json.loads(resp["body"])["detail"].lower()

@@ -30,7 +30,7 @@ from dev_cloud_control.store import (
 )
 from dev_sdk.stream_sse import SSE_HEADERS, STREAM_MAX_DURATION_SEC, run_task_stream
 
-SUPPORTED_COMMANDS = ("question", "plan-implement", "implement", "do", "bash")
+SUPPORTED_COMMANDS = ("question", "plan-implement", "implement", "do", "bash", "merge-from-main")
 WORKER_REBOOT_MESSAGE = (
     "Worker rebooted — command cancelled; workspace may have uncommitted changes"
 )
@@ -875,6 +875,16 @@ class Router:
         command = body.get("command")
         if command not in SUPPORTED_COMMANDS:
             return _json(400, {"detail": f"Unsupported command: {command}"})
+        if command == "merge-from-main" and not task.repo:
+            return _json(
+                400,
+                {
+                    "detail": (
+                        "This task has no cloned repository under the task root; "
+                        "Merge from main is not available."
+                    )
+                },
+            )
         payload: dict[str, Any] = {}
         if body.get("prompt") is not None:
             payload["prompt"] = body["prompt"]
