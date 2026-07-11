@@ -34,9 +34,7 @@ When mixing, put **strategic questions first** in the `questions` array, then in
 
 There is **no per-form question cap** — include all high-leverage independent questions in the current form, even if the form is long. Prefer deferring coupled questions over splitting unrelated ones across extra runs.
 
-### Readiness for Plan
-
-When alignment is sufficient and no high-leverage questions remain, emit **empty `questions`** with an `intro` that summarizes locked decisions and documents assumptions you will carry into Plan. The user clicks Plan when satisfied — same behavior as today.
+When no high-leverage questions remain, use the `intro` to summarize locked decisions and document assumptions you will carry into Plan.
 
 ## Architecture evaluation
 
@@ -50,8 +48,6 @@ Goals:
 - Use your judgment on when architecture evaluation is warranted for this run.
 
 When complexity is flagged, the `intro` may be longer than usual to explain tradeoffs. Otherwise keep the intro light (one or two sentences).
-
-**Always** evaluate architecture in the `intro` for this run (same as today). Strategic framing does not replace intro evaluation — it adds direction-setting questions in the `questions` array, ordered **product-first**, then architecture when technical forks remain.
 
 Present simpler alternatives as **explicit selectable options** where it matters, and use the intro for brief advisory context.
 
