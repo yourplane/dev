@@ -477,7 +477,11 @@ class Router:
     def set_question_answers_draft(self, event: dict, task_name: str, comms_filename: str) -> dict:
         body = _parse_body(event) or {}
         sk = f"question-answers-{task_name}-{comms_filename.replace('/', '_')}"
-        if not body:
+        selections = body.get("selections") or {}
+        free_text = body.get("freeText") or {}
+        expanded = body.get("expandedFreeText") or {}
+        editing = body.get("editing")
+        if not selections and not free_text and not expanded and not editing:
             self.store.delete_draft(sk)
         else:
             self.store.set_draft(sk, body)

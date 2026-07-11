@@ -79,7 +79,7 @@ describe('QuestionAnswerForm', () => {
     expect(api.setQuestionAnswersDraft).toHaveBeenCalledWith(
       't',
       '002-agent-question.md',
-      {},
+      { selections: {}, freeText: {}, expandedFreeText: {} },
     )
   })
 

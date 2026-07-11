@@ -458,6 +458,24 @@ def test_post_question_answers_clears_draft(aws_env):
     assert store.get_draft(sk) is None
 
 
+def test_set_question_answers_draft_empty_fields_clears_draft(aws_env):
+    router = Router()
+    store = CloudStore()
+    task_name = _create_active_task(router)
+    sk = f"question-answers-{task_name}-002-agent-question.md"
+    store.set_draft(sk, {"selections": {"q1": "A"}, "freeText": {}})
+
+    resp = router.dispatch(
+        _event(
+            "PUT",
+            f"/tasks/{task_name}/drafts/question-answers/002-agent-question.md",
+            {"selections": {}, "freeText": {}, "expandedFreeText": {}},
+        )
+    )
+    assert resp["statusCode"] == 204
+    assert store.get_draft(sk) is None
+
+
 def test_start_do_clears_comment_draft(aws_env):
     router = Router()
     store = CloudStore()
