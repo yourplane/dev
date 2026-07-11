@@ -5,8 +5,8 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dev-workspace"
 version = "0.0.0"
-requires-python = ">=3.9"
-dependencies = ["dev", "dev-server"]
+requires-python = ">=3.11"
+dependencies = ["dev", "dev-server", "dev-cloud-worker"]
 
 [project.optional-dependencies]
 dev = ["tox", "pytest", "pytest-cov", "ruff"]
@@ -19,6 +19,7 @@ dev = { workspace = true }
 dev-server = { workspace = true }
 dev-sdk = { workspace = true }
 dev-cloud-control = { workspace = true }
+dev-cloud-worker = { workspace = true }
 
 [tool.ruff.lint]
 # E402: module-level import not at top of file (no mid-file imports).
