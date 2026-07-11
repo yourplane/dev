@@ -1,4 +1,6 @@
-export type FeedNavTarget = { kind: 'header'; entryKey: string }
+export type FeedNavTarget =
+  | { kind: 'header'; entryKey: string }
+  | { kind: 'page-bottom' }
 
 export interface FeedEntryOutline {
   type: string
@@ -6,7 +8,7 @@ export interface FeedEntryOutline {
 }
 
 export function navTargetId(target: FeedNavTarget): string {
-  return `${target.entryKey}:header`
+  return target.kind === 'page-bottom' ? 'page:bottom:footer' : `${target.entryKey}:header`
 }
 
 export function buildFeedNavTargets(
@@ -19,10 +21,12 @@ export function buildFeedNavTargets(
     if (isCollapsed(entryKey, entry)) continue
     targets.push({ kind: 'header', entryKey })
   }
+  targets.push({ kind: 'page-bottom' })
   return targets
 }
 
 export function findNavTargetElement(target: FeedNavTarget): HTMLElement | null {
+  if (target.kind === 'page-bottom') return null
   return document.querySelector(
     `[data-feed-nav-key="${CSS.escape(target.entryKey)}"][data-feed-nav-type="header"]`,
   )
@@ -31,10 +35,20 @@ export function findNavTargetElement(target: FeedNavTarget): HTMLElement | null 
 /** Index of the nav target whose top is at or just above the viewport anchor. */
 export function findCurrentNavIndex(targets: FeedNavTarget[], viewportOffsetPx = 80): number {
   if (targets.length === 0) return -1
+
+  const footerIdx = targets.length - 1
+  if (targets[footerIdx].kind === 'page-bottom' && isNearPageBottom(viewportOffsetPx)) {
+    return footerIdx
+  }
+
+  const headerTargets =
+    targets[footerIdx].kind === 'page-bottom' ? targets.slice(0, footerIdx) : targets
+  if (headerTargets.length === 0) return -1
+
   let bestIdx = 0
   let found = false
-  for (let i = 0; i < targets.length; i++) {
-    const el = findNavTargetElement(targets[i])
+  for (let i = 0; i < headerTargets.length; i++) {
+    const el = findNavTargetElement(headerTargets[i])
     if (!el) continue
     found = true
     const top = el.getBoundingClientRect().top
@@ -45,6 +59,10 @@ export function findCurrentNavIndex(targets: FeedNavTarget[], viewportOffsetPx =
 }
 
 export function scrollToNavTarget(target: FeedNavTarget, behavior: ScrollBehavior = 'smooth'): boolean {
+  if (target.kind === 'page-bottom') {
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior })
+    return true
+  }
   const el = findNavTargetElement(target)
   if (!el) return false
   el.scrollIntoView({ behavior, block: 'start' })
