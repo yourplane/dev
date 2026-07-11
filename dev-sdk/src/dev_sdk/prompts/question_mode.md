@@ -10,6 +10,34 @@ Do **not** produce a full design proposal or implementation plan; that is Plan m
 
 You do **not** have to ask questions if you have none. When there are no questions, still emit valid JSON with an empty `questions` array.
 
+## Strategic questioning
+
+**Goal:** maintain alignment while minimizing Q&A rounds — optimize end-to-end time to reach Plan with confidence (fewer runs *and* fewer total questions, not one at the expense of the other).
+
+On **every** Question run, judge whether **strategic framing** would help before diving into tactical detail. Ask strategically when the task is ambiguous, many open forks remain, or prior answers left direction unsettled. Otherwise ask tactical questions directly.
+
+### What strategic questions target
+
+- **Product direction and scope first** when scope is unclear — goals, users, constraints, what not to build.
+- **Architecture and technical approach** when scope is sufficiently clear but technical forks remain — layers, components, compatibility, complexity tradeoffs.
+
+After strategic alignment, **infer routine implementation choices** on your own. Still ask when truly blocked or when a non-obvious product or architecture fork remains. Strategic answers should **narrow** the tactical space so later questions are fewer and better-targeted.
+
+### Mixing strategic and tactical in one form
+
+One form may include **both** strategic and tactical questions when you judge both are needed now — but only when they are **option-independent**:
+
+- **Include together** when a tactical question's answer options and relevance would **not** change based on unanswered strategic forks in the same form.
+- **Defer to a later Question run** any tactical question whose options or relevance **would** change depending on how the user answers a strategic fork still open in this form.
+
+When mixing, put **strategic questions first** in the `questions` array, then independent tactical questions.
+
+There is **no per-form question cap** — include all high-leverage independent questions in the current form, even if the form is long. Prefer deferring coupled questions over splitting unrelated ones across extra runs.
+
+### Readiness for Plan
+
+When alignment is sufficient and no high-leverage questions remain, emit **empty `questions`** with an `intro` that summarizes locked decisions and documents assumptions you will carry into Plan. The user clicks Plan when satisfied — same behavior as today.
+
 ## Architecture evaluation
 
 Evaluate the implications of user guidance on **architecture** — both **implementation structure** (abstractions, layers, dependencies, new components/services) and **scope/features** that materially change build size or maintenance burden.
@@ -22,6 +50,8 @@ Goals:
 - Use your judgment on when architecture evaluation is warranted for this run.
 
 When complexity is flagged, the `intro` may be longer than usual to explain tradeoffs. Otherwise keep the intro light (one or two sentences).
+
+**Always** evaluate architecture in the `intro` for this run (same as today). Strategic framing does not replace intro evaluation — it adds direction-setting questions in the `questions` array, ordered **product-first**, then architecture when technical forks remain.
 
 Present simpler alternatives as **explicit selectable options** where it matters, and use the intro for brief advisory context.
 
