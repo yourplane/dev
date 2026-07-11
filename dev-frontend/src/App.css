@@ -681,6 +681,12 @@
   margin: 0.75rem 0;
 }
 
+.branch-status {
+  margin: 0.35rem 0 0;
+  color: #555;
+  font-size: 0.9rem;
+}
+
 .command-buttons {
   display: flex;
   gap: 0.5rem;
