@@ -477,7 +477,11 @@ class Router:
     def set_question_answers_draft(self, event: dict, task_name: str, comms_filename: str) -> dict:
         body = _parse_body(event) or {}
         sk = f"question-answers-{task_name}-{comms_filename.replace('/', '_')}"
-        if not body:
+        selections = body.get("selections") or {}
+        free_text = body.get("freeText") or {}
+        expanded = body.get("expandedFreeText") or {}
+        editing = body.get("editing")
+        if not selections and not free_text and not expanded and not editing:
             self.store.delete_draft(sk)
         else:
             self.store.set_draft(sk, body)
@@ -542,8 +546,7 @@ class Router:
             if "ConditionalCheckFailed" in str(e):
                 return _json(409, {"detail": "Task name collision"})
             raise
-        if body.get("comment"):
-            self.store.delete_draft("new-task")
+        self.store.delete_draft("new-task")
         lines = [
             json.dumps({"type": "progress", "message": "Task queued for environment."}),
             json.dumps(
@@ -631,6 +634,7 @@ class Router:
             FeedItem(type="comms", id=filename, created_at=ts, deletable=True, origin="cloud"),
         )
         self._notify_cloud_comms_changed(task_name)
+        self.store.delete_draft(f"comment-{task_name}")
         return _json(201, {"filename": filename})
 
     def post_question_answers(self, event: dict, task_name: str) -> dict:
@@ -659,6 +663,10 @@ class Router:
             FeedItem(type="comms", id=filename, created_at=ts, deletable=True, origin="cloud"),
         )
         self._notify_cloud_comms_changed(task_name)
+        source = body.get("source", "")
+        if source:
+            sk = f"question-answers-{task_name}-{str(source).replace('/', '_')}"
+            self.store.delete_draft(sk)
         return _json(201, {"filename": filename})
 
     def get_comms_file(self, event: dict, task_name: str, filename: str) -> dict:
@@ -892,6 +900,8 @@ class Router:
                 "queued_at": time.time(),
             },
         )
+        if command == "do":
+            self.store.delete_draft(f"comment-{task_name}")
         return _json(201, {"command": command, "status": "queued"})
 
     def cancel_command(self, event: dict, task_name: str) -> dict:
