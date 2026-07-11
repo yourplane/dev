@@ -43,6 +43,7 @@ vi.mock('./api', () => ({
 describe('App', () => {
   beforeEach(async () => {
     Element.prototype.scrollIntoView = vi.fn()
+    window.scrollTo = vi.fn()
     vi.resetModules()
     const { api } = await import('./api')
     vi.mocked(api.getTasks).mockResolvedValue({ tasks: [] })
