@@ -11,6 +11,7 @@ from decimal import Decimal
 from typing import Any
 from urllib.parse import parse_qs, unquote
 
+from dev_sdk.branch_status import get_branch_status_from_metadata
 from dev_sdk.create_pr import (
     CreatePRError,
     create_pull_request_from_metadata,
@@ -493,7 +494,18 @@ class Router:
         if not task:
             return _json(404, {"detail": "Task not found"})
         label = task.repo
-        return _json(200, {"repo_label": label})
+        branch_status = None
+        if task.owner and task.repo_name and task.branch:
+            branch_status = get_branch_status_from_metadata(
+                owner=task.owner,
+                repo=task.repo_name,
+                branch=task.branch,
+                bots=self.store.get_bots(),
+            )
+        payload: dict[str, object] = {"repo_label": label}
+        if branch_status is not None:
+            payload["branch_status"] = branch_status
+        return _json(200, payload)
 
     def create_task(self, event: dict) -> dict:
         body = _parse_body(event) or {}

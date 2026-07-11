@@ -62,6 +62,7 @@ describe('App', () => {
     vi.mocked(api.getTaskFeedDeletable).mockResolvedValue({})
     vi.mocked(api.getTaskWorkspace).mockResolvedValue({
       repo_label: 'https://github.com/acme/repo.git',
+      branch_status: { ahead: 3, behind: 5 },
     })
     vi.mocked(api.getTaskPr).mockResolvedValue({ pr_url: null })
     vi.mocked(api.getTaskCommentDraft).mockResolvedValue('')
@@ -164,6 +165,7 @@ describe('App', () => {
     const { api } = await import('./api')
     vi.mocked(api.getTaskWorkspace).mockResolvedValue({
       repo_label: 'https://github.com/acme/repo.git',
+      branch_status: { ahead: 3, behind: 5 },
     })
     localStorage.removeItem('dev_last_agent_command')
 
@@ -187,6 +189,7 @@ describe('App', () => {
     const { api } = await import('./api')
     vi.mocked(api.getTaskWorkspace).mockResolvedValue({
       repo_label: 'https://github.com/acme/repo.git',
+      branch_status: { ahead: 3, behind: 5 },
     })
     vi.mocked(api.startTaskCommand).mockResolvedValue({ command: 'merge-from-main', status: 'running' })
     localStorage.removeItem('dev_last_agent_command')
@@ -235,6 +238,40 @@ describe('App', () => {
     await waitFor(() => {
       expect(vi.mocked(api.setTaskBashDraft).mock.calls.some((c) => c[0] === 'test-task' && c[1] === '')).toBe(true)
     })
+  })
+
+  it('shows branch status in the task footer when available', async () => {
+    const noop = () => {}
+    const { api } = await import('./api')
+    vi.mocked(api.getTaskWorkspace).mockResolvedValue({
+      repo_label: 'https://github.com/acme/repo.git',
+      branch_status: { ahead: 3, behind: 5 },
+    })
+
+    render(
+      <MemoryRouter>
+        <TaskCommsPageContent taskName="test-task" navigate={noop} />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByText('3 ahead, 5 behind main')).resolves.toBeInTheDocument()
+  })
+
+  it('shows up to date branch status when counts are zero', async () => {
+    const noop = () => {}
+    const { api } = await import('./api')
+    vi.mocked(api.getTaskWorkspace).mockResolvedValue({
+      repo_label: 'https://github.com/acme/repo.git',
+      branch_status: { ahead: 0, behind: 0 },
+    })
+
+    render(
+      <MemoryRouter>
+        <TaskCommsPageContent taskName="test-task" navigate={noop} />
+      </MemoryRouter>,
+    )
+
+    await expect(screen.findByText('Up to date with main')).resolves.toBeInTheDocument()
   })
 
   it('shows Pull Comments and triggers pull when PR exists', async () => {
