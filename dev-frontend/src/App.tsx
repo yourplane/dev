@@ -10,7 +10,6 @@ import {
   isNearPageBottom,
   navTargetId,
   scrollToNavTarget,
-  segmentCountFromLogContent,
   type FeedNavTarget,
 } from './feedScrollNav'
 import { isCloudMode, getIdToken, signIn, signOut, completeNewPassword, restoreCloudSession } from './cloudAuth'
@@ -996,7 +995,7 @@ const FeedEntryRow = memo(function FeedEntryRow({
       {!isCollapsed && (
         <div className="comms-content">
           {entry.type === 'log' ? (
-            <ParsedLogView raw={contents[entry.id] ?? ''} entryKey={entryKey} />
+            <ParsedLogView raw={contents[entry.id] ?? ''} />
           ) : isBashCommsEntry(entry.id) ? (
             <BashCommsFeedBody text={rawContent} />
           ) : questionPayload ? (
@@ -1016,7 +1015,7 @@ const FeedEntryRow = memo(function FeedEntryRow({
   )
 })
 
-function ParsedLogView({ raw, entryKey }: { raw: string; entryKey: string }) {
+function ParsedLogView({ raw }: { raw: string }) {
   const segments = parseLogToSegments(raw)
   if (segments.length === 0) {
     return <pre className="feed-log-content feed-log-raw">(no parseable events)</pre>
@@ -1024,7 +1023,7 @@ function ParsedLogView({ raw, entryKey }: { raw: string; entryKey: string }) {
   return (
     <div className="feed-log-parsed">
       {segments.map((seg, i) => (
-        <LogSegmentBlock key={i} segment={seg} entryKey={entryKey} segmentIndex={i} />
+        <LogSegmentBlock key={i} segment={seg} />
       ))}
     </div>
   )
@@ -1478,29 +1477,12 @@ function ToolCallBlock({ toolCall }: { toolCall: ToolCallInfo }) {
   )
 }
 
-function logSegmentNavProps(entryKey: string, segmentIndex: number) {
-  return {
-    'data-feed-nav-type': 'segment' as const,
-    'data-feed-nav-key': entryKey,
-    'data-feed-nav-segment': segmentIndex,
-  }
-}
-
-function LogSegmentBlock({
-  segment,
-  entryKey,
-  segmentIndex,
-}: {
-  segment: LogSegment
-  entryKey: string
-  segmentIndex: number
-}) {
-  const navProps = logSegmentNavProps(entryKey, segmentIndex)
+function LogSegmentBlock({ segment }: { segment: LogSegment }) {
   const { type, text, toolCall } = segment
   const label = type === 'tool_call' ? 'Tool call' : type === 'thinking' ? 'Thinking' : type.charAt(0).toUpperCase() + type.slice(1)
   if (type === 'thinking') {
     return (
-      <div className="feed-log-segment feed-log-thinking" {...navProps}>
+      <div className="feed-log-segment feed-log-thinking">
         <span className="feed-log-segment-label">{label}</span>
         <div className="feed-log-segment-body">
           <MarkdownText>{text.trim() || '\u00a0'}</MarkdownText>
@@ -1509,22 +1491,18 @@ function LogSegmentBlock({
     )
   }
   if (type === 'tool_call' && toolCall) {
-    return (
-      <div {...navProps}>
-        <ToolCallBlock toolCall={toolCall} />
-      </div>
-    )
+    return <ToolCallBlock toolCall={toolCall} />
   }
   if (type === 'tool_call') {
     return (
-      <div className="feed-log-segment feed-log-tool-call" {...navProps}>
+      <div className="feed-log-segment feed-log-tool-call">
         <span className="feed-log-segment-label">{label}</span>
         <pre className="feed-log-segment-body feed-log-terminal">{text || '(no details)'}</pre>
       </div>
     )
   }
   return (
-    <div className="feed-log-segment feed-log-default" {...navProps}>
+    <div className="feed-log-segment feed-log-default">
       <span className="feed-log-segment-label">{label}</span>
       <div className="feed-log-segment-body">
         <MarkdownText>{text.trim() || '\u00a0'}</MarkdownText>
@@ -1969,15 +1947,8 @@ export function TaskCommsPageContent({
   const PROGRAMMATIC_SCROLL_SMOOTH_MS = 800
 
   const buildNavTargets = useCallback((): FeedNavTarget[] => {
-    return buildFeedNavTargets(
-      feedEntries,
-      (entryKey, entry) => getEntryCollapsed(entry, entryKey),
-      (_entryKey, entry) => {
-        if (entry.type !== 'log') return 0
-        return segmentCountFromLogContent(contents[entry.id])
-      },
-    )
-  }, [feedEntries, getEntryCollapsed, contents])
+    return buildFeedNavTargets(feedEntries, (entryKey, entry) => getEntryCollapsed(entry, entryKey))
+  }, [feedEntries, getEntryCollapsed])
 
   const runProgrammaticScroll = useCallback((durationMs: number, fn: () => void) => {
     programmaticScrollRef.current = true
@@ -2511,7 +2482,7 @@ export function TaskCommsPageContent({
     const oldIdx = targets.findIndex((t) => navTargetId(t) === pending.prevFirstId)
     if (oldIdx <= 0) return
     scrollToNavTargetWithLock(targets[oldIdx - 1], 'up')
-  }, [feedEntries, contents, feedCollapse, loadingOlder, buildNavTargets, scrollToNavTargetWithLock])
+  }, [feedEntries, feedCollapse, loadingOlder, buildNavTargets, scrollToNavTargetWithLock])
 
   // Bottom lock: enter when really close to bottom, leave only when user scrolls up (ignore programmatic scrolls)
   useEffect(() => {

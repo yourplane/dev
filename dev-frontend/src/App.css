@@ -914,8 +914,7 @@
   }
 }
 
-[data-feed-nav-type='header'],
-[data-feed-nav-type='segment'] {
+[data-feed-nav-type='header'] {
   scroll-margin-top: 0.75rem;
 }
 

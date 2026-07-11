@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import {
-  buildFeedNavTargets,
-  findCurrentNavIndex,
-  navTargetId,
-  segmentCountFromLogContent,
-} from './feedScrollNav'
+import { buildFeedNavTargets, findCurrentNavIndex, navTargetId } from './feedScrollNav'
 
 describe('buildFeedNavTargets', () => {
   const entries = [
@@ -13,38 +8,19 @@ describe('buildFeedNavTargets', () => {
     { type: 'comms', id: '002-reply.md' },
   ]
 
-  it('skips collapsed entries and expands logs into segments only', () => {
+  it('skips collapsed entries and uses one header stop per expanded entry', () => {
     const collapsed = new Set(['comms:002-reply.md'])
-    const targets = buildFeedNavTargets(
-      entries,
-      (key) => collapsed.has(key),
-      (_key, entry) => (entry.type === 'log' ? 3 : 0),
-    )
-    expect(targets.map(navTargetId)).toEqual([
-      'comms:001-user.md:header',
-      'log:run.log:segment:0',
-      'log:run.log:segment:1',
-      'log:run.log:segment:2',
-    ])
+    const targets = buildFeedNavTargets(entries, (key) => collapsed.has(key))
+    expect(targets.map(navTargetId)).toEqual(['comms:001-user.md:header', 'log:run.log:header'])
   })
 
-  it('includes comms headers when not collapsed', () => {
-    const targets = buildFeedNavTargets(
-      entries,
-      () => false,
-      (_key, entry) => (entry.type === 'log' ? 0 : 0),
-    )
+  it('includes comms and expanded log headers when not collapsed', () => {
+    const targets = buildFeedNavTargets(entries, () => false)
     expect(targets.map(navTargetId)).toEqual([
       'comms:001-user.md:header',
+      'log:run.log:header',
       'comms:002-reply.md:header',
     ])
-  })
-})
-
-describe('segmentCountFromLogContent', () => {
-  it('returns 0 for loading or missing content', () => {
-    expect(segmentCountFromLogContent(undefined)).toBe(0)
-    expect(segmentCountFromLogContent('(loading…)')).toBe(0)
   })
 })
 
@@ -57,7 +33,6 @@ describe('findCurrentNavIndex', () => {
         { type: 'comms', id: 'c.md' },
       ],
       () => false,
-      () => 0,
     )
     document.body.innerHTML = `
       <button data-feed-nav-type="header" data-feed-nav-key="comms:a.md"></button>

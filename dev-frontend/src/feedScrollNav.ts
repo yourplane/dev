@@ -1,8 +1,4 @@
-import { parseLogToSegments } from './logParser'
-
-export type FeedNavTarget =
-  | { kind: 'header'; entryKey: string }
-  | { kind: 'segment'; entryKey: string; segmentIndex: number }
+export type FeedNavTarget = { kind: 'header'; entryKey: string }
 
 export interface FeedEntryOutline {
   type: string
@@ -10,45 +6,25 @@ export interface FeedEntryOutline {
 }
 
 export function navTargetId(target: FeedNavTarget): string {
-  return target.kind === 'header'
-    ? `${target.entryKey}:header`
-    : `${target.entryKey}:segment:${target.segmentIndex}`
+  return `${target.entryKey}:header`
 }
 
 export function buildFeedNavTargets(
   entries: FeedEntryOutline[],
   isCollapsed: (entryKey: string, entry: FeedEntryOutline) => boolean,
-  getLogSegmentCount: (entryKey: string, entry: FeedEntryOutline) => number,
 ): FeedNavTarget[] {
   const targets: FeedNavTarget[] = []
   for (const entry of entries) {
     const entryKey = `${entry.type}:${entry.id}`
     if (isCollapsed(entryKey, entry)) continue
-    if (entry.type === 'log') {
-      const segmentCount = getLogSegmentCount(entryKey, entry)
-      for (let i = 0; i < segmentCount; i++) {
-        targets.push({ kind: 'segment', entryKey, segmentIndex: i })
-      }
-    } else {
-      targets.push({ kind: 'header', entryKey })
-    }
+    targets.push({ kind: 'header', entryKey })
   }
   return targets
 }
 
-export function segmentCountFromLogContent(raw: string | undefined): number {
-  if (raw === undefined || raw === '(loading…)') return 0
-  return parseLogToSegments(raw).length
-}
-
 export function findNavTargetElement(target: FeedNavTarget): HTMLElement | null {
-  if (target.kind === 'header') {
-    return document.querySelector(
-      `[data-feed-nav-key="${CSS.escape(target.entryKey)}"][data-feed-nav-type="header"]`,
-    )
-  }
   return document.querySelector(
-    `[data-feed-nav-key="${CSS.escape(target.entryKey)}"][data-feed-nav-type="segment"][data-feed-nav-segment="${target.segmentIndex}"]`,
+    `[data-feed-nav-key="${CSS.escape(target.entryKey)}"][data-feed-nav-type="header"]`,
   )
 }
 
