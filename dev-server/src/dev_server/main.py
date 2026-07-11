@@ -57,6 +57,7 @@ from dev_sdk.create_pr import (
     find_existing_pull_request,
     pull_pr_comments,
 )
+from dev_sdk.task_list_status import TaskStatusInput, resolve_task_list_status
 from dev_sdk.merge_from_main import (
     MergeFromMainError,
     has_conflicted_merge_in_progress,
@@ -466,8 +467,13 @@ class CreateTaskResponse(BaseModel):
     task_dir: str
 
 
+class TaskListEntryModel(BaseModel):
+    name: str
+    status: str
+
+
 class ListTasksResponse(BaseModel):
-    tasks: list[str]
+    tasks: list[TaskListEntryModel]
 
 
 class ArchiveTaskResponse(BaseModel):
@@ -786,10 +792,36 @@ def put_task_question_answers_draft_endpoint(
         set_task_question_answers_draft(_tasks_root(), task_name, comms_filename, data)
 
 
+def _task_status_input_for_local(task_name: str, task_dir: Path) -> TaskStatusInput:
+    with _command_registry_lock:
+        entry = _command_registry.get(task_name)
+        last_error = _last_command_error.get(task_name)
+    comms = tuple(read_index(task_dir))
+    if entry is None:
+        return TaskStatusInput(
+            active=False,
+            command=None,
+            command_error=last_error,
+            comms_index=comms,
+        )
+    return TaskStatusInput(
+        active=True,
+        command=entry["command_id"],
+        command_error=None,
+        comms_index=comms,
+    )
+
+
 @app.get("/tasks", response_model=ListTasksResponse)
 def list_tasks() -> ListTasksResponse:
     manager = _get_manager()
-    return ListTasksResponse(tasks=manager.list_tasks())
+    root = _tasks_root()
+    entries = []
+    for name in manager.list_tasks():
+        inp = _task_status_input_for_local(name, root / name)
+        status = resolve_task_list_status(inp)
+        entries.append(TaskListEntryModel(name=name, status=status.value))
+    return ListTasksResponse(tasks=entries)
 
 
 @app.get("/tasks/{task_name}/workspace", response_model=TaskWorkspaceResponse)
