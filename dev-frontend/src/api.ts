@@ -211,8 +211,14 @@ export interface EnvironmentInfo {
   registered_at: number;
 }
 
+export interface BranchStatusInfo {
+  ahead: number;
+  behind: number;
+}
+
 export interface TaskWorkspaceInfo {
   repo_label: string | null;
+  branch_status?: BranchStatusInfo | null;
 }
 
 export interface CreateTaskResponse {

@@ -93,10 +93,10 @@ def test_get_task_workspace_no_repo(client, tmp_path, monkeypatch):
     tc = TestClient(app)
     resp = tc.get("/tasks/ops-task/workspace")
     assert resp.status_code == 200
-    assert resp.json() == {"repo_label": None}
+    assert resp.json() == {"repo_label": None, "branch_status": None}
 
 
-def test_get_task_workspace_with_git_child(client, tmp_path, monkeypatch):
+def test_get_task_workspace_with_branch_status(client, tmp_path, monkeypatch):
     monkeypatch.setenv("DEV_TASKS_DIR", str(tmp_path))
     task = tmp_path / "code-task"
     task.mkdir()
@@ -111,11 +111,16 @@ def test_get_task_workspace_with_git_child(client, tmp_path, monkeypatch):
     )
     from dev_server.main import app
 
-    tc = TestClient(app)
-    resp = tc.get("/tasks/code-task/workspace")
+    with patch(
+        "dev_server.main.get_branch_status_from_task",
+        return_value={"ahead": 2, "behind": 1},
+    ):
+        tc = TestClient(app)
+        resp = tc.get("/tasks/code-task/workspace")
     assert resp.status_code == 200
     data = resp.json()
     assert "github.com" in (data.get("repo_label") or "")
+    assert data["branch_status"] == {"ahead": 2, "behind": 1}
 
 
 def test_create_task_streams_error(client):
