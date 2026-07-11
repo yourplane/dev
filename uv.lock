@@ -670,6 +670,7 @@ version = "0.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "dev" },
+    { name = "dev-cloud-worker" },
     { name = "dev-server" },
 ]
 
@@ -684,6 +685,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "dev", editable = "dev-cli" },
+    { name = "dev-cloud-worker", editable = "dev-cloud-worker" },
     { name = "dev-server", editable = "dev-server" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-cov", marker = "extra == 'dev'" },

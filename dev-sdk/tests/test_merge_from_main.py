@@ -1,15 +1,19 @@
 """Tests for merge-from-main validation helpers."""
 
 import subprocess
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+from dev_sdk.bash_runner import BashRunResult
 from dev_sdk.merge_from_main import (
     MergeFromMainError,
+    MergeFromMainHooks,
     has_conflicted_merge_in_progress,
     merge_shell_command,
+    run_merge_from_main,
     validate_merge_from_main_can_start,
 )
 
@@ -64,3 +68,61 @@ def test_has_conflicted_merge_false_without_merge_head(tmp_path: Path) -> None:
     repo.mkdir(parents=True)
     _init_repo(repo)
     assert not has_conflicted_merge_in_progress(repo)
+
+
+def test_run_merge_from_main_skips_git_when_conflicted_merge_in_progress(tmp_path: Path) -> None:
+    task = tmp_path / "task"
+    repo = task / "myrepo"
+    repo.mkdir(parents=True)
+    _init_repo(repo)
+    seen: dict[str, bool] = {"git": False, "agent": False}
+
+    def stream_bash(*args: object, **kwargs: object) -> BashRunResult:
+        seen["git"] = True
+        return BashRunResult(0, False, False, False, None)
+
+    def run_conflict(td: Path, cancel: threading.Event, on_start: object) -> None:
+        seen["agent"] = True
+
+    with patch(
+        "dev_sdk.merge_from_main.has_conflicted_merge_in_progress",
+        return_value=True,
+    ):
+        run_merge_from_main(
+            task,
+            cancel_event=threading.Event(),
+            hooks=MergeFromMainHooks(
+                stream_bash=stream_bash,
+                run_conflict_resolution=run_conflict,
+            ),
+        )
+    assert seen["agent"] is True
+    assert seen["git"] is False
+
+
+def test_run_merge_from_main_runs_agent_after_git_conflict(tmp_path: Path) -> None:
+    task = tmp_path / "task"
+    repo = task / "myrepo"
+    repo.mkdir(parents=True)
+    _init_repo(repo)
+    seen: dict[str, bool] = {"agent": False}
+
+    def stream_bash(*args: object, **kwargs: object) -> BashRunResult:
+        return BashRunResult(1, False, False, False, None)
+
+    def run_conflict(td: Path, cancel: threading.Event, on_start: object) -> None:
+        seen["agent"] = True
+
+    with patch(
+        "dev_sdk.merge_from_main.has_conflicted_merge_in_progress",
+        side_effect=[False, True],
+    ):
+        run_merge_from_main(
+            task,
+            cancel_event=threading.Event(),
+            hooks=MergeFromMainHooks(
+                stream_bash=stream_bash,
+                run_conflict_resolution=run_conflict,
+            ),
+        )
+    assert seen["agent"] is True
