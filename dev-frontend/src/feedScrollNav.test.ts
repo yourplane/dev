@@ -81,10 +81,23 @@ describe('findCurrentNavIndex', () => {
 
   it('returns the page-bottom index when near the page bottom', () => {
     const targets = buildFeedNavTargets([{ type: 'comms', id: 'a.md' }], () => false)
+    document.body.innerHTML = ''
     Object.defineProperty(document.documentElement, 'scrollHeight', { value: 1000, configurable: true })
     Object.defineProperty(window, 'innerHeight', { value: 800, configurable: true })
     Object.defineProperty(window, 'scrollY', { value: 150, configurable: true })
     expect(findCurrentNavIndex(targets, 80)).toBe(targets.length - 1)
+  })
+
+  it('prefers a visible feed header over the page-bottom stop when near the bottom', () => {
+    const targets = buildFeedNavTargets([{ type: 'comms', id: 'a.md' }], () => false)
+    document.body.innerHTML = `<button data-feed-nav-type="header" data-feed-nav-key="comms:a.md"></button>`
+    Object.defineProperty(document.documentElement, 'scrollHeight', { value: 1000, configurable: true })
+    Object.defineProperty(window, 'innerHeight', { value: 800, configurable: true })
+    Object.defineProperty(window, 'scrollY', { value: 150, configurable: true })
+    const el = document.querySelector('[data-feed-nav-key="comms:a.md"]') as HTMLElement
+    el.getBoundingClientRect = () =>
+      ({ top: 50, bottom: 70, left: 0, right: 0, width: 0, height: 20, x: 0, y: 50, toJSON: () => ({}) }) as DOMRect
+    expect(findCurrentNavIndex(targets, 80)).toBe(0)
   })
 })
 

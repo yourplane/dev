@@ -37,13 +37,8 @@ export function findCurrentNavIndex(targets: FeedNavTarget[], viewportOffsetPx =
   if (targets.length === 0) return -1
 
   const footerIdx = targets.length - 1
-  if (targets[footerIdx].kind === 'page-bottom' && isNearPageBottom(viewportOffsetPx)) {
-    return footerIdx
-  }
-
-  const headerTargets =
-    targets[footerIdx].kind === 'page-bottom' ? targets.slice(0, footerIdx) : targets
-  if (headerTargets.length === 0) return -1
+  const hasFooter = targets[footerIdx].kind === 'page-bottom'
+  const headerTargets = hasFooter ? targets.slice(0, footerIdx) : targets
 
   let bestIdx = 0
   let found = false
@@ -55,7 +50,10 @@ export function findCurrentNavIndex(targets: FeedNavTarget[], viewportOffsetPx =
     if (top <= viewportOffsetPx + 8) bestIdx = i
     else break
   }
-  return found ? bestIdx : -1
+  if (found) return bestIdx
+
+  if (hasFooter && isNearPageBottom(viewportOffsetPx)) return footerIdx
+  return -1
 }
 
 export function scrollToNavTarget(target: FeedNavTarget, behavior: ScrollBehavior = 'smooth'): boolean {
