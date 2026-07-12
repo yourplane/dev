@@ -30,7 +30,7 @@ from dev_sdk.comms import (
     comms_dir,
     read_index,
 )
-from dev_sdk.merge_from_main import MergeFromMainError, MergeFromMainHooks, run_merge_from_main
+from dev_sdk.merge_from_main import MergeFromMainError, MergeFromMainHooks, run_merge_from_main, write_clean_merge_success_comms
 from dev_sdk.task_manager import TaskCancelled, TaskManager
 
 logger = logging.getLogger("dev_cloud_worker")
@@ -528,6 +528,7 @@ class CommandExecutor:
         hooks = MergeFromMainHooks(
             stream_bash=stream_bash,
             run_conflict_resolution=run_conflict,
+            on_clean_merge_success=lambda: write_clean_merge_success_comms(task_dir),
         )
         run_merge_from_main(task_dir, cancel_event=cancel_flag, hooks=hooks)
         self._sync_comms(task_name)
