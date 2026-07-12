@@ -14,8 +14,13 @@ def test_idle_when_no_signals() -> None:
     assert resolve_task_list_status(TaskStatusInput()) == TaskListStatus.IDLE
 
 
-def test_worker_issue_when_queued() -> None:
+def test_syncing_when_queued_and_pending_syncing() -> None:
     inp = TaskStatusInput(queued=True, command="create-task", pending_state="syncing")
+    assert resolve_task_list_status(inp) == TaskListStatus.SYNCING
+
+
+def test_worker_issue_when_queued_and_worker_offline() -> None:
+    inp = TaskStatusInput(queued=True, command="create-task", pending_state="worker_offline")
     assert resolve_task_list_status(inp) == TaskListStatus.WORKER_ISSUE
 
 
@@ -24,19 +29,29 @@ def test_worker_issue_when_worker_offline_even_if_active() -> None:
     assert resolve_task_list_status(inp) == TaskListStatus.WORKER_ISSUE
 
 
+def test_worker_offline_beats_syncing() -> None:
+    inp = TaskStatusInput(command="question", pending_state="worker_offline", queued=True)
+    assert resolve_task_list_status(inp) == TaskListStatus.WORKER_ISSUE
+
+
+def test_syncing_beats_running_when_not_active() -> None:
+    inp = TaskStatusInput(command="question", pending_state="syncing", active=False)
+    assert resolve_task_list_status(inp) == TaskListStatus.SYNCING
+
+
 def test_running_when_active() -> None:
     inp = TaskStatusInput(active=True, command="implement")
     assert resolve_task_list_status(inp) == TaskListStatus.RUNNING
 
 
-def test_running_when_syncing_pending() -> None:
+def test_syncing_when_pending_syncing() -> None:
     inp = TaskStatusInput(command="question", pending_state="syncing")
-    assert resolve_task_list_status(inp) == TaskListStatus.RUNNING
+    assert resolve_task_list_status(inp) == TaskListStatus.SYNCING
 
 
-def test_running_when_pending_command() -> None:
+def test_syncing_when_pending_command_without_active() -> None:
     inp = TaskStatusInput(command="question")
-    assert resolve_task_list_status(inp) == TaskListStatus.RUNNING
+    assert resolve_task_list_status(inp) == TaskListStatus.SYNCING
 
 
 def test_failed_when_command_error() -> None:

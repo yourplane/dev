@@ -256,6 +256,7 @@ export interface CopyFromArchiveResponse {
 export type TaskListStatus =
   | 'idle'
   | 'worker_issue'
+  | 'syncing'
   | 'running'
   | 'failed'
   | 'waiting_for_answers'
