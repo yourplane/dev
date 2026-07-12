@@ -70,3 +70,33 @@ export function scrollToNavTarget(target: FeedNavTarget, behavior: ScrollBehavio
 export function isNearPageBottom(thresholdPx = 80): boolean {
   return window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - thresholdPx
 }
+
+/** True when reading a section body after its header has scrolled fully off-screen. */
+export function isInSectionBody(targets: FeedNavTarget[], currentIdx: number): boolean {
+  if (currentIdx < 0) return false
+  const target = targets[currentIdx]
+  if (target.kind !== 'header') return false
+
+  const el = findNavTargetElement(target)
+  if (!el) return false
+
+  const top = el.getBoundingClientRect().top
+  // While the header row is still visible, up may jump to the previous section.
+  if (top >= 0) return false
+
+  const footerIdx = targets.length - 1
+  const hasFooter = targets[footerIdx]?.kind === 'page-bottom'
+  const lastHeaderIdx = hasFooter ? footerIdx - 1 : targets.length - 1
+  return currentIdx <= lastHeaderIdx
+}
+
+export function resolveUpNavTargetIndex(
+  targets: FeedNavTarget[],
+  currentIdx: number,
+): { targetIdx: number; snapBack: boolean } {
+  if (currentIdx < 0) return { targetIdx: 0, snapBack: false }
+  if (isInSectionBody(targets, currentIdx)) {
+    return { targetIdx: currentIdx, snapBack: true }
+  }
+  return { targetIdx: Math.max(0, currentIdx - 1), snapBack: false }
+}
