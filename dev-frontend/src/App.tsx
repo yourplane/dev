@@ -80,9 +80,18 @@ const TASK_STATUS_LABELS: Record<Exclude<TaskListStatus, 'idle'>, string> = {
   running: 'Command in progress',
   failed: 'Last command failed',
   waiting_for_answers: 'Waiting for question answers',
+  ready_for_next_step: 'Ready for next step (e.g. Plan or Implement)',
   plan_complete: 'Plan complete',
   implement_complete: 'Implement complete',
   merge_from_main_complete: 'Merge from main complete',
+  user_comment: 'User comment — latest activity is your input',
+  pr_comments: 'PR comments — latest activity is review feedback',
+  bash_complete: 'Shell command finished — latest activity is bash output',
+}
+
+function taskStatusIconClass(status: TaskListStatus): string {
+  if (status === 'pr_comments') return 'task-status-icon--user_comment'
+  return `task-status-icon--${status}`
 }
 
 function TaskStatusIcon({ status }: { status: TaskListStatus }) {
@@ -90,7 +99,7 @@ function TaskStatusIcon({ status }: { status: TaskListStatus }) {
   const label = TASK_STATUS_LABELS[status]
   return (
     <span
-      className={`task-status-icon task-status-icon--${status}`}
+      className={`task-status-icon ${taskStatusIconClass(status)}`}
       role="img"
       aria-label={label}
       title={label}

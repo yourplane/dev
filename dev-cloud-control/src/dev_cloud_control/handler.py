@@ -20,7 +20,11 @@ from dev_sdk.create_pr import (
 )
 from dev_sdk.feed import FeedCursor, FeedEntry
 from dev_sdk.question_answers import AnswerItem, build_answers_markdown
-from dev_sdk.task_list_status import resolve_task_list_status, task_status_input_from_command_body
+from dev_sdk.task_list_status import (
+    enrich_task_status_input_with_comms,
+    resolve_task_list_status,
+    task_status_input_from_command_body,
+)
 
 from dev_cloud_control.store import (
     ArchiveRecord,
@@ -500,6 +504,11 @@ class Router:
             body = self._command_status_body(task)
             comms = self._comms_index(name)
             inp = task_status_input_from_command_body(body, comms_index=comms)
+
+            def read_comms_file(filename: str, task_name: str = name) -> str | None:
+                return self.store.get_comms(task_name, filename)
+
+            inp = enrich_task_status_input_with_comms(inp, read_comms_file=read_comms_file)
             status = resolve_task_list_status(inp).value
             tasks.append({"name": name, "status": status})
         return _json(200, {"tasks": tasks})

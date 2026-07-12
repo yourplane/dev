@@ -39,10 +39,30 @@ def test_list_tasks_returns_name_and_status(client_with_tasks: TestClient, task_
 
 def test_list_tasks_waiting_for_answers(client_with_tasks: TestClient, task_dir: Path) -> None:
     add_comms(task_dir, "user", "hello")
-    add_comms(task_dir, "agent", "questions?", kind="question")
+    add_comms(
+        task_dir,
+        "agent",
+        '{"intro": "Need clarity", "questions": [{"id": "q1", "text": "Which?", '
+        '"options": [{"label": "A"}, {"label": "B"}]}]}\n',
+        kind="question",
+    )
 
     resp = client_with_tasks.get("/tasks")
     assert resp.json()["tasks"][0]["status"] == "waiting_for_answers"
+
+
+def test_list_tasks_ready_for_next_step(client_with_tasks: TestClient, task_dir: Path) -> None:
+    add_comms(task_dir, "agent", '{"intro": "All clear", "questions": []}\n', kind="question")
+
+    resp = client_with_tasks.get("/tasks")
+    assert resp.json()["tasks"][0]["status"] == "ready_for_next_step"
+
+
+def test_list_tasks_user_comment(client_with_tasks: TestClient, task_dir: Path) -> None:
+    add_comms(task_dir, "user", "follow-up comment")
+
+    resp = client_with_tasks.get("/tasks")
+    assert resp.json()["tasks"][0]["status"] == "user_comment"
 
 
 def test_list_tasks_plan_complete(client_with_tasks: TestClient, task_dir: Path) -> None:

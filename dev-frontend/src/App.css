@@ -274,6 +274,67 @@
   line-height: 1;
 }
 
+.task-status-icon--ready_for_next_step {
+  border-radius: 50%;
+  background: #ccfbf1;
+  border: 1.5px solid #0d9488;
+  position: relative;
+}
+
+.task-status-icon--ready_for_next_step::after {
+  content: '→';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #0f766e;
+  line-height: 1;
+}
+
+.task-status-icon--user_comment {
+  border-radius: 50%;
+  background: #f3f4f6;
+  border: 1.5px solid #6b7280;
+  position: relative;
+}
+
+.task-status-icon--user_comment::after {
+  content: '❝';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: #4b5563;
+  line-height: 1;
+}
+
+.task-status-icon--bash_complete {
+  border-radius: 50%;
+  background: #f5f5f4;
+  border: 1.5px solid #78716c;
+  position: relative;
+}
+
+.task-status-icon--bash_complete::after {
+  content: '>_';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.45rem;
+  font-weight: 700;
+  color: #57534e;
+  line-height: 1;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
 .task-row:last-child {
   border-bottom: none;
 }

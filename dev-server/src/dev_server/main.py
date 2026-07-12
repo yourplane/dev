@@ -55,12 +55,17 @@ from dev_sdk.create_pr import (
     find_existing_pull_request,
     pull_pr_comments,
 )
-from dev_sdk.task_list_status import TaskStatusInput, resolve_task_list_status
+from dev_sdk.task_list_status import (
+    TaskStatusInput,
+    enrich_task_status_input_with_comms,
+    resolve_task_list_status,
+)
 from dev_sdk.merge_from_main import (
     MergeFromMainError,
     MergeFromMainHooks,
     run_merge_from_main,
     validate_merge_from_main_can_start,
+    write_clean_merge_success_comms,
 )
 from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repos
 from dev_sdk.task_commands import TaskCommand
@@ -169,6 +174,7 @@ def _run_merge_from_main_in_thread(
         on_validation_error=set_last_error,
         on_agent_error=set_last_error,
         on_success_clear_error=clear_last_error,
+        on_clean_merge_success=lambda: write_clean_merge_success_comms(task_dir),
         on_agent_start=on_agent_start,
     )
     try:
@@ -630,7 +636,16 @@ def list_tasks() -> ListTasksResponse:
     root = _tasks_root()
     entries = []
     for name in manager.list_tasks():
-        inp = _task_status_input_for_local(name, root / name)
+        task_dir = root / name
+        inp = _task_status_input_for_local(name, task_dir)
+
+        def read_comms_file(filename: str, _task_dir: Path = task_dir) -> str | None:
+            path = comms_dir(_task_dir) / filename
+            if not path.is_file():
+                return None
+            return path.read_text(encoding="utf-8")
+
+        inp = enrich_task_status_input_with_comms(inp, read_comms_file=read_comms_file)
         status = resolve_task_list_status(inp)
         entries.append(TaskListEntryModel(name=name, status=status.value))
     return ListTasksResponse(tasks=entries)
