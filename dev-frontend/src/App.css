@@ -813,6 +813,16 @@
   color: #555;
 }
 
+.sync-health-banner {
+  margin: 0 0 0.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 4px;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  color: #664d03;
+  font-size: 0.9rem;
+}
+
 .create-form-submit-row {
   flex-wrap: wrap;
   align-items: center;

@@ -714,3 +714,26 @@ def test_start_merge_from_main_rejects_task_without_repo(aws_env):
     )
     assert resp["statusCode"] == 400
     assert "no cloned repository" in json.loads(resp["body"])["detail"].lower()
+
+
+def test_worker_sync_health_updates_task_status(aws_env):
+    router = Router()
+    task_name = "sync-health-task"
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Sync health", "environment_id": "env-1", "repo": None},
+        )
+    )
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "claim_work": True}))
+    router.dispatch(
+        _event("POST", f"/worker/tasks/{task_name}/sync-health", {"sync_health": "unhealthy"})
+    )
+    status = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/commands"))["body"])
+    assert status["sync_health"] == "unhealthy"
+    router.dispatch(
+        _event("POST", f"/worker/tasks/{task_name}/sync-health", {"sync_health": "healthy"})
+    )
+    status = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/commands"))["body"])
+    assert status["sync_health"] is None

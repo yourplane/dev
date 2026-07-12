@@ -165,6 +165,7 @@ class Router:
                 "queued": False,
                 "cancelling": _command_cancelling(active),
                 "pending_state": pending_state,
+                "sync_health": task.sync_health,
             }
         cmd = None
         if queued:
@@ -182,6 +183,7 @@ class Router:
                 "queued": bool(queued),
                 "cancelling": _command_cancelling(active),
                 "pending_state": pending_state,
+                "sync_health": task.sync_health,
             }
         return {
             "active": False,
@@ -193,6 +195,7 @@ class Router:
             "queued": False,
             "cancelling": False,
             "pending_state": None,
+            "sync_health": task.sync_health,
         }
 
     def dispatch(self, event: dict, context: Any = None) -> dict:
@@ -1193,6 +1196,9 @@ class Router:
         m = re.match(r"^/worker/tasks/([^/]+)/command/progress$", path)
         if m and method == "POST":
             return self.worker_command_progress(event, unquote(m.group(1)))
+        m = re.match(r"^/worker/tasks/([^/]+)/sync-health$", path)
+        if m and method == "POST":
+            return self.worker_sync_health(event, unquote(m.group(1)))
         m = re.match(r"^/worker/deletions/ack$", path)
         if m and method == "POST":
             return self.worker_deletion_ack(event)
@@ -1426,6 +1432,7 @@ class Router:
             updates["last_command_error"] = str(error)
         else:
             updates["last_command_error"] = None
+            updates["sync_health"] = None
         if result.get("owner"):
             updates["owner"] = result["owner"]
         if result.get("repo_name"):
@@ -1444,6 +1451,18 @@ class Router:
                 progress = list(task.create_progress or [])
                 progress.append(str(message))
                 self.store.update_task(task_name, create_progress=progress)
+        return _no_content()
+
+    def worker_sync_health(self, event: dict, task_name: str) -> dict:
+        body = _parse_body(event) or {}
+        sync_health = body.get("sync_health")
+        if sync_health not in ("healthy", "unhealthy"):
+            return _json(400, {"detail": "sync_health must be healthy or unhealthy"})
+        task = self.store.get_task(task_name)
+        if not task:
+            return _json(404, {"detail": "Task not found"})
+        value = None if sync_health == "healthy" else "unhealthy"
+        self.store.update_task(task_name, sync_health=value)
         return _no_content()
 
     def worker_deletion_ack(self, event: dict) -> dict:

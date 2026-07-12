@@ -6,9 +6,7 @@ import json
 import logging
 import os
 import shutil
-import signal
 import subprocess
-import sys
 import threading
 import time
 import uuid
@@ -17,6 +15,7 @@ from typing import Callable
 
 import requests
 
+from dev_cloud_worker.poller import COMMS_SYNC_RETRIES, CloudPoller
 from dev_sdk.agent_run import (
     AgentRunError,
     run_do,
@@ -26,17 +25,20 @@ from dev_sdk.agent_run import (
     run_question_mode,
 )
 from dev_sdk.bash_runner import BashStreamHooks, run_bash_stream
-from dev_sdk.comms import (
-    comms_dir,
-    read_index,
-)
+from dev_sdk.comms import comms_dir
 from dev_sdk.merge_from_main import MergeFromMainError, MergeFromMainHooks, run_merge_from_main
 from dev_sdk.task_manager import TaskCancelled, TaskManager
+from dev_sdk.worker_sync import (
+    OutboxEntry,
+    StreamsState,
+    append_progress,
+    has_outbox,
+    write_outbox,
+    write_streams,
+)
 
 logger = logging.getLogger("dev_cloud_worker")
 POLL_INTERVAL_SEC = float(os.environ.get("DEV_CLOUD_POLL_INTERVAL", "1"))
-COMMS_SYNC_RETRIES = 3
-COMMS_SYNC_RETRY_DELAY_SEC = 0.5
 WORKER_REBOOT_MESSAGE = (
     "Worker rebooted — command cancelled; workspace may have uncommitted changes"
 )
@@ -185,6 +187,13 @@ class WorkerClient:
             timeout=10,
         ).raise_for_status()
 
+    def report_sync_health(self, task_name: str, *, sync_health: str) -> None:
+        self.session.post(
+            f"{self.base}/worker/tasks/{task_name}/sync-health",
+            json={"sync_health": sync_health},
+            timeout=10,
+        ).raise_for_status()
+
     def ack_deletion(self, task_name: str, filename: str) -> None:
         self.session.post(
             f"{self.base}/worker/deletions/ack",
@@ -203,10 +212,11 @@ class WorkerClient:
 
 
 class CommandExecutor:
-    def __init__(self, client: WorkerClient) -> None:
-        self.client = client
-        self.tasks_root = _tasks_root()
-        self.manager = TaskManager(self.tasks_root)
+    """Runs commands locally; poller owns all cloud writes except git-token reads."""
+
+    def __init__(self, tasks_root: Path) -> None:
+        self.tasks_root = tasks_root
+        self.manager = TaskManager(tasks_root)
         self._cancel_flags: dict[str, threading.Event] = {}
         self._cancel_lock = threading.Lock()
         self._running_tasks: set[str] = set()
@@ -223,21 +233,25 @@ class CommandExecutor:
         with self._running_lock:
             return task_name in self._running_tasks
 
+    def discard_running(self, task_name: str) -> None:
+        with self._running_lock:
+            self._running_tasks.discard(task_name)
+
     def reconcile_orphans(self, active_commands: list[dict]) -> None:
         for item in active_commands:
             task_name = item.get("task_name")
             if not task_name or self.is_running(task_name):
+                continue
+            task_dir = self.tasks_root / task_name
+            if has_outbox(task_dir):
                 continue
             command = item.get("command") or {}
             if command.get("cancel_requested"):
                 error = "Cancelled"
             else:
                 error = WORKER_REBOOT_MESSAGE
-            try:
-                self.client.complete_command(task_name, error=error)
-                logger.info("Reconciled orphaned command for %s: %s", task_name, error)
-            except Exception:
-                logger.exception("Failed to reconcile orphaned command for %s", task_name)
+            write_outbox(task_dir, OutboxEntry(error=error, result={}))
+            logger.info("Queued orphan outbox for %s: %s", task_name, error)
 
     def _cancel_for(self, task_name: str) -> threading.Event:
         with self._cancel_lock:
@@ -255,6 +269,8 @@ class CommandExecutor:
         payload = command.get("payload") or {}
         cancel_flag = self._cancel_for(task_name)
         cancel_flag.clear()
+        task_dir = self.tasks_root / task_name
+
         if cmd == "cancel":
             cancel_flag.set()
             return
@@ -262,7 +278,6 @@ class CommandExecutor:
         error: str | None = None
         result: dict | None = None
         try:
-            self.client.command_start(task_name)
             if cmd == "create-task":
                 self._create_task(task_name, payload, cancel_flag)
             elif cmd == "archive":
@@ -283,7 +298,6 @@ class CommandExecutor:
         except TaskCancelled as e:
             logger.info("Command cancelled for %s: %s", task_name, e)
             if cmd == "create-task":
-                task_dir = self.tasks_root / task_name
                 if task_dir.is_dir():
                     shutil.rmtree(task_dir, ignore_errors=True)
             error = "Cancelled"
@@ -298,17 +312,7 @@ class CommandExecutor:
             with self._running_lock:
                 self._running_tasks.discard(task_name)
 
-        try:
-            self._sync_comms_with_retries(task_name)
-        except Exception as sync_err:
-            logger.exception("Comms sync failed for %s after retries: %s", task_name, sync_err)
-            error = f"Failed to sync comms: {sync_err}"
-            result = None
-
-        if error is not None:
-            self.client.complete_command(task_name, error=error)
-        else:
-            self.client.complete_command(task_name, result=result or {})
+        write_outbox(task_dir, OutboxEntry(error=error, result=result or {}))
 
     def _task_result(self, task_name: str) -> dict:
         task_dir = self.tasks_root / task_name
@@ -348,8 +352,10 @@ class CommandExecutor:
         payload: dict,
         cancel_flag: threading.Event,
     ) -> None:
+        task_dir = self.tasks_root / task_name
+
         def on_progress(msg: str) -> None:
-            self.client.progress(task_name, msg)
+            append_progress(task_dir, msg)
 
         self.manager.start_task(
             payload.get("title", task_name),
@@ -371,77 +377,22 @@ class CommandExecutor:
         archived_name = payload["archived_name"]
         self.manager.copy_task_from_archive(archived_name, task_name_override=task_name)
 
-    def _bash_upload_hooks(self, task_name: str) -> BashStreamHooks:
-        uploaded_size = {"bytes": 0}
-        path_holder: dict[str, Path | None] = {"path": None}
-
+    def _stream_hooks(self, task_dir: Path) -> BashStreamHooks:
         def on_comms_path(path: Path) -> None:
-            path_holder["path"] = path
-            uploaded_size["bytes"] = 0
-            self.client.upload_log_chunk(task_name, path.name, b"", kind="bash")
+            write_streams(task_dir, StreamsState(active_bash=path.name))
 
-        def on_output_appended(path: Path) -> None:
-            if not path.is_file():
-                return
-            data = path.read_bytes()
-            if len(data) > uploaded_size["bytes"]:
-                self.client.upload_log_chunk(
-                    task_name,
-                    path.name,
-                    data[uploaded_size["bytes"] :],
-                    kind="bash",
-                )
-                uploaded_size["bytes"] = len(data)
+        return BashStreamHooks(on_comms_path=on_comms_path, on_output_appended=None)
 
-        return BashStreamHooks(on_comms_path=on_comms_path, on_output_appended=on_output_appended)
-
-    def _run_agent_with_log_upload(
+    def _run_agent_with_log(
         self,
-        task_name: str,
+        task_dir: Path,
         cancel_flag: threading.Event,
         runner: Callable[[Path, Callable[[Path], None], threading.Event], None],
     ) -> None:
-        task_dir = self.tasks_root / task_name
-        log_path_holder: dict[str, Path | None] = {"path": None}
-        uploaded_size = {"bytes": 0}
-
         def on_start(stream_log_path: Path) -> None:
-            log_path_holder["path"] = stream_log_path
-            uploaded_size["bytes"] = 0
-            self.client.upload_log_chunk(task_name, stream_log_path.name, b"")
+            write_streams(task_dir, StreamsState(active_log=stream_log_path.name))
 
-        def tail_log() -> None:
-            while not cancel_flag.is_set():
-                path = log_path_holder["path"]
-                if path and path.is_file():
-                    data = path.read_bytes()
-                    if len(data) > uploaded_size["bytes"]:
-                        self.client.upload_log_chunk(
-                            task_name,
-                            path.name,
-                            data[uploaded_size["bytes"] :],
-                        )
-                        uploaded_size["bytes"] = len(data)
-                time.sleep(1)
-
-        t = threading.Thread(target=tail_log, daemon=True)
-        t.start()
-        try:
-            runner(task_dir, on_start, cancel_flag)
-        except AgentRunError as e:
-            raise RuntimeError(str(e)) from e
-        finally:
-            cancel_flag.set()
-            t.join(timeout=2)
-            path = log_path_holder["path"]
-            if path and path.is_file():
-                data = path.read_bytes()
-                if len(data) > uploaded_size["bytes"]:
-                    self.client.upload_log_chunk(
-                        task_name,
-                        path.name,
-                        data[uploaded_size["bytes"] :],
-                    )
+        runner(task_dir, on_start, cancel_flag)
 
     def _run_agent(
         self,
@@ -450,21 +401,26 @@ class CommandExecutor:
         prompt: str | None,
         cancel_flag: threading.Event,
     ) -> None:
-        def runner(task_dir: Path, on_start: Callable[[Path], None], flag: threading.Event) -> None:
+        task_dir = self.tasks_root / task_name
+
+        def runner(task_dir_arg: Path, on_start: Callable[[Path], None], flag: threading.Event) -> None:
             if command == "question":
-                run_question_mode(task_dir, on_start=on_start, cancel_event=flag)
+                run_question_mode(task_dir_arg, on_start=on_start, cancel_event=flag)
             elif command == "plan-implement":
-                run_plan_implement(task_dir, on_start=on_start, cancel_event=flag)
+                run_plan_implement(task_dir_arg, on_start=on_start, cancel_event=flag)
             elif command == "implement":
-                run_implement(task_dir, on_start=on_start, cancel_event=flag)
+                run_implement(task_dir_arg, on_start=on_start, cancel_event=flag)
             elif command == "do":
                 if not prompt or not str(prompt).strip():
                     raise RuntimeError("Missing prompt for do command")
-                run_do(task_dir, str(prompt).strip(), on_start=on_start, cancel_event=flag)
+                run_do(task_dir_arg, str(prompt).strip(), on_start=on_start, cancel_event=flag)
             else:
                 raise RuntimeError(f"Unknown agent command: {command}")
 
-        self._run_agent_with_log_upload(task_name, cancel_flag, runner)
+        try:
+            self._run_agent_with_log(task_dir, cancel_flag, runner)
+        except AgentRunError as e:
+            raise RuntimeError(str(e)) from e
 
     def _run_bash(
         self,
@@ -473,7 +429,7 @@ class CommandExecutor:
         cancel_flag: threading.Event,
     ) -> None:
         task_dir = self.tasks_root / task_name
-        hooks = self._bash_upload_hooks(task_name)
+        hooks = self._stream_hooks(task_dir)
         result = run_bash_stream(
             task_dir,
             shell_command,
@@ -483,7 +439,6 @@ class CommandExecutor:
         )
         if result.cancelled or cancel_flag.is_set():
             raise TaskCancelled("Cancelled during bash")
-        self._sync_comms(task_name)
 
     def _run_merge_from_main(self, task_name: str, cancel_flag: threading.Event) -> None:
         task_dir = self.tasks_root / task_name
@@ -494,7 +449,7 @@ class CommandExecutor:
             cwd: Path,
             cancel_event: threading.Event,
         ):
-            hooks = self._bash_upload_hooks(task_name)
+            hooks = self._stream_hooks(task_dir)
             result = run_bash_stream(
                 td,
                 shell_command,
@@ -523,74 +478,22 @@ class CommandExecutor:
                     cancel_event=flag,
                 )
 
-            self._run_agent_with_log_upload(task_name, cancel_event, runner)
+            self._run_agent_with_log(task_dir, cancel_event, runner)
 
         hooks = MergeFromMainHooks(
             stream_bash=stream_bash,
             run_conflict_resolution=run_conflict,
         )
         run_merge_from_main(task_dir, cancel_event=cancel_flag, hooks=hooks)
-        self._sync_comms(task_name)
-
-    def _sync_comms(self, task_name: str) -> None:
-        sync_task_comms(self.client, self.tasks_root, task_name)
-
-    def _sync_comms_with_retries(self, task_name: str) -> None:
-        last_error: Exception | None = None
-        for attempt in range(COMMS_SYNC_RETRIES):
-            try:
-                sync_task_comms(self.client, self.tasks_root, task_name)
-                return
-            except Exception as exc:
-                last_error = exc
-                if attempt < COMMS_SYNC_RETRIES - 1:
-                    delay = COMMS_SYNC_RETRY_DELAY_SEC * (2**attempt)
-                    logger.warning(
-                        "Comms sync attempt %d/%d failed for %s: %s; retrying in %.1fs",
-                        attempt + 1,
-                        COMMS_SYNC_RETRIES,
-                        task_name,
-                        exc,
-                        delay,
-                    )
-                    time.sleep(delay)
-        assert last_error is not None
-        raise last_error
-
-
-def sync_task_comms(client: WorkerClient, tasks_root: Path, task_name: str) -> None:
-    task_dir = tasks_root / task_name
-    if not task_dir.is_dir():
-        return
-    push: list[dict] = []
-    cdir = comms_dir(task_dir)
-    if cdir.is_dir():
-        for filename in read_index(task_dir):
-            fp = cdir / filename
-            if fp.is_file():
-                push.append(
-                    {
-                        "filename": filename,
-                        "content": fp.read_text(encoding="utf-8", errors="replace"),
-                        "origin": "worker",
-                        "created_at": fp.stat().st_mtime,
-                        "deletable": None,
-                    }
-                )
-    pull = client.sync_push(task_name, push)
-    non_index = [item for item in pull if item.get("filename") != "index.txt"]
-    index_items = [item for item in pull if item.get("filename") == "index.txt"]
-    for item in non_index + index_items:
-        fp = cdir / item["filename"]
-        fp.parent.mkdir(parents=True, exist_ok=True)
-        fp.write_text(item["content"], encoding="utf-8")
 
 
 def run_loop() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     _load_cursor_api_key()
     client = WorkerClient()
-    executor = CommandExecutor(client)
+    tasks_root = _tasks_root()
+    executor = CommandExecutor(tasks_root)
+    poller = CloudPoller(client, tasks_root)
     task_locks: dict[str, threading.Lock] = {}
     task_locks_guard = threading.Lock()
 
@@ -602,7 +505,7 @@ def run_loop() -> None:
                 task_locks[task_name] = lock
             return lock
 
-    logger.info("Worker started env=%s tasks_root=%s", client.env_id, _tasks_root())
+    logger.info("Worker started env=%s tasks_root=%s", client.env_id, tasks_root)
 
     def run_command(task_name: str, command: dict) -> None:
         with task_lock(task_name):
@@ -611,17 +514,13 @@ def run_loop() -> None:
     while True:
         try:
             data = client.poll(claim_work=False)
-            for task_name in data.get("sync_tasks", []):
-                try:
-                    sync_task_comms(client, _tasks_root(), task_name)
-                except Exception:
-                    logger.exception("Comms sync failed for %s", task_name)
+            poller.run_sync_pass(data.get("sync_tasks", []))
             work_data = client.poll(claim_work=True)
             executor.reconcile_orphans(work_data.get("active_commands", []))
             for d in work_data.get("deletions", []):
                 task_name = d["task_name"]
                 filename = d["filename"]
-                fp = comms_dir(_tasks_root() / task_name) / filename
+                fp = comms_dir(tasks_root / task_name) / filename
                 if fp.is_file():
                     fp.unlink()
                 client.ack_deletion(task_name, filename)
@@ -632,6 +531,12 @@ def run_loop() -> None:
                     executor.request_cancel(task_name)
                     continue
                 if not executor.try_start(task_name):
+                    continue
+                try:
+                    client.command_start(task_name)
+                except Exception:
+                    logger.exception("command_start failed for %s", task_name)
+                    executor.discard_running(task_name)
                     continue
                 threading.Thread(
                     target=run_command,

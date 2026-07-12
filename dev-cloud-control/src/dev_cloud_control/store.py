@@ -72,6 +72,7 @@ class TaskRecord:
     last_command_error: str | None = None
     comms_cloud_epoch: int = 0
     worker_comms_epoch: int = 0
+    sync_health: str | None = None  # "healthy" | "unhealthy" | None
 
 
 @dataclass
@@ -230,6 +231,7 @@ class CloudStore:
             "last_command_error": record.last_command_error,
             "comms_cloud_epoch": record.comms_cloud_epoch,
             "worker_comms_epoch": record.worker_comms_epoch,
+            "sync_health": record.sync_health,
         }
         self._table.put_item(
             Item=_ddb(item),
@@ -289,6 +291,7 @@ class CloudStore:
             last_command_error=item.get("last_command_error"),
             comms_cloud_epoch=int(item.get("comms_cloud_epoch", 0) or 0),
             worker_comms_epoch=int(item.get("worker_comms_epoch", 0) or 0),
+            sync_health=item.get("sync_health"),
         )
 
     def bump_comms_cloud_epoch(self, task_name: str) -> int:

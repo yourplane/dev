@@ -613,6 +613,7 @@ export const api = {
     queued?: boolean;
     cancelling?: boolean;
     pending_state?: 'syncing' | 'worker_offline' | null;
+    sync_health?: 'unhealthy' | null;
   }> {
     return request(`/tasks/${encodeURIComponent(taskName)}/commands`);
   },
