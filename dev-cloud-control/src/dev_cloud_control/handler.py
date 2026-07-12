@@ -765,7 +765,12 @@ class Router:
 
     def _feed_entries(self, task_name: str) -> list[FeedEntry]:
         items = self.store.list_feed_items(task_name)
-        visible = [i for i in items if i.delete_status != "deleted"]
+        visible = [
+            i
+            for i in items
+            if i.delete_status != "deleted"
+            and not (i.type == "comms" and i.id == "index.txt")
+        ]
         return [
             FeedEntry(
                 type=i.type,
@@ -1392,6 +1397,8 @@ class Router:
                 continue
             if origin == "worker":
                 self.store.put_comms(task_name, filename, content, origin=origin)
+                if filename == "index.txt":
+                    continue
                 self._append_comms_index(task_name, filename)
                 if not any(
                     fi.id == filename

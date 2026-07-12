@@ -16,6 +16,20 @@ from botocore.exceptions import ClientError
 
 OFFLINE_THRESHOLD_SEC = 10
 STREAM_CHUNK_MAX_BYTES = 250_000
+COMMS_INDEX_FILE = "index.txt"
+
+
+def scrub_comms_index_content(raw: str) -> str:
+    """Drop index.txt self-references and duplicate lines from stored index content."""
+    seen: set[str] = set()
+    lines: list[str] = []
+    for line in raw.splitlines():
+        name = line.strip()
+        if not name or name == COMMS_INDEX_FILE or name in seen:
+            continue
+        seen.add(name)
+        lines.append(name)
+    return "\n".join(lines) + ("\n" if lines else "")
 
 
 def _now() -> Decimal:

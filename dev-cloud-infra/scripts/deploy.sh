@@ -92,6 +92,12 @@ if [[ "$DEPLOY_BACKEND" -eq 1 ]]; then
       --require-approval "$CDK_REQUIRE_APPROVAL" \
       --outputs-file "$OUTPUTS_FILE"
   )
+
+  log "Cleaning up stray index.txt feed entries"
+  (
+    cd "$REPO_ROOT"
+    DEV_CLOUD_TABLE=dev-cloud uv run python "$SCRIPT_DIR/cleanup-index-feed.py" || true
+  )
 else
   if [[ ! -f "$OUTPUTS_FILE" ]]; then
     log "Fetching stack outputs from CloudFormation"
