@@ -2085,7 +2085,7 @@ export function TaskCommsPageContent({
       if (currentIdx < 0) currentIdx = direction === 'down' ? -1 : 0
 
       if (direction === 'up') {
-        const { targetIdx, snapBack } = resolveUpNavTargetIndex(targets, currentIdx, SCROLL_NEAR_BOTTOM_PX)
+        const { targetIdx, snapBack } = resolveUpNavTargetIndex(targets, currentIdx)
         if (!snapBack && currentIdx <= 0 && hasOlderRef.current && !loadingOlderRef.current) {
           pendingNavAfterLoadRef.current = { prevFirstId: navTargetId(targets[0]) }
           await loadOlderFeed()

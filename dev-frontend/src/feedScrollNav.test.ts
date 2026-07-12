@@ -132,13 +132,22 @@ describe('isInSectionBody', () => {
   ]
   const targets = buildFeedNavTargets(entries, () => false)
 
-  it('is true between B and C when B header is scrolled past', () => {
+  it('is false while B header is still visible on screen', () => {
     setupHeaderRects(['comms:a.md', 'comms:b.md', 'comms:c.md'], {
       'comms:a.md': -200,
       'comms:b.md': 40,
       'comms:c.md': 200,
     })
-    expect(isInSectionBody(targets, 1, 80)).toBe(true)
+    expect(isInSectionBody(targets, 1)).toBe(false)
+  })
+
+  it('is true when B header is fully off-screen even if C is at the anchor', () => {
+    setupHeaderRects(['comms:a.md', 'comms:b.md', 'comms:c.md'], {
+      'comms:a.md': -200,
+      'comms:b.md': -40,
+      'comms:c.md': 80,
+    })
+    expect(isInSectionBody(targets, 1)).toBe(true)
   })
 
   it('is false when anchored at B header', () => {
@@ -147,17 +156,23 @@ describe('isInSectionBody', () => {
       'comms:b.md': 80,
       'comms:c.md': 200,
     })
-    expect(isInSectionBody(targets, 1, 80)).toBe(false)
+    expect(isInSectionBody(targets, 1)).toBe(false)
   })
 
-  it('is true below the last entry header before page bottom', () => {
+  it('is false while the last entry header is still visible', () => {
     const lastTargets = buildFeedNavTargets([{ type: 'comms', id: 'a.md' }], () => false)
     setupHeaderRects(['comms:a.md'], { 'comms:a.md': 30 })
-    expect(isInSectionBody(lastTargets, 0, 80)).toBe(true)
+    expect(isInSectionBody(lastTargets, 0)).toBe(false)
+  })
+
+  it('is true when the last entry header is fully off-screen', () => {
+    const lastTargets = buildFeedNavTargets([{ type: 'comms', id: 'a.md' }], () => false)
+    setupHeaderRects(['comms:a.md'], { 'comms:a.md': -20 })
+    expect(isInSectionBody(lastTargets, 0)).toBe(true)
   })
 
   it('is false for the page-bottom target', () => {
-    expect(isInSectionBody(targets, targets.length - 1, 80)).toBe(false)
+    expect(isInSectionBody(targets, targets.length - 1)).toBe(false)
   })
 })
 
@@ -169,13 +184,31 @@ describe('resolveUpNavTargetIndex', () => {
   ]
   const targets = buildFeedNavTargets(entries, () => false)
 
-  it('snaps to B when between B and C instead of jumping to A', () => {
+  it('jumps to A while B header is still visible on screen', () => {
     setupHeaderRects(['comms:a.md', 'comms:b.md', 'comms:c.md'], {
       'comms:a.md': -200,
       'comms:b.md': 40,
       'comms:c.md': 200,
     })
-    expect(resolveUpNavTargetIndex(targets, 1, 80)).toEqual({ targetIdx: 1, snapBack: true })
+    expect(resolveUpNavTargetIndex(targets, 1)).toEqual({ targetIdx: 0, snapBack: false })
+  })
+
+  it('snaps to B when B is off-screen and C is at the anchor', () => {
+    setupHeaderRects(['comms:a.md', 'comms:b.md', 'comms:c.md'], {
+      'comms:a.md': -200,
+      'comms:b.md': -40,
+      'comms:c.md': 80,
+    })
+    expect(resolveUpNavTargetIndex(targets, 1)).toEqual({ targetIdx: 1, snapBack: true })
+  })
+
+  it('moves to B from C anchor when B is still off-screen above', () => {
+    setupHeaderRects(['comms:a.md', 'comms:b.md', 'comms:c.md'], {
+      'comms:a.md': -400,
+      'comms:b.md': -120,
+      'comms:c.md': 80,
+    })
+    expect(resolveUpNavTargetIndex(targets, 2)).toEqual({ targetIdx: 1, snapBack: false })
   })
 
   it('moves to the previous header when already anchored at B', () => {
@@ -184,18 +217,18 @@ describe('resolveUpNavTargetIndex', () => {
       'comms:b.md': 80,
       'comms:c.md': 200,
     })
-    expect(resolveUpNavTargetIndex(targets, 1, 80)).toEqual({ targetIdx: 0, snapBack: false })
+    expect(resolveUpNavTargetIndex(targets, 1)).toEqual({ targetIdx: 0, snapBack: false })
   })
 
-  it('snaps to the last entry header from its body', () => {
+  it('snaps to the last entry header once it is fully off-screen', () => {
     const lastTargets = buildFeedNavTargets([{ type: 'comms', id: 'a.md' }], () => false)
-    setupHeaderRects(['comms:a.md'], { 'comms:a.md': 20 })
-    expect(resolveUpNavTargetIndex(lastTargets, 0, 80)).toEqual({ targetIdx: 0, snapBack: true })
+    setupHeaderRects(['comms:a.md'], { 'comms:a.md': -20 })
+    expect(resolveUpNavTargetIndex(lastTargets, 0)).toEqual({ targetIdx: 0, snapBack: true })
   })
 
   it('moves from page-bottom to the last header', () => {
     const lastTargets = buildFeedNavTargets([{ type: 'comms', id: 'a.md' }], () => false)
-    expect(resolveUpNavTargetIndex(lastTargets, lastTargets.length - 1, 80)).toEqual({
+    expect(resolveUpNavTargetIndex(lastTargets, lastTargets.length - 1)).toEqual({
       targetIdx: 0,
       snapBack: false,
     })

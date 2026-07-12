@@ -71,14 +71,8 @@ export function isNearPageBottom(thresholdPx = 80): boolean {
   return window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - thresholdPx
 }
 
-const ANCHOR_TOLERANCE_PX = 8
-
-/** True when the viewport anchor sits in a section body (past its header, before the next). */
-export function isInSectionBody(
-  targets: FeedNavTarget[],
-  currentIdx: number,
-  viewportOffsetPx = 80,
-): boolean {
+/** True when reading a section body after its header has scrolled fully off-screen. */
+export function isInSectionBody(targets: FeedNavTarget[], currentIdx: number): boolean {
   if (currentIdx < 0) return false
   const target = targets[currentIdx]
   if (target.kind !== 'header') return false
@@ -87,30 +81,21 @@ export function isInSectionBody(
   if (!el) return false
 
   const top = el.getBoundingClientRect().top
-  if (top >= viewportOffsetPx - ANCHOR_TOLERANCE_PX) return false
+  // While the header row is still visible, up may jump to the previous section.
+  if (top >= 0) return false
 
   const footerIdx = targets.length - 1
   const hasFooter = targets[footerIdx]?.kind === 'page-bottom'
   const lastHeaderIdx = hasFooter ? footerIdx - 1 : targets.length - 1
-
-  if (currentIdx < lastHeaderIdx) {
-    const nextTarget = targets[currentIdx + 1]
-    if (nextTarget.kind !== 'header') return true
-    const nextEl = findNavTargetElement(nextTarget)
-    if (!nextEl) return false
-    return nextEl.getBoundingClientRect().top > viewportOffsetPx + ANCHOR_TOLERANCE_PX
-  }
-
-  return currentIdx === lastHeaderIdx
+  return currentIdx <= lastHeaderIdx
 }
 
 export function resolveUpNavTargetIndex(
   targets: FeedNavTarget[],
   currentIdx: number,
-  viewportOffsetPx = 80,
 ): { targetIdx: number; snapBack: boolean } {
   if (currentIdx < 0) return { targetIdx: 0, snapBack: false }
-  if (isInSectionBody(targets, currentIdx, viewportOffsetPx)) {
+  if (isInSectionBody(targets, currentIdx)) {
     return { targetIdx: currentIdx, snapBack: true }
   }
   return { targetIdx: Math.max(0, currentIdx - 1), snapBack: false }
