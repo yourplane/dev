@@ -9,6 +9,7 @@ import {
   findCurrentNavIndex,
   isNearPageBottom,
   navTargetId,
+  resolveUpNavTargetIndex,
   scrollToNavTarget,
   type FeedNavTarget,
 } from './feedScrollNav'
@@ -2029,14 +2030,14 @@ export function TaskCommsPageContent({
       if (currentIdx < 0) currentIdx = direction === 'down' ? -1 : 0
 
       if (direction === 'up') {
-        if (currentIdx <= 0 && hasOlderRef.current && !loadingOlderRef.current) {
+        const { targetIdx, snapBack } = resolveUpNavTargetIndex(targets, currentIdx, SCROLL_NEAR_BOTTOM_PX)
+        if (!snapBack && currentIdx <= 0 && hasOlderRef.current && !loadingOlderRef.current) {
           pendingNavAfterLoadRef.current = { prevFirstId: navTargetId(targets[0]) }
           await loadOlderFeed()
           return
         }
-        const nextIdx = Math.max(0, currentIdx - 1)
-        if (nextIdx === currentIdx) return
-        scrollToNavTargetWithLock(targets[nextIdx], direction)
+        if (!snapBack && targetIdx === currentIdx) return
+        scrollToNavTargetWithLock(targets[targetIdx], direction)
         return
       }
 

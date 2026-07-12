@@ -70,3 +70,48 @@ export function scrollToNavTarget(target: FeedNavTarget, behavior: ScrollBehavio
 export function isNearPageBottom(thresholdPx = 80): boolean {
   return window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - thresholdPx
 }
+
+const ANCHOR_TOLERANCE_PX = 8
+
+/** True when the viewport anchor sits in a section body (past its header, before the next). */
+export function isInSectionBody(
+  targets: FeedNavTarget[],
+  currentIdx: number,
+  viewportOffsetPx = 80,
+): boolean {
+  if (currentIdx < 0) return false
+  const target = targets[currentIdx]
+  if (target.kind !== 'header') return false
+
+  const el = findNavTargetElement(target)
+  if (!el) return false
+
+  const top = el.getBoundingClientRect().top
+  if (top >= viewportOffsetPx - ANCHOR_TOLERANCE_PX) return false
+
+  const footerIdx = targets.length - 1
+  const hasFooter = targets[footerIdx]?.kind === 'page-bottom'
+  const lastHeaderIdx = hasFooter ? footerIdx - 1 : targets.length - 1
+
+  if (currentIdx < lastHeaderIdx) {
+    const nextTarget = targets[currentIdx + 1]
+    if (nextTarget.kind !== 'header') return true
+    const nextEl = findNavTargetElement(nextTarget)
+    if (!nextEl) return false
+    return nextEl.getBoundingClientRect().top > viewportOffsetPx + ANCHOR_TOLERANCE_PX
+  }
+
+  return currentIdx === lastHeaderIdx
+}
+
+export function resolveUpNavTargetIndex(
+  targets: FeedNavTarget[],
+  currentIdx: number,
+  viewportOffsetPx = 80,
+): { targetIdx: number; snapBack: boolean } {
+  if (currentIdx < 0) return { targetIdx: 0, snapBack: false }
+  if (isInSectionBody(targets, currentIdx, viewportOffsetPx)) {
+    return { targetIdx: currentIdx, snapBack: true }
+  }
+  return { targetIdx: Math.max(0, currentIdx - 1), snapBack: false }
+}
