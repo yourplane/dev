@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef, useMemo, memo } from 'react'
 import { BrowserRouter, Link, Routes, Route, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { api, apiBaseUrl, type TaskWorkspaceInfo, type EnvironmentInfo } from './api'
+import { api, apiBaseUrl, type TaskListEntry, type TaskListStatus, type TaskWorkspaceInfo, type EnvironmentInfo } from './api'
 import { bashTranscriptShellDisplayBlocks, extractBashCommandFromTranscript } from './bashTranscript'
 import {
   buildFeedNavTargets,
@@ -75,10 +75,43 @@ export function Layout() {
 
 const DEFAULT_TAB_TITLE = 'Dev – Task management'
 
+const TASK_STATUS_LABELS: Record<Exclude<TaskListStatus, 'idle'>, string> = {
+  worker_issue: 'Worker offline or queued',
+  running: 'Command in progress',
+  failed: 'Last command failed',
+  waiting_for_answers: 'Waiting for question answers',
+  ready_for_next_step: 'Ready for next step (e.g. Plan or Implement)',
+  plan_complete: 'Plan complete',
+  implement_complete: 'Implement complete',
+  merge_from_main_complete: 'Merge from main complete',
+  user_comment: 'User comment — latest activity is your input',
+  pr_comments: 'PR comments — latest activity is review feedback',
+  bash_complete: 'Shell command finished — latest activity is bash output',
+}
+
+function taskStatusIconClass(status: TaskListStatus): string {
+  if (status === 'pr_comments') return 'task-status-icon--user_comment'
+  return `task-status-icon--${status}`
+}
+
+function TaskStatusIcon({ status }: { status: TaskListStatus }) {
+  if (status === 'idle') return null
+  const label = TASK_STATUS_LABELS[status]
+  return (
+    <span
+      className={`task-status-icon ${taskStatusIconClass(status)}`}
+      role="img"
+      aria-label={label}
+      title={label}
+    />
+  )
+}
+
 function TaskListPage() {
-  const [tasks, setTasks] = useState<string[]>([])
+  const [tasks, setTasks] = useState<TaskListEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const tabVisibleRef = useRef(!document.hidden)
   const [lastArchived, setLastArchived] = useState<{ archivedName: string; taskName: string } | null>(() => {
     try {
       const raw = sessionStorage.getItem('dev_undo_archive')
@@ -92,22 +125,40 @@ function TaskListPage() {
     return null
   })
 
-  const loadTasks = useCallback(async () => {
-    setError(null)
-    setLoading(true)
+  const loadTasks = useCallback(async ({ silent = false } = {}) => {
+    if (!silent) {
+      setError(null)
+      setLoading(true)
+    }
     try {
       const res = await api.getTasks()
       setTasks(res.tasks)
+      if (!silent) setError(null)
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
+      if (!silent) setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setLoading(false)
+      if (!silent) setLoading(false)
     }
   }, [])
 
   useEffect(() => {
     loadTasks()
   }, [loadTasks])
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      if (tabVisibleRef.current) loadTasks({ silent: true })
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [loadTasks])
+
+  useEffect(() => {
+    const onVisibility = () => {
+      tabVisibleRef.current = !document.hidden
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  }, [])
 
   const handleUndoArchive = useCallback(async () => {
     if (!lastArchived) return
@@ -147,7 +198,7 @@ function TaskList({
   onRefresh,
   onArchived,
 }: {
-  tasks: string[]
+  tasks: TaskListEntry[]
   loading: boolean
   error: string | null
   onRefresh: () => void
@@ -196,9 +247,12 @@ function TaskList({
         <p className="empty">No tasks yet. Create one from “New task”.</p>
       ) : (
         <ul>
-          {tasks.map((name) => (
+          {tasks.map(({ name, status }) => (
             <li key={name} className="task-row">
-              <Link to={`/task/${encodeURIComponent(name)}`} className="task-name">{name}</Link>
+              <Link to={`/task/${encodeURIComponent(name)}`} className="task-row-link">
+                <TaskStatusIcon status={status} />
+                <span className="task-name">{name}</span>
+              </Link>
               <button
                 type="button"
                 className="archive-btn"

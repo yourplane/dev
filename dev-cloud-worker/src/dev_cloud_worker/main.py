@@ -26,7 +26,12 @@ from dev_sdk.agent_run import (
 )
 from dev_sdk.bash_runner import BashStreamHooks, run_bash_stream
 from dev_sdk.comms import comms_dir
-from dev_sdk.merge_from_main import MergeFromMainError, MergeFromMainHooks, run_merge_from_main
+from dev_sdk.merge_from_main import (
+    MergeFromMainError,
+    MergeFromMainHooks,
+    run_merge_from_main,
+    write_clean_merge_success_comms,
+)
 from dev_sdk.task_manager import TaskCancelled, TaskManager
 from dev_sdk.worker_sync import (
     OutboxEntry,
@@ -483,6 +488,7 @@ class CommandExecutor:
         hooks = MergeFromMainHooks(
             stream_bash=stream_bash,
             run_conflict_resolution=run_conflict,
+            on_clean_merge_success=lambda: write_clean_merge_success_comms(task_dir),
         )
         run_merge_from_main(task_dir, cancel_event=cancel_flag, hooks=hooks)
 
