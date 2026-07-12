@@ -1659,6 +1659,7 @@ export function TaskCommsPageContent({
   const [activeCommand, setActiveCommand] = useState<string | null>(null)
   const [pendingCommand, setPendingCommand] = useState<string | null>(null)
   const [pendingCommandState, setPendingCommandState] = useState<'syncing' | 'worker_offline' | null>(null)
+  const [syncHealth, setSyncHealth] = useState<'unhealthy' | null>(null)
   const [createProgress, setCreateProgress] = useState<string[]>([])
   const [activeLogFilename, setActiveLogFilename] = useState<string | null>(null)
   const [commandError, setCommandError] = useState<string | null>(null)
@@ -1864,6 +1865,7 @@ export function TaskCommsPageContent({
       setActiveCommand(running ? res.command : null)
       setPendingCommand(pending ? res.command : null)
       setPendingCommandState(res.pending_state ?? (pending ? 'syncing' : null))
+      setSyncHealth(res.sync_health === 'unhealthy' ? 'unhealthy' : null)
       setCreateProgress(res.create_progress ?? [])
       setCancelling(Boolean(res.cancelling))
       setActiveLogFilename(res.active && res.active_log_filename ? res.active_log_filename : null)
@@ -2774,6 +2776,11 @@ export function TaskCommsPageContent({
         <p className="status">Updating feed…</p>
       ) : null}
       <div className="task-commands">
+        {syncHealth === 'unhealthy' && (
+          <p className="sync-health-banner" role="status">
+            Cloud sync is delayed — retrying in the background. The command stays active until sync completes.
+          </p>
+        )}
         {activeCommand ? (
           <div className="command-status-block">
             <div className="command-status-row">

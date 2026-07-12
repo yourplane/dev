@@ -35,7 +35,28 @@ class TaskStatusInput:
     queued: bool = False
     pending_state: str | None = None
     comms_index: tuple[str, ...] = ()
+    latest_feed_comms_filename: str | None = None
     latest_question_content: str | None = None
+
+
+def latest_feed_comms_filename(
+    feed_entries: tuple[tuple[str, float], ...],
+    *,
+    suffix: str | None = None,
+) -> str | None:
+    """Return the feed comms id with the greatest created_at, optionally filtered by suffix."""
+    entries = feed_entries
+    if suffix is not None:
+        entries = tuple((name, ts) for name, ts in feed_entries if name.endswith(suffix))
+    if not entries:
+        return None
+    return max(entries, key=lambda item: (item[1], item[0]))[0]
+
+
+def _latest_comms_filename(inp: TaskStatusInput) -> str | None:
+    if inp.latest_feed_comms_filename:
+        return inp.latest_feed_comms_filename
+    return inp.comms_index[-1] if inp.comms_index else None
 
 
 def is_cancelled_error(error: str | None) -> bool:
@@ -73,7 +94,7 @@ def resolve_task_list_status(inp: TaskStatusInput) -> TaskListStatus:
     if inp.command_error and not is_cancelled_error(inp.command_error):
         return TaskListStatus.FAILED
 
-    latest = inp.comms_index[-1] if inp.comms_index else None
+    latest = _latest_comms_filename(inp)
     if latest and latest.endswith("-agent-question.md"):
         return _question_comms_status(inp.latest_question_content)
 
@@ -100,6 +121,7 @@ def task_status_input_from_command_body(
     body: dict,
     *,
     comms_index: list[str] | None = None,
+    latest_feed_comms_filename: str | None = None,
     latest_question_content: str | None = None,
 ) -> TaskStatusInput:
     return TaskStatusInput(
@@ -109,6 +131,7 @@ def task_status_input_from_command_body(
         queued=bool(body.get("queued")),
         pending_state=body.get("pending_state"),
         comms_index=tuple(comms_index or ()),
+        latest_feed_comms_filename=latest_feed_comms_filename,
         latest_question_content=latest_question_content,
     )
 
@@ -118,8 +141,8 @@ def enrich_task_status_input_with_comms(
     *,
     read_comms_file: Callable[[str], str | None] | None = None,
 ) -> TaskStatusInput:
-    """Load latest agent-question comms content when needed for status resolution."""
-    latest = inp.comms_index[-1] if inp.comms_index else None
+    """Load agent-question comms content when the latest feed entry is a question file."""
+    latest = _latest_comms_filename(inp)
     if not latest or not latest.endswith("-agent-question.md") or read_comms_file is None:
         return inp
     content = read_comms_file(latest)
@@ -132,5 +155,6 @@ def enrich_task_status_input_with_comms(
         queued=inp.queued,
         pending_state=inp.pending_state,
         comms_index=inp.comms_index,
+        latest_feed_comms_filename=latest,
         latest_question_content=content,
     )

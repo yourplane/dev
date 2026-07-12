@@ -92,6 +92,22 @@ if [[ "$DEPLOY_BACKEND" -eq 1 ]]; then
       --require-approval "$CDK_REQUIRE_APPROVAL" \
       --outputs-file "$OUTPUTS_FILE"
   )
+
+  log "Cleaning up stray index.txt feed entries"
+  (
+    cd "$REPO_ROOT"
+    DEV_CLOUD_BUCKET="$(aws cloudformation describe-stacks \
+      --region "$REGION" \
+      --stack-name "$STACK_NAME" \
+      --query "Stacks[0].Outputs[?OutputKey=='DataBucketName'].OutputValue | [0]" \
+      --output text 2>/dev/null || true)"
+    if [[ -n "$DEV_CLOUD_BUCKET" && "$DEV_CLOUD_BUCKET" != "None" ]]; then
+      DEV_CLOUD_TABLE=dev-cloud DEV_CLOUD_BUCKET="$DEV_CLOUD_BUCKET" \
+        uv run python "$SCRIPT_DIR/cleanup-index-feed.py" || true
+    else
+      log "Skipping index feed cleanup (stack outputs unavailable)"
+    fi
+  )
 else
   if [[ ! -f "$OUTPUTS_FILE" ]]; then
     log "Fetching stack outputs from CloudFormation"

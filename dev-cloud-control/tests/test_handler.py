@@ -717,3 +717,68 @@ def test_start_merge_from_main_rejects_task_without_repo(aws_env):
     )
     assert resp["statusCode"] == 400
     assert "no cloned repository" in json.loads(resp["body"])["detail"].lower()
+
+
+def test_worker_sync_health_updates_task_status(aws_env):
+    router = Router()
+    task_name = "sync-health-task"
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Sync health", "environment_id": "env-1", "repo": None},
+        )
+    )
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "claim_work": True}))
+    router.dispatch(
+        _event("POST", f"/worker/tasks/{task_name}/sync-health", {"sync_health": "unhealthy"})
+    )
+    status = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/commands"))["body"])
+    assert status["sync_health"] == "unhealthy"
+    router.dispatch(
+        _event("POST", f"/worker/tasks/{task_name}/sync-health", {"sync_health": "healthy"})
+    )
+    status = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/commands"))["body"])
+    assert status["sync_health"] is None
+
+
+def test_worker_sync_index_not_in_feed(aws_env):
+    router = Router()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Index feed", "environment_id": "env-1", "repo": None},
+        )
+    )
+    task_name = json.loads(router.dispatch(_event("GET", "/tasks"))["body"])["tasks"][0]["name"]
+    router.dispatch(
+        _event(
+            "POST",
+            f"/worker/tasks/{task_name}/sync",
+            {
+                "push": [
+                    {
+                        "filename": "001-agent-question.md",
+                        "content": '{"intro": "hi", "questions": []}\n',
+                        "origin": "worker",
+                        "created_at": 1.0,
+                    },
+                    {
+                        "filename": "index.txt",
+                        "content": "001-agent-question.md\n",
+                        "origin": "worker",
+                        "created_at": 1.0,
+                    },
+                ]
+            },
+        )
+    )
+    feed = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/feed"))["body"])
+    feed_ids = {e["id"] for e in feed["entries"] if e["type"] == "comms"}
+    assert "001-agent-question.md" in feed_ids
+    assert "index.txt" not in feed_ids
+    index_raw = router.store.get_comms(task_name, "index.txt")
+    assert index_raw is not None
+    assert "index.txt" not in index_raw

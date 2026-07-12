@@ -22,6 +22,7 @@ from dev_sdk.feed import FeedCursor, FeedEntry
 from dev_sdk.question_answers import AnswerItem, build_answers_markdown
 from dev_sdk.task_list_status import (
     enrich_task_status_input_with_comms,
+    latest_feed_comms_filename,
     resolve_task_list_status,
     task_status_input_from_command_body,
 )
@@ -170,6 +171,7 @@ class Router:
                 "queued": False,
                 "cancelling": _command_cancelling(active),
                 "pending_state": pending_state,
+                "sync_health": task.sync_health,
             }
         cmd = None
         if queued:
@@ -187,6 +189,7 @@ class Router:
                 "queued": bool(queued),
                 "cancelling": _command_cancelling(active),
                 "pending_state": pending_state,
+                "sync_health": task.sync_health,
             }
         return {
             "active": False,
@@ -198,6 +201,7 @@ class Router:
             "queued": False,
             "cancelling": False,
             "pending_state": None,
+            "sync_health": task.sync_health,
         }
 
     def dispatch(self, event: dict, context: Any = None) -> dict:
@@ -503,7 +507,20 @@ class Router:
                 continue
             body = self._command_status_body(task)
             comms = self._comms_index(name)
-            inp = task_status_input_from_command_body(body, comms_index=comms)
+            feed_entries = [
+                (fi.id, fi.created_at)
+                for fi in self.store.list_feed_items(name)
+                if fi.type == "comms"
+                and fi.delete_status != "deleted"
+                and fi.id != "index.txt"
+            ]
+            feed_tuple = tuple(feed_entries)
+            latest_feed = latest_feed_comms_filename(feed_tuple)
+            inp = task_status_input_from_command_body(
+                body,
+                comms_index=comms,
+                latest_feed_comms_filename=latest_feed,
+            )
 
             def read_comms_file(filename: str, task_name: str = name) -> str | None:
                 return self.store.get_comms(task_name, filename)
@@ -762,7 +779,12 @@ class Router:
 
     def _feed_entries(self, task_name: str) -> list[FeedEntry]:
         items = self.store.list_feed_items(task_name)
-        visible = [i for i in items if i.delete_status != "deleted"]
+        visible = [
+            i
+            for i in items
+            if i.delete_status != "deleted"
+            and not (i.type == "comms" and i.id == "index.txt")
+        ]
         return [
             FeedEntry(
                 type=i.type,
@@ -1213,6 +1235,9 @@ class Router:
         m = re.match(r"^/worker/tasks/([^/]+)/command/progress$", path)
         if m and method == "POST":
             return self.worker_command_progress(event, unquote(m.group(1)))
+        m = re.match(r"^/worker/tasks/([^/]+)/sync-health$", path)
+        if m and method == "POST":
+            return self.worker_sync_health(event, unquote(m.group(1)))
         m = re.match(r"^/worker/deletions/ack$", path)
         if m and method == "POST":
             return self.worker_deletion_ack(event)
@@ -1386,6 +1411,8 @@ class Router:
                 continue
             if origin == "worker":
                 self.store.put_comms(task_name, filename, content, origin=origin)
+                if filename == "index.txt":
+                    continue
                 self._append_comms_index(task_name, filename)
                 if not any(
                     fi.id == filename
@@ -1446,6 +1473,7 @@ class Router:
             updates["last_command_error"] = str(error)
         else:
             updates["last_command_error"] = None
+            updates["sync_health"] = None
         if result.get("owner"):
             updates["owner"] = result["owner"]
         if result.get("repo_name"):
@@ -1464,6 +1492,18 @@ class Router:
                 progress = list(task.create_progress or [])
                 progress.append(str(message))
                 self.store.update_task(task_name, create_progress=progress)
+        return _no_content()
+
+    def worker_sync_health(self, event: dict, task_name: str) -> dict:
+        body = _parse_body(event) or {}
+        sync_health = body.get("sync_health")
+        if sync_health not in ("healthy", "unhealthy"):
+            return _json(400, {"detail": "sync_health must be healthy or unhealthy"})
+        task = self.store.get_task(task_name)
+        if not task:
+            return _json(404, {"detail": "Task not found"})
+        value = None if sync_health == "healthy" else "unhealthy"
+        self.store.update_task(task_name, sync_health=value)
         return _no_content()
 
     def worker_deletion_ack(self, event: dict) -> dict:
