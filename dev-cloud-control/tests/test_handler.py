@@ -149,7 +149,8 @@ def test_archive_task_updates_status(aws_env):
     resp = router.dispatch(_event("POST", f"/tasks/{task_name}/archive"))
     assert resp["statusCode"] == 200
     tasks = json.loads(router.dispatch(_event("GET", "/tasks"))["body"])["tasks"]
-    assert task_name not in tasks
+    task_names = [t["name"] for t in tasks]
+    assert task_name not in task_names
     archive = json.loads(router.dispatch(_event("GET", "/archive"))["body"])
     assert any(e["task_name"] == task_name for e in archive["entries"])
 
@@ -218,7 +219,9 @@ def test_command_status_shows_queued_create_task(aws_env):
             {"title": "Queued", "environment_id": "env-1", "repo": None},
         )
     )
-    task_name = json.loads(router.dispatch(_event("GET", "/tasks"))["body"])["tasks"][0]
+    tasks = json.loads(router.dispatch(_event("GET", "/tasks"))["body"])["tasks"]
+    task_name = tasks[0]["name"]
+    assert tasks[0]["status"] == "worker_issue"
     status = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/commands"))["body"])
     assert status["queued"] is True
     assert status["active"] is False
@@ -344,7 +347,7 @@ def test_comms_sync_blocks_command_until_worker_pulls(aws_env):
             {"title": "Sync gate", "environment_id": "env-1", "repo": None},
         )
     )
-    task_name = json.loads(router.dispatch(_event("GET", "/tasks"))["body"])["tasks"][0]
+    task_name = json.loads(router.dispatch(_event("GET", "/tasks"))["body"])["tasks"][0]["name"]
     router.dispatch(_event("POST", f"/worker/tasks/{task_name}/sync", {"push": []}))
     poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
     assert poll["statusCode"] == 200
@@ -385,7 +388,7 @@ def test_worker_sync_pulls_comms_index(aws_env):
             {"title": "Index sync", "environment_id": "env-1", "repo": None},
         )
     )
-    task_name = json.loads(router.dispatch(_event("GET", "/tasks"))["body"])["tasks"][0]
+    task_name = json.loads(router.dispatch(_event("GET", "/tasks"))["body"])["tasks"][0]["name"]
     router.dispatch(_event("POST", f"/worker/tasks/{task_name}/sync", {"push": []}))
     answers_resp = router.dispatch(
         _event(

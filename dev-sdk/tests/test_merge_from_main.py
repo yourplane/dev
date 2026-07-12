@@ -126,3 +126,35 @@ def test_run_merge_from_main_runs_agent_after_git_conflict(tmp_path: Path) -> No
             ),
         )
     assert seen["agent"] is True
+
+
+def test_run_merge_from_main_writes_clean_success_comms(tmp_path: Path) -> None:
+    task = tmp_path / "task"
+    repo = task / "myrepo"
+    repo.mkdir(parents=True)
+    _init_repo(repo)
+    seen: dict[str, bool] = {"clean": False}
+
+    def stream_bash(*args: object, **kwargs: object) -> BashRunResult:
+        return BashRunResult(0, False, False, False, None)
+
+    def on_clean() -> None:
+        seen["clean"] = True
+        from dev_sdk.merge_from_main import write_clean_merge_success_comms
+
+        write_clean_merge_success_comms(task)
+
+    with patch("dev_sdk.merge_from_main.has_conflicted_merge_in_progress", return_value=False):
+        run_merge_from_main(
+            task,
+            cancel_event=threading.Event(),
+            hooks=MergeFromMainHooks(
+                stream_bash=stream_bash,
+                run_conflict_resolution=lambda *a, **k: None,
+                on_clean_merge_success=on_clean,
+            ),
+        )
+    assert seen["clean"] is True
+    from dev_sdk.comms import read_index
+
+    assert any(name.endswith("-agent-merge-from-main.md") for name in read_index(task))
