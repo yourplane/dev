@@ -253,8 +253,27 @@ export interface CopyFromArchiveResponse {
   task_dir: string;
 }
 
+export type TaskListStatus =
+  | 'idle'
+  | 'worker_issue'
+  | 'running'
+  | 'failed'
+  | 'waiting_for_answers'
+  | 'ready_for_next_step'
+  | 'plan_complete'
+  | 'implement_complete'
+  | 'merge_from_main_complete'
+  | 'user_comment'
+  | 'pr_comments'
+  | 'bash_complete';
+
+export interface TaskListEntry {
+  name: string;
+  status: TaskListStatus;
+}
+
 export const api = {
-  getTasks(): Promise<{ tasks: string[] }> {
+  getTasks(): Promise<{ tasks: TaskListEntry[] }> {
     return request('/tasks');
   },
 

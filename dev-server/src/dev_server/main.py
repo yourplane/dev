@@ -55,11 +55,17 @@ from dev_sdk.create_pr import (
     find_existing_pull_request,
     pull_pr_comments,
 )
+from dev_sdk.task_list_status import (
+    TaskStatusInput,
+    enrich_task_status_input_with_comms,
+    resolve_task_list_status,
+)
 from dev_sdk.merge_from_main import (
     MergeFromMainError,
     MergeFromMainHooks,
     run_merge_from_main,
     validate_merge_from_main_can_start,
+    write_clean_merge_success_comms,
 )
 from dev_sdk.repo_config import load_repos, remove_repo, resolve_repo, save_repos
 from dev_sdk.task_commands import TaskCommand
@@ -168,6 +174,7 @@ def _run_merge_from_main_in_thread(
         on_validation_error=set_last_error,
         on_agent_error=set_last_error,
         on_success_clear_error=clear_last_error,
+        on_clean_merge_success=lambda: write_clean_merge_success_comms(task_dir),
         on_agent_start=on_agent_start,
     )
     try:
@@ -272,8 +279,13 @@ class CreateTaskResponse(BaseModel):
     task_dir: str
 
 
+class TaskListEntryModel(BaseModel):
+    name: str
+    status: str
+
+
 class ListTasksResponse(BaseModel):
-    tasks: list[str]
+    tasks: list[TaskListEntryModel]
 
 
 class ArchiveTaskResponse(BaseModel):
@@ -598,10 +610,45 @@ def put_task_question_answers_draft_endpoint(
         set_task_question_answers_draft(_tasks_root(), task_name, comms_filename, data)
 
 
+def _task_status_input_for_local(task_name: str, task_dir: Path) -> TaskStatusInput:
+    with _command_registry_lock:
+        entry = _command_registry.get(task_name)
+        last_error = _last_command_error.get(task_name)
+    comms = tuple(read_index(task_dir))
+    if entry is None:
+        return TaskStatusInput(
+            active=False,
+            command=None,
+            command_error=last_error,
+            comms_index=comms,
+        )
+    return TaskStatusInput(
+        active=True,
+        command=entry["command_id"],
+        command_error=None,
+        comms_index=comms,
+    )
+
+
 @app.get("/tasks", response_model=ListTasksResponse)
 def list_tasks() -> ListTasksResponse:
     manager = _get_manager()
-    return ListTasksResponse(tasks=manager.list_tasks())
+    root = _tasks_root()
+    entries = []
+    for name in manager.list_tasks():
+        task_dir = root / name
+        inp = _task_status_input_for_local(name, task_dir)
+
+        def read_comms_file(filename: str, _task_dir: Path = task_dir) -> str | None:
+            path = comms_dir(_task_dir) / filename
+            if not path.is_file():
+                return None
+            return path.read_text(encoding="utf-8")
+
+        inp = enrich_task_status_input_with_comms(inp, read_comms_file=read_comms_file)
+        status = resolve_task_list_status(inp)
+        entries.append(TaskListEntryModel(name=name, status=status.value))
+    return ListTasksResponse(tasks=entries)
 
 
 @app.get("/tasks/{task_name}/workspace", response_model=TaskWorkspaceResponse)

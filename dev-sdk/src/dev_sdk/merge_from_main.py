@@ -15,7 +15,10 @@ from typing import Callable
 
 from dev_sdk.agent_run import AgentRunError
 from dev_sdk.bash_runner import BashRunResult
+from dev_sdk.comms import add_comms
 from dev_sdk.create_pr import _ensure_clean_tree, _find_single_git_repo_under
+
+CLEAN_MERGE_SUCCESS_COMMS = "Merge from main complete — clean merge, no conflicts."
 
 
 class MergeFromMainError(Exception):
@@ -93,7 +96,13 @@ class MergeFromMainHooks:
     on_validation_error: Callable[[str], None] | None = None
     on_agent_error: Callable[[str], None] | None = None
     on_success_clear_error: Callable[[], None] | None = None
+    on_clean_merge_success: Callable[[], None] | None = None
     on_agent_start: Callable[[Path], None] | None = None
+
+
+def write_clean_merge_success_comms(task_dir: Path) -> Path:
+    """Append merge-complete comms after a successful clean merge-from-main command."""
+    return add_comms(task_dir, "agent", CLEAN_MERGE_SUCCESS_COMMS, kind="merge-from-main")
 
 
 def run_merge_from_main(
@@ -124,6 +133,8 @@ def run_merge_from_main(
         if cancel_event.is_set() or result.cancelled:
             return
         if result.exit_code == 0 and not has_conflicted_merge_in_progress(repo_root):
+            if hooks.on_clean_merge_success is not None:
+                hooks.on_clean_merge_success()
             return
         if has_conflicted_merge_in_progress(repo_root):
             hooks.run_conflict_resolution(task_dir, cancel_event, agent_start)
