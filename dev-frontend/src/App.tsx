@@ -2813,7 +2813,7 @@ export function TaskCommsPageContent({
                 <span className="command-spinner" aria-hidden />{' '}
                 {pendingCommandState === 'worker_offline'
                   ? 'Worker offline — command queued'
-                  : 'Syncing to worker…'}
+                  : `Syncing: ${COMMAND_LABEL[pendingCommand] ?? pendingCommand}`}
               </p>
               <button
                 type="button"
