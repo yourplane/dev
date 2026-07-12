@@ -190,3 +190,26 @@ def test_is_cancelled_error() -> None:
     assert is_cancelled_error("Cancelled.") is True
     assert is_cancelled_error("boom") is False
     assert is_cancelled_error(None) is False
+
+
+def test_latest_feed_comms_filename_picks_newest_by_created_at() -> None:
+    from dev_sdk.task_list_status import latest_feed_comms_filename
+
+    entries = (
+        ("019-agent-question.md", 100.0),
+        ("032-agent-question.md", 200.0),
+    )
+    assert latest_feed_comms_filename(entries, suffix="-agent-question.md") == "032-agent-question.md"
+
+
+def test_question_status_uses_feed_latest_not_index_tail() -> None:
+    open_q = (
+        '{"intro": "Need clarity", "questions": [{"id": "q1", "text": "Which?", '
+        '"options": [{"label": "A"}, {"label": "B"}]}]}\n'
+    )
+    inp = TaskStatusInput(
+        comms_index=("032-agent-question.md", "051-agent-question.md"),
+        latest_question_filename="032-agent-question.md",
+        latest_question_content=open_q,
+    )
+    assert resolve_task_list_status(inp) == TaskListStatus.WAITING_FOR_ANSWERS

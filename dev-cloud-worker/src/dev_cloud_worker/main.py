@@ -16,6 +16,7 @@ from typing import Callable
 import requests
 
 from dev_cloud_worker.poller import CloudPoller
+from dev_cloud_worker.stream_supervisor import BackgroundSyncWorker, StreamUploadSupervisor
 from dev_sdk.agent_run import (
     AgentRunError,
     run_do,
@@ -500,6 +501,7 @@ def run_loop() -> None:
     tasks_root = _tasks_root()
     executor = CommandExecutor(tasks_root)
     poller = CloudPoller(client, tasks_root)
+    stream_supervisor = StreamUploadSupervisor(client, tasks_root)
     task_locks: dict[str, threading.Lock] = {}
     task_locks_guard = threading.Lock()
 
@@ -511,6 +513,8 @@ def run_loop() -> None:
                 task_locks[task_name] = lock
             return lock
 
+    bg_sync = BackgroundSyncWorker(poller, task_lock=task_lock)
+
     logger.info("Worker started env=%s tasks_root=%s", client.env_id, tasks_root)
 
     def run_command(task_name: str, command: dict) -> None:
@@ -520,7 +524,8 @@ def run_loop() -> None:
     while True:
         try:
             data = client.poll(claim_work=False)
-            poller.run_sync_pass(data.get("sync_tasks", []))
+            bg_sync.enqueue(data.get("sync_tasks", []))
+            stream_supervisor.supervise()
             work_data = client.poll(claim_work=True)
             executor.reconcile_orphans(work_data.get("active_commands", []))
             for d in work_data.get("deletions", []):

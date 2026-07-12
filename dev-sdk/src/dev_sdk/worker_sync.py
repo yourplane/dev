@@ -279,6 +279,59 @@ class LogUploadClient(Protocol):
     ) -> None: ...
 
 
+def tail_log_file(
+    client: LogUploadClient,
+    task_dir: Path,
+    task_name: str,
+    filename: str,
+    state: TailState,
+) -> TailState:
+    log_path = task_dir / LOGS_DIR / filename
+    if not log_path.is_file():
+        return state
+    if state.log_filename != filename:
+        state.log_filename = filename
+        state.log_offset = 0
+        client.upload_log_chunk(task_name, filename, b"")
+    data = log_path.read_bytes()
+    if len(data) > state.log_offset:
+        client.upload_log_chunk(
+            task_name,
+            filename,
+            data[state.log_offset :],
+        )
+        state.log_offset = len(data)
+    write_tail_state(task_dir, state)
+    return state
+
+
+def tail_bash_file(
+    client: LogUploadClient,
+    task_dir: Path,
+    task_name: str,
+    filename: str,
+    state: TailState,
+) -> TailState:
+    bash_path = comms_dir(task_dir) / filename
+    if not bash_path.is_file():
+        return state
+    if state.bash_filename != filename:
+        state.bash_filename = filename
+        state.bash_offset = 0
+        client.upload_log_chunk(task_name, filename, b"", kind="bash")
+    data = bash_path.read_bytes()
+    if len(data) > state.bash_offset:
+        client.upload_log_chunk(
+            task_name,
+            filename,
+            data[state.bash_offset :],
+            kind="bash",
+        )
+        state.bash_offset = len(data)
+    write_tail_state(task_dir, state)
+    return state
+
+
 def tail_streams(
     client: LogUploadClient,
     task_dir: Path,
@@ -290,40 +343,12 @@ def tail_streams(
 
     log_name = streams.active_log
     if log_name:
-        log_path = logs_dir / log_name
-        if log_path.is_file():
-            if state.log_filename != log_name:
-                state.log_filename = log_name
-                state.log_offset = 0
-                client.upload_log_chunk(task_name, log_name, b"")
-            data = log_path.read_bytes()
-            if len(data) > state.log_offset:
-                client.upload_log_chunk(
-                    task_name,
-                    log_name,
-                    data[state.log_offset :],
-                )
-                state.log_offset = len(data)
+        state = tail_log_file(client, task_dir, task_name, log_name, state)
 
     bash_name = streams.active_bash
     if bash_name:
-        bash_path = comms_dir(task_dir) / bash_name
-        if bash_path.is_file():
-            if state.bash_filename != bash_name:
-                state.bash_filename = bash_name
-                state.bash_offset = 0
-                client.upload_log_chunk(task_name, bash_name, b"", kind="bash")
-            data = bash_path.read_bytes()
-            if len(data) > state.bash_offset:
-                client.upload_log_chunk(
-                    task_name,
-                    bash_name,
-                    data[state.bash_offset :],
-                    kind="bash",
-                )
-                state.bash_offset = len(data)
+        state = tail_bash_file(client, task_dir, task_name, bash_name, state)
 
-    write_tail_state(task_dir, state)
     return state
 
 

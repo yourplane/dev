@@ -22,6 +22,7 @@ from dev_sdk.feed import FeedCursor, FeedEntry
 from dev_sdk.question_answers import AnswerItem, build_answers_markdown
 from dev_sdk.task_list_status import (
     enrich_task_status_input_with_comms,
+    latest_feed_comms_filename,
     resolve_task_list_status,
     task_status_input_from_command_body,
 )
@@ -506,7 +507,22 @@ class Router:
                 continue
             body = self._command_status_body(task)
             comms = self._comms_index(name)
-            inp = task_status_input_from_command_body(body, comms_index=comms)
+            feed_entries = [
+                (fi.id, fi.created_at)
+                for fi in self.store.list_feed_items(name)
+                if fi.type == "comms"
+                and fi.delete_status != "deleted"
+                and fi.id != "index.txt"
+            ]
+            latest_question = latest_feed_comms_filename(
+                tuple(feed_entries),
+                suffix="-agent-question.md",
+            )
+            inp = task_status_input_from_command_body(
+                body,
+                comms_index=comms,
+                latest_question_filename=latest_question,
+            )
 
             def read_comms_file(filename: str, task_name: str = name) -> str | None:
                 return self.store.get_comms(task_name, filename)
