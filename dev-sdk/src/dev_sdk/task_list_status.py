@@ -14,6 +14,7 @@ _CANCELLED_ERRORS = frozenset({"Cancelled", "Cancelled."})
 class TaskListStatus(str, Enum):
     IDLE = "idle"
     WORKER_ISSUE = "worker_issue"
+    SYNCING = "syncing"
     RUNNING = "running"
     FAILED = "failed"
     WAITING_FOR_ANSWERS = "waiting_for_answers"
@@ -53,14 +54,21 @@ def _question_comms_status(content: str | None) -> TaskListStatus:
 
 
 def resolve_task_list_status(inp: TaskStatusInput) -> TaskListStatus:
-    """Apply priority ladder: worker issue → running → failed → waiting → complete → user activity → idle."""
-    if inp.queued or inp.pending_state == "worker_offline":
+    """Apply priority ladder: worker offline → syncing → running → failed → waiting → complete → user activity → idle."""
+    if inp.pending_state == "worker_offline":
         return TaskListStatus.WORKER_ISSUE
 
-    if inp.active or inp.pending_state == "syncing":
+    if inp.pending_state == "syncing":
+        return TaskListStatus.SYNCING
+
+    if inp.active:
         return TaskListStatus.RUNNING
+
+    if inp.queued:
+        return TaskListStatus.WORKER_ISSUE
+
     if inp.command and not inp.active:
-        return TaskListStatus.RUNNING
+        return TaskListStatus.SYNCING
 
     if inp.command_error and not is_cancelled_error(inp.command_error):
         return TaskListStatus.FAILED
