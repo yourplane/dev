@@ -5,6 +5,7 @@ from dev_sdk.task_list_status import (
     TaskStatusInput,
     enrich_task_status_input_with_comms,
     is_cancelled_error,
+    latest_feed_comms_filename,
     resolve_task_list_status,
     task_status_input_from_command_body,
 )
@@ -193,8 +194,6 @@ def test_is_cancelled_error() -> None:
 
 
 def test_latest_feed_comms_filename_picks_newest_by_created_at() -> None:
-    from dev_sdk.task_list_status import latest_feed_comms_filename
-
     entries = (
         ("019-agent-question.md", 100.0),
         ("032-agent-question.md", 200.0),
@@ -202,14 +201,40 @@ def test_latest_feed_comms_filename_picks_newest_by_created_at() -> None:
     assert latest_feed_comms_filename(entries, suffix="-agent-question.md") == "032-agent-question.md"
 
 
-def test_question_status_uses_feed_latest_not_index_tail() -> None:
+def test_latest_feed_comms_filename_without_suffix() -> None:
+    entries = (
+        ("051-agent-question.md", 100.0),
+        ("052-agent-implement.md", 200.0),
+    )
+    assert latest_feed_comms_filename(entries) == "052-agent-implement.md"
+
+
+def test_question_status_when_latest_feed_is_question() -> None:
     open_q = (
         '{"intro": "Need clarity", "questions": [{"id": "q1", "text": "Which?", '
         '"options": [{"label": "A"}, {"label": "B"}]}]}\n'
     )
     inp = TaskStatusInput(
         comms_index=("032-agent-question.md", "051-agent-question.md"),
-        latest_question_filename="032-agent-question.md",
+        latest_feed_comms_filename="032-agent-question.md",
         latest_question_content=open_q,
     )
     assert resolve_task_list_status(inp) == TaskListStatus.WAITING_FOR_ANSWERS
+
+
+def test_implement_complete_when_latest_feed_is_implement() -> None:
+    empty_q = '{"intro": "done", "questions": []}\n'
+    inp = TaskStatusInput(
+        comms_index=("051-agent-question.md", "052-agent-implement.md"),
+        latest_feed_comms_filename="052-agent-implement.md",
+        latest_question_content=empty_q,
+    )
+    assert resolve_task_list_status(inp) == TaskListStatus.IMPLEMENT_COMPLETE
+
+
+def test_user_comment_when_latest_feed_is_user() -> None:
+    inp = TaskStatusInput(
+        comms_index=("052-agent-implement.md", "057-user.md"),
+        latest_feed_comms_filename="057-user.md",
+    )
+    assert resolve_task_list_status(inp) == TaskListStatus.USER_COMMENT

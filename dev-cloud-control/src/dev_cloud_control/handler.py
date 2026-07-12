@@ -514,14 +514,12 @@ class Router:
                 and fi.delete_status != "deleted"
                 and fi.id != "index.txt"
             ]
-            latest_question = latest_feed_comms_filename(
-                tuple(feed_entries),
-                suffix="-agent-question.md",
-            )
+            feed_tuple = tuple(feed_entries)
+            latest_feed = latest_feed_comms_filename(feed_tuple)
             inp = task_status_input_from_command_body(
                 body,
                 comms_index=comms,
-                latest_question_filename=latest_question,
+                latest_feed_comms_filename=latest_feed,
             )
 
             def read_comms_file(filename: str, task_name: str = name) -> str | None:
