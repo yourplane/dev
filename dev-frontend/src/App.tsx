@@ -76,7 +76,8 @@ export function Layout() {
 const DEFAULT_TAB_TITLE = 'Dev – Task management'
 
 const TASK_STATUS_LABELS: Record<Exclude<TaskListStatus, 'idle'>, string> = {
-  worker_issue: 'Worker offline or queued',
+  worker_issue: 'Worker offline',
+  syncing: 'Command syncing — waiting for worker',
   running: 'Command in progress',
   failed: 'Last command failed',
   waiting_for_answers: 'Waiting for question answers',
@@ -2819,7 +2820,7 @@ export function TaskCommsPageContent({
                 <span className="command-spinner" aria-hidden />{' '}
                 {pendingCommandState === 'worker_offline'
                   ? 'Worker offline — command queued'
-                  : 'Syncing to worker…'}
+                  : `Syncing: ${COMMAND_LABEL[pendingCommand] ?? pendingCommand}`}
               </p>
               <button
                 type="button"

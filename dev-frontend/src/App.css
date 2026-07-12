@@ -154,6 +154,33 @@
   animation: command-spin 0.8s linear infinite;
 }
 
+.task-status-icon--syncing {
+  border-radius: 50%;
+  background: #f3f4f6;
+  border: 1.5px solid #9ca3af;
+  position: relative;
+}
+
+.task-status-icon--syncing::after {
+  content: '...';
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.45rem;
+  font-weight: 700;
+  color: #6b7280;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  animation: task-status-syncing-dots 1.1s ease-in-out infinite;
+}
+
+@keyframes task-status-syncing-dots {
+  0%, 100% { opacity: 0.35; transform: translateY(0); }
+  50% { opacity: 1; transform: translateY(-1px); }
+}
+
 .task-status-icon--worker_issue {
   border-radius: 50%;
   background: #fef3c7;
