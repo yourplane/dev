@@ -15,7 +15,7 @@ from typing import Callable
 
 import requests
 
-from dev_cloud_worker.poller import COMMS_SYNC_RETRIES, CloudPoller
+from dev_cloud_worker.poller import CloudPoller
 from dev_sdk.agent_run import (
     AgentRunError,
     run_do,
