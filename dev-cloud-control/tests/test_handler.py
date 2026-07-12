@@ -221,7 +221,7 @@ def test_command_status_shows_queued_create_task(aws_env):
     )
     tasks = json.loads(router.dispatch(_event("GET", "/tasks"))["body"])["tasks"]
     task_name = tasks[0]["name"]
-    assert tasks[0]["status"] == "worker_issue"
+    assert tasks[0]["status"] == "syncing"
     status = json.loads(router.dispatch(_event("GET", f"/tasks/{task_name}/commands"))["body"])
     assert status["queued"] is True
     assert status["active"] is False
