@@ -3,6 +3,23 @@ import { authHeaders, ensureValidIdToken, isCloudMode } from './cloudAuth';
 
 export const apiBaseUrl = import.meta.env.VITE_DEV_SERVER_URL ?? '/api';
 
+/** CloudFront SPA fallback can return index.html with HTTP 200 for missing API paths. */
+export function isSpaIndexHtmlBody(body: string): boolean {
+  const trimmed = body.trimStart();
+  if (!trimmed.startsWith('<!DOCTYPE html>') && !trimmed.toLowerCase().startsWith('<html')) {
+    return false;
+  }
+  return /<div\s+id=["']root["']/i.test(trimmed);
+}
+
+async function readTextResponse(res: Response): Promise<string> {
+  const text = await res.text();
+  if (isSpaIndexHtmlBody(text)) {
+    throw new Error('Resource not found');
+  }
+  return text;
+}
+
 function apiErrorMessage(httpStatus: number, detail: string): string {
   if (isCloudMode()) {
     if (httpStatus === 401 || httpStatus === 403) {
@@ -611,7 +628,7 @@ export const api = {
       }
       throw new Error(detail || `HTTP ${res.status}`);
     }
-    return res.text();
+    return readTextResponse(res);
   },
 
   postTaskComms(taskName: string, content: string): Promise<{ filename: string }> {
@@ -699,7 +716,7 @@ export const api = {
       }
       throw new Error(detail || `HTTP ${res.status}`);
     }
-    return res.text();
+    return readTextResponse(res);
   },
 
   /**

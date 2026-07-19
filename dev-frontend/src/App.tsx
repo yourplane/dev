@@ -2012,6 +2012,10 @@ export function TaskCommsPageContent({
         if (activeLog && (prev[activeLog] ?? '').length > 0) {
           next[activeLog] = prev[activeLog]
         }
+        const activeBash = activeBashCommsFilenameRef.current
+        if (activeBash && (prev[activeBash] ?? '').length > 0) {
+          next[activeBash] = prev[activeBash]
+        }
         return next
       })
     } catch (e) {
@@ -2143,7 +2147,12 @@ export function TaskCommsPageContent({
         })
         if (opts?.prefetchNew && newEntries.length > 0) {
           const activeLog = activeLogFilenameRef.current
-          const toFetch = newEntries.filter((entry) => !(entry.type === 'log' && entry.id === activeLog))
+          const activeBash = activeBashCommsFilenameRef.current
+          const toFetch = newEntries.filter((entry) => {
+            if (entry.type === 'log' && entry.id === activeLog) return false
+            if (entry.type === 'comms' && entry.id === activeBash) return false
+            return true
+          })
           const texts = await Promise.all(
             toFetch.map((entry) =>
               entry.type === 'comms'
@@ -2158,6 +2167,9 @@ export function TaskCommsPageContent({
             })
             newEntries.forEach((entry) => {
               if (entry.type === 'log' && entry.id === activeLog) {
+                next[entry.id] = prev[entry.id] ?? ''
+              }
+              if (entry.type === 'comms' && entry.id === activeBash) {
                 next[entry.id] = prev[entry.id] ?? ''
               }
             })
