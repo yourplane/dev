@@ -315,10 +315,12 @@ class CommandExecutor:
             error = str(e)
         finally:
             cancel_flag.clear()
+
+        try:
+            write_outbox(task_dir, OutboxEntry(error=error, result=result or {}))
+        finally:
             with self._running_lock:
                 self._running_tasks.discard(task_name)
-
-        write_outbox(task_dir, OutboxEntry(error=error, result=result or {}))
 
     def _task_result(self, task_name: str) -> dict:
         task_dir = self.tasks_root / task_name
