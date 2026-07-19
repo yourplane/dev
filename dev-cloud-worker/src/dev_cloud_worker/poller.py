@@ -12,6 +12,7 @@ from dev_sdk.worker_sync import (
     OutboxEntry,
     clear_outbox,
     clear_streams,
+    flush_streams,
     forward_progress,
     has_outbox,
     read_outbox,
@@ -60,6 +61,7 @@ class CloudPoller:
 
         try:
             self._sync_with_burst_retries(task_name, entry, task_lock=task_lock)
+            flush_streams(self.client, task_dir, task_name)
             self.client.complete_command(
                 task_name,
                 error=entry.error,

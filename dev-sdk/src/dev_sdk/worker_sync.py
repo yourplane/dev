@@ -14,6 +14,8 @@ OUTBOX_FILE = "outbox.json"
 STREAMS_FILE = "streams.json"
 TAIL_STATE_FILE = "tail_state.json"
 PROGRESS_FILE = "progress.jsonl"
+# Match control-plane STREAM_CHUNK_MAX_BYTES so each upload stays bounded.
+STREAM_UPLOAD_MAX_BYTES = 250_000
 
 
 class SyncPushClient(Protocol):
@@ -93,9 +95,14 @@ def read_streams(task_dir: Path) -> StreamsState:
 
 
 def write_streams(task_dir: Path, state: StreamsState) -> None:
+    existing = read_streams(task_dir)
+    merged = StreamsState(
+        active_log=state.active_log if state.active_log is not None else existing.active_log,
+        active_bash=state.active_bash if state.active_bash is not None else existing.active_bash,
+    )
     path = streams_path(task_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(asdict(state), indent=2) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(asdict(merged), indent=2) + "\n", encoding="utf-8")
 
 
 def clear_streams(task_dir: Path) -> None:
@@ -279,15 +286,19 @@ class LogUploadClient(Protocol):
     ) -> None: ...
 
 
-def _read_file_from_offset(path: Path, offset: int) -> tuple[bytes, int]:
+def _read_file_from_offset(path: Path, offset: int, *, max_bytes: int | None = None) -> tuple[bytes, int]:
     if not path.is_file():
         return b"", offset
     size = path.stat().st_size
     if size <= offset:
         return b"", size
+    to_read = size - offset
+    if max_bytes is not None:
+        to_read = min(to_read, max_bytes)
     with path.open("rb") as f:
         f.seek(offset)
-        return f.read(), size
+        data = f.read(to_read)
+    return data, offset + len(data)
 
 
 def tail_log_file(
@@ -304,10 +315,12 @@ def tail_log_file(
         state.log_filename = filename
         state.log_offset = 0
         client.upload_log_chunk(task_name, filename, b"")
-    chunk, total = _read_file_from_offset(log_path, state.log_offset)
+    chunk, new_offset = _read_file_from_offset(
+        log_path, state.log_offset, max_bytes=STREAM_UPLOAD_MAX_BYTES
+    )
     if chunk:
         client.upload_log_chunk(task_name, filename, chunk)
-        state.log_offset = total
+        state.log_offset = new_offset
     write_tail_state(task_dir, state)
     return state
 
@@ -326,7 +339,9 @@ def tail_bash_file(
         state.bash_filename = filename
         state.bash_offset = 0
         client.upload_log_chunk(task_name, filename, b"", kind="bash")
-    chunk, total = _read_file_from_offset(bash_path, state.bash_offset)
+    chunk, new_offset = _read_file_from_offset(
+        bash_path, state.bash_offset, max_bytes=STREAM_UPLOAD_MAX_BYTES
+    )
     if chunk:
         client.upload_log_chunk(
             task_name,
@@ -334,7 +349,7 @@ def tail_bash_file(
             chunk,
             kind="bash",
         )
-        state.bash_offset = total
+        state.bash_offset = new_offset
     write_tail_state(task_dir, state)
     return state
 
@@ -346,8 +361,6 @@ def tail_streams(
     streams: StreamsState,
     state: TailState,
 ) -> TailState:
-    logs_dir = task_dir / LOGS_DIR
-
     log_name = streams.active_log
     if log_name:
         state = tail_log_file(client, task_dir, task_name, log_name, state)
@@ -357,6 +370,38 @@ def tail_streams(
         state = tail_bash_file(client, task_dir, task_name, bash_name, state)
 
     return state
+
+
+def _streams_fully_uploaded(
+    task_dir: Path, streams: StreamsState, state: TailState
+) -> bool:
+    if streams.active_log:
+        log_path = task_dir / LOGS_DIR / streams.active_log
+        if log_path.is_file() and log_path.stat().st_size > state.log_offset:
+            return False
+    if streams.active_bash:
+        bash_path = comms_dir(task_dir) / streams.active_bash
+        if bash_path.is_file() and bash_path.stat().st_size > state.bash_offset:
+            return False
+    return True
+
+
+def flush_streams(
+    client: LogUploadClient,
+    task_dir: Path,
+    task_name: str,
+) -> None:
+    """Upload any remaining log/bash bytes before command completion."""
+    streams = read_streams(task_dir)
+    if not streams.active_log and not streams.active_bash:
+        return
+    state = read_tail_state(task_dir)
+    while not _streams_fully_uploaded(task_dir, streams, state):
+        before_log = state.log_offset
+        before_bash = state.bash_offset
+        state = tail_streams(client, task_dir, task_name, streams, state)
+        if state.log_offset == before_log and state.bash_offset == before_bash:
+            raise RuntimeError(f"Stream flush stalled for {task_name}")
 
 
 class ProgressClient(Protocol):
