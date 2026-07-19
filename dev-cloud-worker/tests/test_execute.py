@@ -7,9 +7,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dev_cloud_worker.main import CommandExecutor
+from dev_cloud_worker.main import WORKER_REBOOT_MESSAGE, CommandExecutor
 from dev_sdk.comms import add_comms
-from dev_sdk.worker_sync import has_outbox, read_outbox
+from dev_sdk.worker_sync import has_outbox, read_outbox, write_outbox
 
 
 @pytest.fixture
@@ -82,3 +82,32 @@ def test_cancel_command_does_not_write_outbox(task_dir: Path) -> None:
     executor = CommandExecutor(task_dir.parent)
     executor.execute(task_dir.name, {"command": "cancel", "payload": {}})
     assert not has_outbox(task_dir)
+
+
+def test_finish_keeps_running_until_outbox_written(
+    task_dir: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: orphan reconciliation must not run between finish and outbox."""
+    executor = CommandExecutor(task_dir.parent)
+    task_name = task_dir.name
+    monkeypatch.setattr(executor, "_archive", MagicMock())
+
+    real_write_outbox = write_outbox
+
+    def write_outbox_while_still_running(td, entry):
+        assert executor.is_running(task_name)
+        executor.reconcile_orphans([{"task_name": task_name, "command": {}}])
+        assert not has_outbox(td)
+        real_write_outbox(td, entry)
+
+    monkeypatch.setattr("dev_cloud_worker.main.write_outbox", write_outbox_while_still_running)
+
+    assert executor.try_start(task_name)
+    executor.execute(task_name, {"command": "archive", "payload": {}})
+
+    assert not executor.is_running(task_name)
+    entry = read_outbox(task_dir)
+    assert entry is not None
+    assert entry.error is None
+    assert entry.error != WORKER_REBOOT_MESSAGE
