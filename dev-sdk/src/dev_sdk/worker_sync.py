@@ -279,6 +279,17 @@ class LogUploadClient(Protocol):
     ) -> None: ...
 
 
+def _read_file_from_offset(path: Path, offset: int) -> tuple[bytes, int]:
+    if not path.is_file():
+        return b"", offset
+    size = path.stat().st_size
+    if size <= offset:
+        return b"", size
+    with path.open("rb") as f:
+        f.seek(offset)
+        return f.read(), size
+
+
 def tail_log_file(
     client: LogUploadClient,
     task_dir: Path,
@@ -293,14 +304,10 @@ def tail_log_file(
         state.log_filename = filename
         state.log_offset = 0
         client.upload_log_chunk(task_name, filename, b"")
-    data = log_path.read_bytes()
-    if len(data) > state.log_offset:
-        client.upload_log_chunk(
-            task_name,
-            filename,
-            data[state.log_offset :],
-        )
-        state.log_offset = len(data)
+    chunk, total = _read_file_from_offset(log_path, state.log_offset)
+    if chunk:
+        client.upload_log_chunk(task_name, filename, chunk)
+        state.log_offset = total
     write_tail_state(task_dir, state)
     return state
 
@@ -319,15 +326,15 @@ def tail_bash_file(
         state.bash_filename = filename
         state.bash_offset = 0
         client.upload_log_chunk(task_name, filename, b"", kind="bash")
-    data = bash_path.read_bytes()
-    if len(data) > state.bash_offset:
+    chunk, total = _read_file_from_offset(bash_path, state.bash_offset)
+    if chunk:
         client.upload_log_chunk(
             task_name,
             filename,
-            data[state.bash_offset :],
+            chunk,
             kind="bash",
         )
-        state.bash_offset = len(data)
+        state.bash_offset = total
     write_tail_state(task_dir, state)
     return state
 

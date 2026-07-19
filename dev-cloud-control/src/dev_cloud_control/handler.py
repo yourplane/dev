@@ -1380,7 +1380,7 @@ class Router:
         else:
             self.store.append_stream(task_name, "bash", filename, chunk)
             field = "active_bash_comms_filename"
-            feed_type = None
+            feed_type = "comms"
         task = self.store.get_task(task_name)
         if task and task.active_command:
             active = dict(task.active_command)
@@ -1391,11 +1391,21 @@ class Router:
                 task_name,
                 FeedItem(type="log", id=filename, created_at=time.time(), origin="worker"),
             )
+        elif feed_type == "comms" and not self._feed_has_comms(task_name, filename):
+            self.store.put_feed_item(
+                task_name,
+                FeedItem(type="comms", id=filename, created_at=time.time(), origin="worker"),
+            )
         return _no_content()
 
     def _feed_has_log(self, task_name: str, filename: str) -> bool:
         return any(
             i.type == "log" and i.id == filename for i in self.store.list_feed_items(task_name)
+        )
+
+    def _feed_has_comms(self, task_name: str, filename: str) -> bool:
+        return any(
+            i.type == "comms" and i.id == filename for i in self.store.list_feed_items(task_name)
         )
 
     def worker_sync(self, event: dict, task_name: str) -> dict:

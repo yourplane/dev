@@ -487,20 +487,8 @@ class CloudStore:
         return self.append_stream(task_name, kind, stream_id, body)
 
     def append_log(self, task_name: str, filename: str, chunk: bytes) -> int:
-        total = self.append_stream(task_name, "log", filename, chunk)
-        key = self._log_key(task_name, filename)
-        existing = b""
-        try:
-            resp = self._s3.get_object(Bucket=self._bucket, Key=key)
-            existing = resp["Body"].read()
-        except ClientError as e:
-            if e.response["Error"]["Code"] != "NoSuchKey":
-                raise
-        if chunk:
-            self._s3.put_object(Bucket=self._bucket, Key=key, Body=existing + chunk)
-        elif not existing:
-            self._s3.put_object(Bucket=self._bucket, Key=key, Body=b"")
-        return total
+        # Live streaming reads DynamoDB chunks only; avoid S3 get+put on every upload.
+        return self.append_stream(task_name, "log", filename, chunk)
 
     def get_log(self, task_name: str, filename: str) -> str:
         data, _ = self.read_stream_from_offset(task_name, "log", filename, 0)
