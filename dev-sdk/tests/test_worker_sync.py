@@ -4,16 +4,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dev_sdk.comms import add_comms, comms_dir, index_path, read_index
+from dev_sdk.comms import LOGS_DIR, add_comms, comms_dir, index_path, read_index
 from dev_sdk.worker_sync import (
     OutboxEntry,
+    StreamsState,
+    TailState,
     collect_comms_push_items,
+    flush_streams,
     has_outbox,
     merge_index_after_pull,
     read_outbox,
+    read_streams,
     repair_local_index,
     sync_task_comms_origin,
+    tail_bash_file,
+    tail_log_file,
     write_outbox,
+    write_streams,
+    STREAM_UPLOAD_MAX_BYTES,
 )
 
 
@@ -88,3 +96,104 @@ def test_sync_applies_cloud_index_without_dropping_locals(tmp_path: Path) -> Non
     sync_task_comms_origin(client, task, "task-a")
     assert "019-agent-question.md" in read_index(task)
     assert orphan.read_text(encoding="utf-8") == "orphan\n"
+
+
+class FakeUploadClient:
+    def __init__(self) -> None:
+        self.uploads: list[tuple[str, str, bytes, str]] = []
+
+    def upload_log_chunk(
+        self,
+        task_name: str,
+        filename: str,
+        chunk: bytes,
+        *,
+        kind: str = "log",
+    ) -> None:
+        self.uploads.append((task_name, filename, chunk, kind))
+
+
+def test_tail_log_file_uploads_incrementally(tmp_path: Path) -> None:
+    task = tmp_path / "task-a"
+    logs = task / LOGS_DIR
+    logs.mkdir(parents=True)
+    log_path = logs / "dev-implement.log"
+    log_path.write_bytes(b"line1\n")
+    client = FakeUploadClient()
+    state = TailState()
+
+    state = tail_log_file(client, task, "task-a", "dev-implement.log", state)
+    assert state.log_offset == len(b"line1\n")
+    assert client.uploads == [("task-a", "dev-implement.log", b"", "log"), ("task-a", "dev-implement.log", b"line1\n", "log")]
+
+    log_path.write_bytes(b"line1\nline2\n")
+    state = tail_log_file(client, task, "task-a", "dev-implement.log", state)
+    assert state.log_offset == len(b"line1\nline2\n")
+    assert client.uploads[-1] == ("task-a", "dev-implement.log", b"line2\n", "log")
+
+
+def test_tail_bash_file_uploads_incrementally(tmp_path: Path) -> None:
+    task = tmp_path / "task-a"
+    cdir = comms_dir(task)
+    cdir.mkdir(parents=True)
+    bash_path = cdir / "001-user-bash.md"
+    bash_path.write_bytes(b"out1\n")
+    client = FakeUploadClient()
+    state = TailState()
+
+    state = tail_bash_file(client, task, "task-a", "001-user-bash.md", state)
+    assert state.bash_offset == len(b"out1\n")
+    assert client.uploads[-1] == ("task-a", "001-user-bash.md", b"out1\n", "bash")
+
+    bash_path.write_bytes(b"out1\nout2\n")
+    state = tail_bash_file(client, task, "task-a", "001-user-bash.md", state)
+    assert state.bash_offset == len(b"out1\nout2\n")
+    assert client.uploads[-1] == ("task-a", "001-user-bash.md", b"out2\n", "bash")
+
+
+def test_write_streams_merges_log_and_bash(tmp_path: Path) -> None:
+    task = tmp_path / "task-a"
+    task.mkdir()
+    write_streams(task, StreamsState(active_log="agent.log"))
+    write_streams(task, StreamsState(active_bash="001-user-bash.md"))
+    streams = read_streams(task)
+    assert streams.active_log == "agent.log"
+    assert streams.active_bash == "001-user-bash.md"
+
+
+def test_tail_log_file_uploads_bounded_chunks(tmp_path: Path) -> None:
+    task = tmp_path / "task-a"
+    logs = task / LOGS_DIR
+    logs.mkdir(parents=True)
+    log_path = logs / "dev-implement.log"
+    chunk_size = STREAM_UPLOAD_MAX_BYTES + 50_000
+    log_path.write_bytes(b"x" * chunk_size)
+    client = FakeUploadClient()
+    state = TailState()
+
+    state = tail_log_file(client, task, "task-a", "dev-implement.log", state)
+    data_uploads = [u for u in client.uploads if u[2]]
+    assert len(data_uploads) == 1
+    assert len(data_uploads[0][2]) == STREAM_UPLOAD_MAX_BYTES
+    assert state.log_offset == STREAM_UPLOAD_MAX_BYTES
+
+    state = tail_log_file(client, task, "task-a", "dev-implement.log", state)
+    data_uploads = [u for u in client.uploads if u[2]]
+    assert len(data_uploads) == 2
+    assert len(data_uploads[1][2]) == 50_000
+    assert state.log_offset == chunk_size
+
+
+def test_flush_streams_uploads_remaining_log_bytes(tmp_path: Path) -> None:
+    task = tmp_path / "task-a"
+    logs = task / LOGS_DIR
+    logs.mkdir(parents=True)
+    log_name = "dev-implement.log"
+    (logs / log_name).write_bytes(b"hello\nworld\n")
+    write_streams(task, StreamsState(active_log=log_name))
+    client = FakeUploadClient()
+
+    flush_streams(client, task, "task-a")
+
+    uploaded = b"".join(chunk for _, _, chunk, kind in client.uploads if kind == "log" and chunk)
+    assert uploaded == b"hello\nworld\n"

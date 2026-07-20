@@ -8,8 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from dev_cloud_worker.poller import COMMS_SYNC_RETRIES, CloudPoller
-from dev_sdk.comms import add_comms
-from dev_sdk.worker_sync import OutboxEntry, has_outbox, write_outbox
+from dev_sdk.comms import LOGS_DIR, add_comms
+from dev_sdk.worker_sync import OutboxEntry, StreamsState, has_outbox, write_outbox, write_streams
 
 
 @pytest.fixture
@@ -26,6 +26,7 @@ class FakeClient:
         self.fail_times = fail_times
         self.complete_calls: list[tuple] = []
         self.health_calls: list[str] = []
+        self.uploads: list[tuple[str, str, bytes, str]] = []
 
     def sync_push(self, task_name: str, items: list[dict]) -> list[dict]:
         if self.fail_times:
@@ -33,8 +34,10 @@ class FakeClient:
             raise RuntimeError("sync failed")
         return []
 
-    def upload_log_chunk(self, task_name: str, filename: str, chunk: bytes, *, kind: str = "log") -> None:
-        pass
+    def upload_log_chunk(
+        self, task_name: str, filename: str, chunk: bytes, *, kind: str = "log"
+    ) -> None:
+        self.uploads.append((task_name, filename, chunk, kind))
 
     def progress(self, task_name: str, message: str) -> None:
         pass
@@ -63,6 +66,26 @@ def test_poller_completes_outbox_after_sync(task_dir: Path) -> None:
     assert len(client.complete_calls) == 1
     assert client.complete_calls[0][2] == {"branch": "main"}
     assert client.health_calls[-1] == "healthy"
+
+
+def test_poller_flushes_remaining_log_before_complete(task_dir: Path) -> None:
+    client = FakeClient()
+    poller = CloudPoller(client, task_dir.parent)
+    logs = task_dir / LOGS_DIR
+    logs.mkdir(parents=True)
+    log_name = "dev-implement.log"
+    (logs / log_name).write_bytes(b"tail-me\n")
+    write_streams(task_dir, StreamsState(active_log=log_name))
+    write_outbox(task_dir, OutboxEntry(error=None, result={"branch": "main"}))
+
+    poller.process_outbox(task_dir.name)
+
+    uploaded = b"".join(
+        chunk for _, _, chunk, kind in client.uploads if kind == "log" and chunk
+    )
+    assert uploaded == b"tail-me\n"
+    assert not has_outbox(task_dir)
+    assert len(client.complete_calls) == 1
 
 
 def test_poller_marks_unhealthy_after_burst_retries(

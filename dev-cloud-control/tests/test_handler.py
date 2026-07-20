@@ -320,6 +320,20 @@ def test_worker_upload_bash_stream(aws_env):
     poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
     task_name = json.loads(poll["body"])["work"][0]["task_name"]
     bash_name = "001-user-bash.md"
+
+    resp = router.dispatch(
+        _event(
+            "POST",
+            f"/worker/tasks/{task_name}/logs",
+            {"filename": bash_name, "kind": "bash", "chunk_b64": ""},
+        )
+    )
+    assert resp["statusCode"] == 204
+    task = store.get_task(task_name)
+    assert task.active_command["active_bash_comms_filename"] == bash_name
+    feed = store.list_feed_items(task_name)
+    assert any(f.type == "comms" and f.id == bash_name for f in feed)
+
     router.dispatch(
         _event(
             "POST",
@@ -334,6 +348,41 @@ def test_worker_upload_bash_stream(aws_env):
     data, total = store.read_stream_from_offset(task_name, "bash", bash_name, 0)
     assert data.decode("utf-8") == "output\n"
     assert total == len(b"output\n")
+
+
+def test_task_stream_emits_bash_and_reconnect(aws_env):
+    import base64
+
+    router = Router()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1", "display_name": "Main"}))
+    router.dispatch(
+        _event(
+            "POST",
+            "/tasks",
+            {"title": "Bash SSE", "environment_id": "env-1", "repo": None},
+        )
+    )
+    poll = router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-1"}))
+    task_name = json.loads(poll["body"])["work"][0]["task_name"]
+    bash_name = "001-user-bash.md"
+    router.dispatch(
+        _event(
+            "POST",
+            f"/worker/tasks/{task_name}/logs",
+            {
+                "filename": bash_name,
+                "kind": "bash",
+                "chunk_b64": base64.b64encode(b"live bash\n").decode("ascii"),
+            },
+        )
+    )
+    ev = _event("GET", f"/tasks/{task_name}/stream", query="stream_duration=0.5")
+    resp = router.dispatch(ev)
+    assert resp["statusCode"] == 200
+    assert resp["headers"]["Content-Type"] == "text/event-stream"
+    assert "event: bash" in resp["body"]
+    assert "live bash" in resp["body"]
+    assert "event: reconnect" in resp["body"]
 
 
 def test_comms_sync_blocks_command_until_worker_pulls(aws_env):
