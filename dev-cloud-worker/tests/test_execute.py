@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dev_cloud_worker.main import WORKER_REBOOT_MESSAGE, CommandExecutor
+from dev_cloud_worker.main import WORKER_REBOOT_MESSAGE, CommandCompletionTracker, CommandExecutor
 from dev_sdk.comms import add_comms
 from dev_sdk.worker_sync import has_outbox, read_outbox, write_outbox
 
@@ -111,3 +111,30 @@ def test_finish_keeps_running_until_outbox_written(
     assert entry is not None
     assert entry.error is None
     assert entry.error != WORKER_REBOOT_MESSAGE
+
+
+def test_reconcile_orphans_skips_after_outbox_reported(task_dir: Path) -> None:
+    """Regression: stale active_commands after outbox processing must not re-queue reboot."""
+    tracker = CommandCompletionTracker()
+    executor = CommandExecutor(task_dir.parent, completion_tracker=tracker)
+    task_name = task_dir.name
+
+    tracker.mark_reported(task_name)
+    executor.reconcile_orphans([{"task_name": task_name, "command": {}}])
+
+    assert not has_outbox(task_dir)
+
+
+def test_reconcile_orphans_clears_reported_when_command_inactive(task_dir: Path) -> None:
+    tracker = CommandCompletionTracker()
+    executor = CommandExecutor(task_dir.parent, completion_tracker=tracker)
+    task_name = task_dir.name
+
+    tracker.mark_reported(task_name)
+    executor.reconcile_orphans([])
+    executor.reconcile_orphans([{"task_name": task_name, "command": {}}])
+
+    assert has_outbox(task_dir)
+    entry = read_outbox(task_dir)
+    assert entry is not None
+    assert entry.error == WORKER_REBOOT_MESSAGE

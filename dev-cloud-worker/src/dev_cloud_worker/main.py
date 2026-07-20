@@ -53,6 +53,26 @@ ENV_ID_FILE = CONFIG_DIR / "environment_id"
 DISPLAY_NAME_FILE = CONFIG_DIR / "display_name"
 
 
+class CommandCompletionTracker:
+    """Skip orphan reconciliation while the control plane still lists a reported command."""
+
+    def __init__(self) -> None:
+        self._awaiting_ack: set[str] = set()
+        self._lock = threading.Lock()
+
+    def mark_reported(self, task_name: str) -> None:
+        with self._lock:
+            self._awaiting_ack.add(task_name)
+
+    def prune_inactive(self, active_task_names: set[str]) -> None:
+        with self._lock:
+            self._awaiting_ack.intersection_update(active_task_names)
+
+    def is_awaiting_ack(self, task_name: str) -> bool:
+        with self._lock:
+            return task_name in self._awaiting_ack
+
+
 def _control_plane_url() -> str:
     url = os.environ.get("CONTROL_PLANE_URL", "").rstrip("/")
     if not url:
@@ -220,13 +240,19 @@ class WorkerClient:
 class CommandExecutor:
     """Runs commands locally; poller owns all cloud writes except git-token reads."""
 
-    def __init__(self, tasks_root: Path) -> None:
+    def __init__(
+        self,
+        tasks_root: Path,
+        *,
+        completion_tracker: CommandCompletionTracker | None = None,
+    ) -> None:
         self.tasks_root = tasks_root
         self.manager = TaskManager(tasks_root)
         self._cancel_flags: dict[str, threading.Event] = {}
         self._cancel_lock = threading.Lock()
         self._running_tasks: set[str] = set()
         self._running_lock = threading.Lock()
+        self._completion_tracker = completion_tracker or CommandCompletionTracker()
 
     def try_start(self, task_name: str) -> bool:
         with self._running_lock:
@@ -244,9 +270,17 @@ class CommandExecutor:
             self._running_tasks.discard(task_name)
 
     def reconcile_orphans(self, active_commands: list[dict]) -> None:
+        active_names = {
+            name
+            for item in active_commands
+            if (name := item.get("task_name"))
+        }
+        self._completion_tracker.prune_inactive(active_names)
         for item in active_commands:
             task_name = item.get("task_name")
             if not task_name or self.is_running(task_name):
+                continue
+            if self._completion_tracker.is_awaiting_ack(task_name):
                 continue
             task_dir = self.tasks_root / task_name
             if has_outbox(task_dir):
@@ -501,8 +535,9 @@ def run_loop() -> None:
     _load_cursor_api_key()
     client = WorkerClient()
     tasks_root = _tasks_root()
-    executor = CommandExecutor(tasks_root)
-    poller = CloudPoller(client, tasks_root)
+    completion_tracker = CommandCompletionTracker()
+    executor = CommandExecutor(tasks_root, completion_tracker=completion_tracker)
+    poller = CloudPoller(client, tasks_root, completion_tracker=completion_tracker)
     stream_supervisor = StreamUploadSupervisor(client, tasks_root)
     task_locks: dict[str, threading.Lock] = {}
     task_locks_guard = threading.Lock()
