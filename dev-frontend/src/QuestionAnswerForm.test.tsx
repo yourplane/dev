@@ -11,7 +11,7 @@ vi.mock('./api', () => ({
 }))
 
 const payload = {
-  intro: 'Please answer',
+  summary: 'Please answer',
   questions: [
     {
       id: 'q1',
@@ -53,7 +53,7 @@ describe('QuestionAnswerForm', () => {
       <QuestionAnswerForm
         taskName="t"
         sourceFilename="002-agent-question.md"
-        payload={{ intro: 'Done', questions: [] }}
+        payload={{ summary: 'Done', questions: [] }}
       />,
     )
     expect(screen.getByText('No questions from the agent')).toBeInTheDocument()
@@ -75,7 +75,15 @@ describe('QuestionAnswerForm', () => {
       expect(screen.getByText('Unlock to edit')).toBeInTheDocument()
     })
     const { api } = await import('./api')
-    expect(api.postQuestionAnswers).toHaveBeenCalled()
+    expect(api.postQuestionAnswers).toHaveBeenCalledWith('t', {
+      source: '002-agent-question.md',
+      answers: [{
+        id: 'q1',
+        text: 'Which database?',
+        selected: ['SQLite'],
+        free_text: '',
+      }],
+    })
     expect(api.setQuestionAnswersDraft).toHaveBeenCalledWith(
       't',
       '002-agent-question.md',
@@ -89,7 +97,7 @@ describe('QuestionAnswerForm', () => {
         taskName="t"
         sourceFilename="002-agent-question.md"
         payload={payload}
-        persistedAnswers={{ selections: { q1: 'Postgres' }, freeText: {} }}
+        persistedAnswers={{ selections: { q1: ['Postgres'] }, freeText: {} }}
       />,
     )
     await waitFor(() => {
@@ -102,7 +110,7 @@ describe('QuestionAnswerForm', () => {
   it('restores editable draft over persisted answers when editing flag is set', async () => {
     const { api } = await import('./api')
     vi.mocked(api.getQuestionAnswersDraft).mockResolvedValue({
-      selections: { q1: 'SQLite' },
+      selections: { q1: ['SQLite'] },
       freeText: {},
       expandedFreeText: {},
       editing: true,
@@ -113,7 +121,7 @@ describe('QuestionAnswerForm', () => {
         taskName="t"
         sourceFilename="002-agent-question.md"
         payload={payload}
-        persistedAnswers={{ selections: { q1: 'Postgres' }, freeText: {} }}
+        persistedAnswers={{ selections: { q1: ['Postgres'] }, freeText: {} }}
       />,
     )
 
@@ -131,7 +139,7 @@ describe('QuestionAnswerForm', () => {
         taskName="t"
         sourceFilename="002-agent-question.md"
         payload={payload}
-        persistedAnswers={{ selections: { q1: 'Postgres' }, freeText: {} }}
+        persistedAnswers={{ selections: { q1: ['Postgres'] }, freeText: {} }}
       />,
     )
     await waitFor(() => {
@@ -142,22 +150,22 @@ describe('QuestionAnswerForm', () => {
       expect(api.setQuestionAnswersDraft).toHaveBeenCalledWith(
         't',
         '002-agent-question.md',
-        expect.objectContaining({ editing: true, selections: { q1: 'Postgres' } }),
+        expect.objectContaining({ editing: true, selections: { q1: ['Postgres'] } }),
       )
     })
   })
 
-  it('shows rationale and implications collapsibles for enriched questions', async () => {
+  it('shows examples and implications collapsibles for enriched questions', async () => {
     render(
       <QuestionAnswerForm
         taskName="t"
         sourceFilename="002-agent-question.md"
         payload={{
-          intro: 'Consider tradeoffs',
+          summary: 'Consider tradeoffs',
           questions: [{
             id: 'q1',
             text: 'Which approach?',
-            rationale: 'This affects service boundaries.',
+            examples: 'This affects service boundaries.',
             options: [
               { label: 'Monolith', complexity: 'low' },
               {
@@ -171,23 +179,23 @@ describe('QuestionAnswerForm', () => {
         persistedAnswers={null}
       />,
     )
-    expect(screen.getByText('Why am I asking this?')).toBeInTheDocument()
+    expect(screen.getByText('Examples')).toBeInTheDocument()
     expect(screen.getByTitle('Low complexity')).toBeInTheDocument()
     expect(screen.getByTitle('High complexity')).toBeInTheDocument()
     expect(screen.getAllByText('Architectural Implications')).toHaveLength(1)
   })
 
-  it('keeps rationale and implications visible in locked summary', async () => {
+  it('keeps examples and implications visible in locked summary', async () => {
     render(
       <QuestionAnswerForm
         taskName="t"
         sourceFilename="002-agent-question.md"
         payload={{
-          intro: '',
+          summary: '',
           questions: [{
             id: 'q1',
             text: 'Which approach?',
-            rationale: 'Boundary choice.',
+            examples: 'Boundary choice.',
             options: [{
               label: 'Microservices',
               complexity: 'high',
@@ -195,13 +203,70 @@ describe('QuestionAnswerForm', () => {
             }],
           }],
         }}
-        persistedAnswers={{ selections: { q1: 'Microservices' }, freeText: {} }}
+        persistedAnswers={{ selections: { q1: ['Microservices'] }, freeText: {} }}
       />,
     )
     await waitFor(() => {
-      expect(screen.getByText('Why am I asking this?')).toBeInTheDocument()
+      expect(screen.getByText('Examples')).toBeInTheDocument()
       expect(screen.getByTitle('High complexity')).toBeInTheDocument()
       expect(screen.getByText('Architectural Implications')).toBeInTheDocument()
     })
+  })
+
+  it('renders checkboxes for multi-choice questions', () => {
+    render(
+      <QuestionAnswerForm
+        taskName="t"
+        sourceFilename="002-agent-question.md"
+        payload={{
+          summary: '',
+          questions: [{
+            id: 'q1',
+            text: 'Pick many?',
+            multiple: true,
+            options: [{ label: 'A' }, { label: 'B' }],
+          }],
+        }}
+        persistedAnswers={null}
+      />,
+    )
+    expect(screen.getByLabelText('A')).toHaveAttribute('type', 'checkbox')
+    expect(screen.getByLabelText('B')).toHaveAttribute('type', 'checkbox')
+  })
+
+  it('clears a selected radio with the clear button', async () => {
+    render(
+      <QuestionAnswerForm
+        taskName="t"
+        sourceFilename="002-agent-question.md"
+        payload={payload}
+        persistedAnswers={null}
+      />,
+    )
+    fireEvent.click(screen.getByRole('radio', { name: 'Postgres' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Clear selection' })).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Clear selection' }))
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Submit answers' })).toBeDisabled()
+    })
+  })
+
+  it('shows response always visible and summary collapsed by default', () => {
+    render(
+      <QuestionAnswerForm
+        taskName="t"
+        sourceFilename="002-agent-question.md"
+        payload={{
+          summary: 'Hidden summary text',
+          response: 'Visible response text',
+          questions: [],
+        }}
+      />,
+    )
+    expect(screen.getByText('Visible response text')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Summary' })).toBeInTheDocument()
+    expect(screen.queryByText('Hidden summary text')).not.toBeInTheDocument()
   })
 })

@@ -6,7 +6,7 @@ import json
 import re
 from typing import Any, Literal
 
-from pydantic import BaseModel, ValidationError, field_validator
+from pydantic import BaseModel, ValidationError, field_validator, model_validator
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n(.*?)```", re.DOTALL | re.IGNORECASE)
 
@@ -22,8 +22,16 @@ class QuestionOption(BaseModel):
 class QuestionItem(BaseModel):
     id: str | None = None
     text: str
-    rationale: str | None = None
+    examples: str | None = None
+    multiple: bool = False
     options: list[QuestionOption]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_fields(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "rationale" in value and "examples" not in value:
+            value = {**value, "examples": value["rationale"]}
+        return value
 
     @field_validator("options", mode="before")
     @classmethod
@@ -40,8 +48,16 @@ class QuestionItem(BaseModel):
 
 
 class QuestionPayload(BaseModel):
-    intro: str
+    summary: str = ""
+    response: str | None = None
     questions: list[QuestionItem]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _legacy_intro(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "intro" in value and "summary" not in value:
+            value = {**value, "summary": value["intro"]}
+        return value
 
 
 def extract_json_from_text(text: str) -> str | None:
@@ -100,9 +116,19 @@ def normalize_question_payload(payload: QuestionPayload) -> QuestionPayload:
     for i, q in enumerate(payload.questions, start=1):
         qid = q.id.strip() if q.id and q.id.strip() else f"q{i}"
         questions.append(
-            QuestionItem(id=qid, text=q.text, rationale=q.rationale, options=q.options)
+            QuestionItem(
+                id=qid,
+                text=q.text,
+                examples=q.examples,
+                multiple=q.multiple,
+                options=q.options,
+            )
         )
-    return QuestionPayload(intro=payload.intro, questions=questions)
+    return QuestionPayload(
+        summary=payload.summary,
+        response=payload.response,
+        questions=questions,
+    )
 
 
 def parse_question_output(text: str) -> tuple[QuestionPayload | None, list[str]]:
@@ -127,16 +153,21 @@ def parse_question_output(text: str) -> tuple[QuestionPayload | None, list[str]]
 def format_question_payload_json(payload: QuestionPayload) -> str:
     """Canonical pretty-printed JSON for comms storage."""
     data: dict[str, Any] = {
-        "intro": payload.intro,
         "questions": [],
     }
+    if payload.summary.strip():
+        data["summary"] = payload.summary
+    if payload.response:
+        data["response"] = payload.response
     for q in payload.questions:
         item: dict[str, Any] = {
             "id": q.id,
             "text": q.text,
             "options": [_serialize_option(o) for o in q.options],
         }
-        if q.rationale:
-            item["rationale"] = q.rationale
+        if q.examples:
+            item["examples"] = q.examples
+        if q.multiple:
+            item["multiple"] = True
         data["questions"].append(item)
     return json.dumps(data, indent=2) + "\n"
