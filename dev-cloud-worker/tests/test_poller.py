@@ -7,6 +7,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from dev_cloud_worker.main import CommandCompletionTracker, CommandExecutor
 from dev_cloud_worker.poller import COMMS_SYNC_RETRIES, CloudPoller
 from dev_sdk.comms import LOGS_DIR, add_comms
 from dev_sdk.worker_sync import OutboxEntry, StreamsState, has_outbox, write_outbox, write_streams
@@ -105,3 +106,19 @@ def test_poller_marks_unhealthy_after_burst_retries(
     assert has_outbox(task_dir)
     assert client.complete_calls == []
     assert client.health_calls == ["unhealthy"]
+
+
+def test_process_outbox_then_reconcile_does_not_queue_reboot(task_dir: Path) -> None:
+    """Regression: outbox clear + stale active_commands must not create orphan outbox."""
+    client = FakeClient()
+    tracker = CommandCompletionTracker()
+    poller = CloudPoller(client, task_dir.parent, completion_tracker=tracker)
+    executor = CommandExecutor(task_dir.parent, completion_tracker=tracker)
+    task_name = task_dir.name
+    write_outbox(task_dir, OutboxEntry(error=None, result={"branch": "main"}))
+
+    poller.process_outbox(task_name)
+    executor.reconcile_orphans([{"task_name": task_name, "command": {}}])
+
+    assert not has_outbox(task_dir)
+    assert client.complete_calls == [(task_name, None, {"branch": "main"})]
