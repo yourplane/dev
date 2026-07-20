@@ -5,6 +5,8 @@ import {
   chooseNotificationDelivery,
   chooseNotificationFallbackDelivery,
   deliverTaskNotification,
+  deliverTestBrowserNotification,
+  deliverTestInAppNotification,
   detectCompletionEvents,
   loadNotificationPreferences,
   saveNotificationPreferences,
@@ -120,5 +122,46 @@ describe('taskNotifications', () => {
   it('uses tab title fallback when browser delivery fails in the background', () => {
     expect(chooseNotificationFallbackDelivery({ browserEnabled: true, inAppEnabled: true }, false)).toBe('tab_title')
     expect(chooseNotificationFallbackDelivery({ browserEnabled: true, inAppEnabled: true }, true)).toBe('in_app')
+  })
+
+  it('delivers split test notifications independently', () => {
+    const showInApp = vi.fn()
+    const event = {
+      taskName: 'notifications-test',
+      status: 'plan_complete' as const,
+      title: 'Task notifications test — Plan complete',
+      dedupeKey: 'test-notification',
+    }
+    expect(deliverTestInAppNotification(event, { browserEnabled: false, inAppEnabled: false }, showInApp)).toBe(false)
+    expect(deliverTestInAppNotification(event, { browserEnabled: true, inAppEnabled: true }, showInApp)).toBe(true)
+    expect(showInApp).toHaveBeenCalledWith({
+      taskName: 'notifications-test',
+      title: 'Task notifications test — Plan complete',
+    })
+
+    const originalNotification = globalThis.Notification
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(globalThis as any).Notification = class {
+      static permission = 'granted'
+      onclick: (() => void) | null = null
+      constructor(public title: string) {}
+      close() {}
+    }
+    try {
+      expect(deliverTestBrowserNotification(
+        event,
+        { browserEnabled: true, inAppEnabled: true },
+        'granted',
+        vi.fn(),
+      )).toBe(true)
+      expect(deliverTestBrowserNotification(
+        event,
+        { browserEnabled: false, inAppEnabled: true },
+        'granted',
+        vi.fn(),
+      )).toBe(false)
+    } finally {
+      globalThis.Notification = originalNotification
+    }
   })
 })

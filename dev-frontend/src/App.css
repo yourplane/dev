@@ -394,16 +394,41 @@
   cursor: not-allowed;
 }
 
+.task-notification-stack {
+  position: fixed;
+  left: 50%;
+  bottom: 0;
+  transform: translateX(-50%);
+  width: min(720px, calc(100vw - 3rem));
+  padding: 0 0 max(1rem, env(safe-area-inset-bottom));
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.task-notification-stack-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+
 .task-notification-banner {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  margin-bottom: 0.75rem;
+  padding: 0.75rem 0.875rem;
   background: #e8f0ff;
   border: 1px solid #88a;
-  border-radius: 6px;
+  border-radius: 10px;
   font-size: 0.95rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  touch-action: pan-y;
+  pointer-events: auto;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.task-notification-banner--dragging {
+  transition: none;
 }
 
 .task-notification-banner-main {
@@ -419,6 +444,25 @@
 
 .task-notification-banner-main:hover {
   text-decoration: underline;
+}
+
+.task-notification-dismiss-btn {
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid #666;
+  border-radius: 999px;
+  background: #fff;
+  color: #333;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.settings-success {
+  margin: 0.5rem 0;
+  color: #2a662a;
+  font-size: 0.95rem;
 }
 
 .settings-toggle-row {

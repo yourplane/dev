@@ -108,6 +108,27 @@ export function createTestNotificationEvent(): TaskCompletionEvent {
   }
 }
 
+export function deliverTestInAppNotification(
+  event: TaskCompletionEvent,
+  prefs: NotificationPreferences,
+  showInApp: (notification: { taskName: string; title: string }) => void,
+): boolean {
+  if (!prefs.inAppEnabled) return false
+  showInApp({ taskName: event.taskName, title: event.title })
+  return true
+}
+
+export function deliverTestBrowserNotification(
+  event: TaskCompletionEvent,
+  prefs: NotificationPreferences,
+  permission: NotificationPermission | 'unsupported',
+  navigateToTask: () => void,
+): boolean {
+  if (!prefs.browserEnabled) return false
+  if (permission !== 'granted') return false
+  return showBrowserNotification(event.title, event.taskName, navigateToTask) !== null
+}
+
 export function completionDedupeKey(taskName: string, prev: TaskListStatus, next: TaskListStatus): string {
   return `${taskName}:${prev}->${next}`
 }

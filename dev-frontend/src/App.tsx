@@ -23,7 +23,8 @@ import {
   saveNotificationPreferences,
   type NotificationPreferences,
 } from './taskNotifications'
-import { TaskListProvider, usePageTitle, useTaskList, TaskNotificationBanner } from './useTaskListPoll'
+import { TaskListProvider, usePageTitle, useTaskList } from './useTaskListPoll'
+import { TaskNotificationBanner } from './TaskNotificationBanner'
 import './App.css'
 
 const markdownComponents: Partial<Components> = {
@@ -3028,7 +3029,7 @@ export function TaskCommsPageContent({
 
 function SettingsPage() {
   usePageTitle('Dev – Settings')
-  const { deliverTestNotification } = useTaskList()
+  const { deliverTestInAppNotification, deliverTestBrowserNotification } = useTaskList()
   const [repos, setRepos] = useState<Record<string, string>>({})
   const [bots, setBots] = useState<Array<{ org: string; secret: string }>>([])
   const [environments, setEnvironments] = useState<EnvironmentInfo[]>([])
@@ -3042,6 +3043,7 @@ function SettingsPage() {
   const [deletingEnv, setDeletingEnv] = useState<string | null>(null)
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>(() => loadNotificationPreferences())
   const [notificationSettingsMessage, setNotificationSettingsMessage] = useState<string | null>(null)
+  const [notificationSettingsSuccess, setNotificationSettingsSuccess] = useState<string | null>(null)
   const [requestingPermission, setRequestingPermission] = useState(false)
 
   const browserPermission: NotificationPermission | 'unsupported' =
@@ -3052,11 +3054,37 @@ function SettingsPage() {
     saveNotificationPreferences(next)
   }
 
-  const handleTestNotification = () => {
+  const handleTestInAppNotification = () => {
     setNotificationSettingsMessage(null)
-    const delivered = deliverTestNotification()
-    if (!delivered) {
-      setNotificationSettingsMessage('Enable at least one notification toggle to test delivery.')
+    setNotificationSettingsSuccess(null)
+    if (!notificationPrefs.inAppEnabled) {
+      setNotificationSettingsMessage('Enable in-app notifications above to test the banner.')
+      return
+    }
+    const delivered = deliverTestInAppNotification()
+    if (delivered) {
+      setNotificationSettingsSuccess('In-app banner sent — swipe down on the banner at the bottom to dismiss.')
+    } else {
+      setNotificationSettingsMessage('Could not show the in-app banner.')
+    }
+  }
+
+  const handleTestBrowserNotification = () => {
+    setNotificationSettingsMessage(null)
+    setNotificationSettingsSuccess(null)
+    if (!notificationPrefs.browserEnabled) {
+      setNotificationSettingsMessage('Enable browser notifications above to test OS alerts.')
+      return
+    }
+    if (browserPermission !== 'granted') {
+      setNotificationSettingsMessage('Browser notification permission is not granted. Click Enable browser notifications first.')
+      return
+    }
+    const delivered = deliverTestBrowserNotification()
+    if (delivered) {
+      setNotificationSettingsSuccess('OS notification sent. Switch away from this tab if you do not see it while Dev is focused.')
+    } else {
+      setNotificationSettingsMessage('Could not show an OS notification on this device or browser.')
     }
   }
 
@@ -3281,10 +3309,13 @@ function SettingsPage() {
         </p>
         <p className="settings-hint">
           On mobile (especially iPhone Safari), background tabs are heavily throttled and OS web notifications may not appear
-          unless Dev is added to the home screen as an installed web app. Use the test button below to verify what works on this device.
+          unless Dev is added to the home screen as an installed web app. Use the test buttons below to verify each channel on this device.
         </p>
         {notificationSettingsMessage && (
           <p className="inline-error settings-error" role="alert">{notificationSettingsMessage}</p>
+        )}
+        {notificationSettingsSuccess && (
+          <p className="settings-success" role="status">{notificationSettingsSuccess}</p>
         )}
         <label className="settings-toggle-row">
           <input
@@ -3324,9 +3355,16 @@ function SettingsPage() {
           <button
             type="button"
             className="settings-btn settings-btn-secondary"
-            onClick={handleTestNotification}
+            onClick={handleTestInAppNotification}
           >
-            Send test notification
+            Test in-app banner
+          </button>
+          <button
+            type="button"
+            className="settings-btn settings-btn-secondary"
+            onClick={handleTestBrowserNotification}
+          >
+            Test OS notification
           </button>
         </div>
       </div>
