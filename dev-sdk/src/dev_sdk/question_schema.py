@@ -153,9 +153,10 @@ def parse_question_output(text: str) -> tuple[QuestionPayload | None, list[str]]
 def format_question_payload_json(payload: QuestionPayload) -> str:
     """Canonical pretty-printed JSON for comms storage."""
     data: dict[str, Any] = {
-        "summary": payload.summary,
         "questions": [],
     }
+    if payload.summary.strip():
+        data["summary"] = payload.summary
     if payload.response:
         data["response"] = payload.response
     for q in payload.questions:

@@ -15,7 +15,7 @@ export interface QuestionItem {
 }
 
 export interface QuestionPayload {
-  summary: string
+  summary?: string
   response?: string
   questions: QuestionItem[]
 }
@@ -190,8 +190,12 @@ export function tryParseQuestionPayload(content: string): QuestionPayload | null
     const data = JSON.parse(content.trim()) as unknown
     if (typeof data !== 'object' || data === null) return null
     const obj = data as Record<string, unknown>
-    const summaryRaw = obj.summary ?? obj.intro
-    if (typeof summaryRaw !== 'string') return null
+    let summary = ''
+    if (typeof obj.summary === 'string') {
+      summary = obj.summary
+    } else if (typeof obj.intro === 'string') {
+      summary = obj.intro
+    }
     if (!Array.isArray(obj.questions)) return null
     const questions: QuestionItem[] = []
     for (const q of obj.questions) {
@@ -218,8 +222,10 @@ export function tryParseQuestionPayload(content: string): QuestionPayload | null
       questions.push(question)
     }
     const payload: QuestionPayload = {
-      summary: summaryRaw,
       questions,
+    }
+    if (summary.trim()) {
+      payload.summary = summary
     }
     if (typeof obj.response === 'string' && obj.response.trim()) {
       payload.response = obj.response

@@ -18,6 +18,16 @@ import {
 } from './questionForm'
 
 describe('questionForm', () => {
+  it('parses payloads without summary', () => {
+    const content = JSON.stringify({
+      questions: [{ text: 'Pick?', options: ['A'] }],
+    })
+    const payload = tryParseQuestionPayload(content)
+    expect(payload).not.toBeNull()
+    expect(payload?.summary).toBeUndefined()
+    expect(payload?.questions[0].id).toBe('q1')
+  })
+
   it('parses valid question payload', () => {
     const content = JSON.stringify({
       summary: 'Hello',

@@ -246,7 +246,7 @@ export function QuestionAnswerForm({
         </div>
       ) : null}
 
-      {payload.summary.trim() ? (
+      {payload.summary?.trim() ? (
         <CollapsibleSection label="Summary" className="question-summary-block">
           <MarkdownInline>{payload.summary}</MarkdownInline>
         </CollapsibleSection>

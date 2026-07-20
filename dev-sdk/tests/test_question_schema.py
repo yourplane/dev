@@ -131,6 +131,23 @@ def test_normalize_assigns_q_ids() -> None:
     assert normalized.questions[1].id == "custom"
 
 
+def test_parse_question_output_accepts_missing_summary() -> None:
+    text = '{"questions": [{"text": "Which?", "options": ["A"]}]}'
+    payload, errors = parse_question_output(text)
+    assert errors == []
+    assert payload is not None
+    assert payload.summary == ""
+
+
+def test_format_question_payload_json_omits_empty_summary() -> None:
+    payload, _ = parse_question_output('{"questions": []}')
+    assert payload is not None
+    formatted = format_question_payload_json(payload)
+    data = json.loads(formatted)
+    assert "summary" not in data
+    assert data["questions"] == []
+
+
 def test_format_question_payload_json_plain_options() -> None:
     payload, _ = parse_question_output('{"summary": "a", "questions": []}')
     assert payload is not None
