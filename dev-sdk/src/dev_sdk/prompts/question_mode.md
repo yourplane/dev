@@ -34,7 +34,7 @@ When mixing, put **strategic questions first** in the `questions` array, then in
 
 There is **no per-form question cap** — include all high-leverage independent questions in the current form, even if the form is long. Prefer deferring coupled questions over splitting unrelated ones across extra runs.
 
-When no high-leverage questions remain, use the `intro` to summarize locked decisions and document assumptions you will carry into Plan.
+When no high-leverage questions remain, use `summary` to document locked decisions and assumptions you will carry into Plan.
 
 ## Architecture evaluation
 
@@ -47,9 +47,9 @@ Goals:
 - Proactively suggest material scope/effort simplifications when relevant, even if the user's path is reasonable.
 - Use your judgment on when architecture evaluation is warranted for this run.
 
-When complexity is flagged, the `intro` may be longer than usual to explain tradeoffs. Otherwise keep the intro light (one or two sentences).
+When complexity is flagged, `summary` may be longer than usual to explain tradeoffs. Otherwise keep it brief.
 
-Present simpler alternatives as **explicit selectable options** where it matters, and use the intro for brief advisory context.
+Present simpler alternatives as **explicit selectable options** where it matters, and use `summary` for brief advisory context.
 
 ## Rules
 
@@ -63,12 +63,14 @@ Respond with **only** a single ` ```json ` fenced block (no other text before or
 
 ```json
 {
-  "intro": "Brief context; may be longer when complexity warnings apply.",
+  "summary": "Brief current-round context only (collapsed in UI).",
+  "response": "Optional: direct replies to prior user Q&A (always visible when present).",
   "questions": [
     {
       "id": "q1",
       "text": "Question text?",
-      "rationale": "Optional: why you are asking (shown in collapsible UI).",
+      "examples": "Optional: examples of how to apply the question (collapsed in UI).",
+      "multiple": false,
       "options": [
         "Plain option (backward compatible)",
         {
@@ -82,14 +84,17 @@ Respond with **only** a single ` ```json ` fenced block (no other text before or
 }
 ```
 
-- `intro`: required string (may be empty).
+- `summary`: required string (may be empty). Put only current-round summary here — not replies to prior user comments.
+- `response`: optional string for direct replies to prior user Q&A or comments (shown always visible when present).
 - `questions`: required array (may be empty when you have no questions).
 - Each question needs `text` (string) and `options` (array).
-- `id` and `rationale` are optional per question.
+- `id`, `examples`, and `multiple` are optional per question.
+- `multiple`: optional boolean (default `false`). When `true`, the UI uses checkboxes and stores `selected` as a string array; when `false`, radio buttons with a clear control.
+- Put question-specific context in `text`, not in `summary`.
 - `options` entries may be plain strings **or** objects with:
   - `label` (required string) — include product/scope tradeoffs here; keep this concise but complete for the user
   - `implications` (optional string) — **architectural impact only** (structure, layers, dependencies, new components, maintenance burden). Do not repeat product or scope points already clear from `label`. The UI shows this under "Architectural Implications".
   - `complexity` (optional) — must be one of `"low"`, `"medium"`, or `"high"` (shown as a left-edge color accent on the option row)
-- Use `rationale`, `implications`, and `complexity` when they help the user understand tradeoffs; omit them for straightforward questions.
+- Use `examples`, `implications`, and `complexity` when they help the user understand tradeoffs; omit them for straightforward questions.
 
-When you have no questions, use: `{ "intro": "…", "questions": [] }`.
+When you have no questions, use: `{ "summary": "…", "questions": [] }`.

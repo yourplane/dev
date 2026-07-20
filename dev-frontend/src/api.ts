@@ -501,7 +501,7 @@ export const api = {
     taskName: string,
     commsFilename: string,
   ): Promise<{
-    selections: Record<string, string>
+    selections: Record<string, string | string[]>
     freeText: Record<string, string>
     expandedFreeText: Record<string, boolean>
     editing?: boolean
@@ -515,7 +515,7 @@ export const api = {
     taskName: string,
     commsFilename: string,
     data: {
-      selections: Record<string, string>
+      selections: Record<string, string[]>
       freeText: Record<string, string>
       expandedFreeText: Record<string, boolean>
       editing?: boolean
@@ -535,7 +535,7 @@ export const api = {
     taskName: string,
     body: {
       source: string
-      answers: Array<{ id: string; text: string; selected: string; free_text: string }>
+      answers: Array<{ id: string; text: string; selected: string[]; free_text: string }>
     },
   ): Promise<{ filename: string }> {
     return request(`/tasks/${encodeURIComponent(taskName)}/comms/question-answers`, {

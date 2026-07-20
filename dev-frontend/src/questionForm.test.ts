@@ -5,8 +5,11 @@ import {
   findOptionByLabel,
   getPersistedAnswersForSource,
   hasAnyAnswer,
+  isQuestionAnswered,
   normalizeOptions,
   normalizeQuestionIds,
+  normalizeSelection,
+  normalizeSelectionsRecord,
   parseAnswersMarkdown,
   submittedAnswersEqual,
   submittedAnswersSignature,
@@ -17,12 +20,12 @@ import {
 describe('questionForm', () => {
   it('parses valid question payload', () => {
     const content = JSON.stringify({
-      intro: 'Hello',
+      summary: 'Hello',
       questions: [{ text: 'Pick?', options: ['A', 'B'] }],
     })
     const payload = tryParseQuestionPayload(content)
     expect(payload).not.toBeNull()
-    expect(payload?.intro).toBe('Hello')
+    expect(payload?.summary).toBe('Hello')
     expect(payload?.questions[0].id).toBe('q1')
     expect(payload?.questions[0].options).toEqual([
       { label: 'A' },
@@ -30,12 +33,28 @@ describe('questionForm', () => {
     ])
   })
 
-  it('parses rationale and object options with complexity', () => {
+  it('parses legacy intro and rationale aliases', () => {
     const content = JSON.stringify({
-      intro: 'Tradeoffs',
+      intro: 'Legacy summary',
       questions: [{
         text: 'Which?',
         rationale: 'Layering matters.',
+        options: ['Simple'],
+      }],
+    })
+    const payload = tryParseQuestionPayload(content)
+    expect(payload?.summary).toBe('Legacy summary')
+    expect(payload?.questions[0].examples).toBe('Layering matters.')
+  })
+
+  it('parses response, examples, and multiple flags', () => {
+    const content = JSON.stringify({
+      summary: 'Tradeoffs',
+      response: 'Prior reply.',
+      questions: [{
+        text: 'Which?',
+        examples: 'e.g. A or B.',
+        multiple: true,
         options: [
           'Simple',
           { label: 'Heavy', implications: 'New service.', complexity: 'high' },
@@ -43,7 +62,9 @@ describe('questionForm', () => {
       }],
     })
     const payload = tryParseQuestionPayload(content)
-    expect(payload?.questions[0].rationale).toBe('Layering matters.')
+    expect(payload?.response).toBe('Prior reply.')
+    expect(payload?.questions[0].examples).toBe('e.g. A or B.')
+    expect(payload?.questions[0].multiple).toBe(true)
     expect(payload?.questions[0].options[1]).toEqual({
       label: 'Heavy',
       implications: 'New service.',
@@ -53,7 +74,7 @@ describe('questionForm', () => {
 
   it('returns null for invalid option objects', () => {
     const content = JSON.stringify({
-      intro: '',
+      summary: '',
       questions: [{ text: 'Q?', options: [{ implications: 'missing label' }] }],
     })
     expect(tryParseQuestionPayload(content)).toBeNull()
@@ -64,6 +85,15 @@ describe('questionForm', () => {
       { label: 'A' },
       { label: 'B', complexity: 'low' },
     ])
+  })
+
+  it('normalizeSelection accepts legacy strings and arrays', () => {
+    expect(normalizeSelection('A')).toEqual(['A'])
+    expect(normalizeSelection(['A', 'B'])).toEqual(['A', 'B'])
+    expect(normalizeSelectionsRecord({ q1: 'A', q2: ['B', 'C'] })).toEqual({
+      q1: ['A'],
+      q2: ['B', 'C'],
+    })
   })
 
   it('findOptionByLabel returns matching option', () => {
@@ -86,20 +116,26 @@ describe('questionForm', () => {
   it('hasAnyAnswer detects selections and free text', () => {
     const questions = [{ id: 'q1', text: 'Q?', options: [{ label: 'A' }] }]
     expect(hasAnyAnswer(questions, {}, {})).toBe(false)
-    expect(hasAnyAnswer(questions, { q1: 'A' }, {})).toBe(true)
+    expect(hasAnyAnswer(questions, { q1: ['A'] }, {})).toBe(true)
     expect(hasAnyAnswer(questions, {}, { q1: 'note' })).toBe(true)
+  })
+
+  it('isQuestionAnswered allows notes-only answers', () => {
+    const question = { id: 'q1', text: 'Q?', options: [{ label: 'A' }], multiple: true }
+    expect(isQuestionAnswered(question, {}, { q1: 'note' })).toBe(true)
+    expect(isQuestionAnswered(question, {}, {})).toBe(false)
   })
 
   it('normalizeQuestionIds assigns q1 q2', () => {
     const payload = normalizeQuestionIds({
-      intro: '',
+      summary: '',
       questions: [{ text: 'First', options: [] }, { id: 'custom', text: 'Second', options: [] }],
     })
     expect(payload.questions[0].id).toBe('q1')
     expect(payload.questions[1].id).toBe('custom')
   })
 
-  it('parseAnswersMarkdown reads source and selections', () => {
+  it('parseAnswersMarkdown reads source and single-line selections', () => {
     const md = `# Answers
 
 Source: \`003-agent-question.md\`
@@ -113,8 +149,23 @@ Need pooling
 `
     const parsed = parseAnswersMarkdown(md)
     expect(parsed?.source).toBe('003-agent-question.md')
-    expect(parsed?.answers.selections.q1).toBe('Postgres')
+    expect(parsed?.answers.selections.q1).toEqual(['Postgres'])
     expect(parsed?.answers.freeText.q1).toBe('Need pooling')
+  })
+
+  it('parseAnswersMarkdown reads bulleted multi selections', () => {
+    const md = `# Answers
+
+Source: \`004-agent-question.md\`
+
+## q1 — Pick many?
+
+**Selected:**
+- A
+- B
+`
+    const parsed = parseAnswersMarkdown(md)
+    expect(parsed?.answers.selections.q1).toEqual(['A', 'B'])
   })
 
   it('getPersistedAnswersForSource returns latest matching answers', () => {
@@ -127,7 +178,7 @@ Need pooling
       '006-user-answers.md': 'Source: `002-agent-question.md`\n\n## q1 — Q\n\n**Selected:** B\n',
     }
     const answers = getPersistedAnswersForSource('002-agent-question.md', feed, contents)
-    expect(answers?.selections.q1).toBe('B')
+    expect(answers?.selections.q1).toEqual(['B'])
   })
 
   it('getPersistedAnswersForSource is undefined while answers content is loading', () => {
@@ -139,7 +190,7 @@ Need pooling
     const questions = [{ id: 'q1', text: 'Q?', options: [{ label: 'A' }] }]
     expect(draftIndicatesEditing({ selections: {}, freeText: {}, expandedFreeText: {} }, questions)).toBe(false)
     expect(draftIndicatesEditing({ selections: {}, freeText: {}, expandedFreeText: {}, editing: true }, questions)).toBe(true)
-    expect(draftIndicatesEditing({ selections: { q1: 'A' }, freeText: {}, expandedFreeText: {} }, questions)).toBe(true)
+    expect(draftIndicatesEditing({ selections: { q1: ['A'] }, freeText: {}, expandedFreeText: {} }, questions)).toBe(true)
   })
 
   it('userAnswersContentsKey ignores unrelated comms content changes', () => {
@@ -153,8 +204,8 @@ Need pooling
   })
 
   it('submittedAnswersSignature is stable for equal answers', () => {
-    const a = { selections: { q1: 'A' }, freeText: {} }
-    const b = { selections: { q1: 'A' }, freeText: {} }
+    const a = { selections: { q1: ['A'] }, freeText: {} }
+    const b = { selections: { q1: ['A'] }, freeText: {} }
     expect(submittedAnswersSignature(a)).toBe(submittedAnswersSignature(b))
     expect(submittedAnswersEqual(a, b)).toBe(true)
   })

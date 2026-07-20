@@ -134,7 +134,7 @@ def test_run_question_mode_writes_comms_with_json(tmp_path, monkeypatch) -> None
     result = run_question_mode(task_dir)
     assert result.comms_path.name.endswith("-agent-question.md")
     comms_text = result.comms_path.read_text(encoding="utf-8")
-    assert '"intro": "Need clarity"' in comms_text
+    assert '"summary": "Need clarity"' in comms_text
     assert '"id": "q1"' in comms_text
     assert not (task_dir / "task-question-draft.md").exists()
     index = (task_dir / "comms" / "index.txt").read_text()
