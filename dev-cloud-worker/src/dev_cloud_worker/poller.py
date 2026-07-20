@@ -30,9 +30,16 @@ COMMS_SYNC_RETRY_DELAY_SEC = 0.5
 class CloudPoller:
     """Owns comms sync and outbox completion; stream uploads are supervised separately."""
 
-    def __init__(self, client, tasks_root: Path) -> None:
+    def __init__(
+        self,
+        client,
+        tasks_root: Path,
+        *,
+        completion_tracker=None,
+    ) -> None:
         self.client = client
         self.tasks_root = tasks_root
+        self._completion_tracker = completion_tracker
 
     def task_dir(self, task_name: str) -> Path:
         return self.tasks_root / task_name
@@ -67,6 +74,8 @@ class CloudPoller:
                 error=entry.error,
                 result=entry.result or {},
             )
+            if self._completion_tracker is not None:
+                self._completion_tracker.mark_reported(task_name)
             clear_outbox(task_dir)
             clear_streams(task_dir)
             tail_path = task_dir / ".cloud" / "tail_state.json"
