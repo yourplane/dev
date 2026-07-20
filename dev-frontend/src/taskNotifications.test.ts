@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach } from 'vitest'
 import {
   BROWSER_NOTIFICATIONS_KEY,
   INAPP_NOTIFICATIONS_KEY,

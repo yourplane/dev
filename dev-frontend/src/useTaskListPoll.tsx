@@ -40,7 +40,7 @@ export interface InAppNotification {
 interface PageTitleContextValue {
   pageTitle: string
   setPageTitle: (title: string) => void
-  tabTitleOverride: string | null
+  tabTitleOverride: { taskName: string; title: string } | null
   clearTabTitleOverride: () => void
 }
 
