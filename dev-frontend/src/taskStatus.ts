@@ -27,14 +27,18 @@ const COMPLETION_STATUSES = new Set<TaskListStatus>([
   'failed',
 ])
 
+export function isCompletionStatus(status: TaskListStatus): boolean {
+  return COMPLETION_STATUSES.has(status)
+}
+
 export function isActiveTaskStatus(status: TaskListStatus): boolean {
   return ACTIVE_STATUSES.has(status)
 }
 
 export function isCompletionTransition(prev: TaskListStatus, next: TaskListStatus): boolean {
-  if (!isActiveTaskStatus(prev)) return false
-  if (next === 'idle') return true
-  return COMPLETION_STATUSES.has(next)
+  if (prev === next) return false
+  if (next === 'idle') return isActiveTaskStatus(prev)
+  return isCompletionStatus(next)
 }
 
 export function completionStatusLabel(status: TaskListStatus): string {

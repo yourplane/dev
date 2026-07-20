@@ -3028,6 +3028,7 @@ export function TaskCommsPageContent({
 
 function SettingsPage() {
   usePageTitle('Dev – Settings')
+  const { deliverTestNotification } = useTaskList()
   const [repos, setRepos] = useState<Record<string, string>>({})
   const [bots, setBots] = useState<Array<{ org: string; secret: string }>>([])
   const [environments, setEnvironments] = useState<EnvironmentInfo[]>([])
@@ -3049,6 +3050,14 @@ function SettingsPage() {
   const updateNotificationPrefs = (next: NotificationPreferences) => {
     setNotificationPrefs(next)
     saveNotificationPreferences(next)
+  }
+
+  const handleTestNotification = () => {
+    setNotificationSettingsMessage(null)
+    const delivered = deliverTestNotification()
+    if (!delivered) {
+      setNotificationSettingsMessage('Enable at least one notification toggle to test delivery.')
+    }
   }
 
   const handleEnableBrowserNotifications = async () => {
@@ -3267,7 +3276,12 @@ function SettingsPage() {
         <h3>Notifications</h3>
         <p className="settings-hint">
           Get alerted when an agent command finishes while you are not viewing that task&apos;s feed.
-          In-app alerts require the Dev tab to be visible unless browser notifications are enabled.
+          In-app banners show when the Dev tab is visible; browser/OS alerts show when the Dev tab is in the background.
+          Toggles are saved per browser — enable them on each device you use.
+        </p>
+        <p className="settings-hint">
+          On mobile (especially iPhone Safari), background tabs are heavily throttled and OS web notifications may not appear
+          unless Dev is added to the home screen as an installed web app. Use the test button below to verify what works on this device.
         </p>
         {notificationSettingsMessage && (
           <p className="inline-error settings-error" role="alert">{notificationSettingsMessage}</p>
@@ -3306,6 +3320,13 @@ function SettingsPage() {
             onClick={() => void handleEnableBrowserNotifications()}
           >
             {requestingPermission ? 'Requesting…' : 'Enable browser notifications'}
+          </button>
+          <button
+            type="button"
+            className="settings-btn settings-btn-secondary"
+            onClick={handleTestNotification}
+          >
+            Send test notification
           </button>
         </div>
       </div>

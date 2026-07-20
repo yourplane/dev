@@ -36,10 +36,76 @@ export function chooseNotificationDelivery(
   permission: NotificationPermission | 'unsupported',
   tabVisible: boolean,
 ): NotificationDelivery {
+  if (tabVisible) {
+    if (prefs.inAppEnabled) return 'in_app'
+    return 'none'
+  }
   if (prefs.browserEnabled && permission === 'granted') return 'browser'
-  if (prefs.inAppEnabled && tabVisible) return 'in_app'
-  if (prefs.inAppEnabled && !tabVisible) return 'tab_title'
+  if (prefs.inAppEnabled) return 'tab_title'
   return 'none'
+}
+
+export function chooseNotificationFallbackDelivery(
+  prefs: NotificationPreferences,
+  tabVisible: boolean,
+): NotificationDelivery {
+  if (tabVisible && prefs.inAppEnabled) return 'in_app'
+  if (!tabVisible && prefs.inAppEnabled) return 'tab_title'
+  return 'none'
+}
+
+export interface TaskNotificationHandlers {
+  navigateToTask: () => void
+  showInApp: (notification: { taskName: string; title: string }) => void
+  showTabTitle: (override: { taskName: string; title: string }) => void
+}
+
+export function deliverTaskNotification(
+  event: TaskCompletionEvent,
+  prefs: NotificationPreferences,
+  permission: NotificationPermission | 'unsupported',
+  tabVisible: boolean,
+  handlers: TaskNotificationHandlers,
+): boolean {
+  const primary = chooseNotificationDelivery(prefs, permission, tabVisible)
+  if (primary === 'none') return false
+
+  if (primary === 'browser') {
+    const notification = showBrowserNotification(event.title, event.taskName, handlers.navigateToTask)
+    if (notification) return true
+    const fallback = chooseNotificationFallbackDelivery(prefs, tabVisible)
+    if (fallback === 'in_app') {
+      handlers.showInApp({ taskName: event.taskName, title: event.title })
+      return true
+    }
+    if (fallback === 'tab_title') {
+      handlers.showTabTitle({ taskName: event.taskName, title: event.title })
+      return true
+    }
+    return false
+  }
+
+  if (primary === 'in_app') {
+    handlers.showInApp({ taskName: event.taskName, title: event.title })
+    return true
+  }
+
+  if (primary === 'tab_title') {
+    handlers.showTabTitle({ taskName: event.taskName, title: event.title })
+    return true
+  }
+
+  return false
+}
+
+export function createTestNotificationEvent(): TaskCompletionEvent {
+  const status = 'plan_complete' as const
+  return {
+    taskName: 'notifications-test',
+    status,
+    title: completionNotificationTitle('notifications test', status),
+    dedupeKey: 'test-notification',
+  }
 }
 
 export function completionDedupeKey(taskName: string, prev: TaskListStatus, next: TaskListStatus): string {
