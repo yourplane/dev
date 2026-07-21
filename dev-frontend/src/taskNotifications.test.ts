@@ -4,13 +4,26 @@ import {
   INAPP_NOTIFICATIONS_KEY,
   chooseNotificationDelivery,
   chooseNotificationFallbackDelivery,
+  createTestNotificationEvent,
   deliverTaskNotification,
+  deliverTestBrowserNotification,
+  deliverTestInAppNotification,
   detectCompletionEvents,
   loadNotificationPreferences,
   saveNotificationPreferences,
   shouldSuppressForRoute,
+  TEST_NOTIFICATION_TITLE,
 } from './taskNotifications'
 import { isCompletionTransition } from './taskStatus'
+
+function mockServiceWorker(showNotification: (...args: unknown[]) => unknown) {
+  Object.defineProperty(navigator, 'serviceWorker', {
+    configurable: true,
+    value: {
+      ready: Promise.resolve({ showNotification }),
+    },
+  })
+}
 
 describe('taskStatus', () => {
   it('detects completion transitions from active states and into completion statuses', () => {
@@ -78,22 +91,22 @@ describe('taskNotifications', () => {
     expect(shouldSuppressForRoute('a/b', '/task/a%2Fb')).toBe(true)
   })
 
-  it('cascades to in-app when browser delivery fails in the foreground', () => {
+  it('cascades to in-app when browser delivery fails in the foreground', async () => {
     const showInApp = vi.fn()
     const showTabTitle = vi.fn()
     const prefs = { browserEnabled: true, inAppEnabled: true }
     const originalNotification = globalThis.Notification
 
+    mockServiceWorker(() => {
+      throw new Error('blocked')
+    })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(globalThis as any).Notification = class {
       static permission = 'granted'
-      constructor() {
-        throw new Error('blocked')
-      }
     }
 
     try {
-      const delivered = deliverTaskNotification(
+      const delivered = await deliverTaskNotification(
         {
           taskName: 'foo',
           status: 'plan_complete',
@@ -120,5 +133,59 @@ describe('taskNotifications', () => {
   it('uses tab title fallback when browser delivery fails in the background', () => {
     expect(chooseNotificationFallbackDelivery({ browserEnabled: true, inAppEnabled: true }, false)).toBe('tab_title')
     expect(chooseNotificationFallbackDelivery({ browserEnabled: true, inAppEnabled: true }, true)).toBe('in_app')
+  })
+
+  it('creates test notification with plain title and settings route', () => {
+    const event = createTestNotificationEvent()
+    expect(event.title).toBe(TEST_NOTIFICATION_TITLE)
+    expect(event.clickUrl).toBe('/settings')
+  })
+
+  it('delivers split test notifications independently', async () => {
+    const showInApp = vi.fn()
+    const event = createTestNotificationEvent()
+    expect(deliverTestInAppNotification(event, { browserEnabled: false, inAppEnabled: false }, showInApp)).toBe(false)
+    expect(deliverTestInAppNotification(event, { browserEnabled: true, inAppEnabled: true }, showInApp)).toBe(true)
+    expect(showInApp).toHaveBeenCalledWith({
+      taskName: 'notifications-test',
+      title: TEST_NOTIFICATION_TITLE,
+      clickUrl: '/settings',
+    })
+
+    const originalNotification = globalThis.Notification
+    const showNotification = vi.fn().mockResolvedValue(undefined)
+    mockServiceWorker(showNotification)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(globalThis as any).Notification = class {
+      static permission = 'granted'
+    }
+    try {
+      const foreground = await deliverTestBrowserNotification(
+        event,
+        { browserEnabled: true, inAppEnabled: true },
+        'granted',
+      )
+      expect(foreground.delivered).toBe(true)
+      expect(showNotification).toHaveBeenCalledWith(
+        TEST_NOTIFICATION_TITLE,
+        expect.objectContaining({
+          data: expect.objectContaining({ url: '/settings' }),
+        }),
+      )
+
+      const background = await deliverTestBrowserNotification(
+        event,
+        { browserEnabled: true, inAppEnabled: true },
+        'granted',
+      )
+      expect(background.delivered).toBe(true)
+      expect(await deliverTestBrowserNotification(
+        event,
+        { browserEnabled: false, inAppEnabled: true },
+        'granted',
+      ).then((result) => result.delivered)).toBe(false)
+    } finally {
+      globalThis.Notification = originalNotification
+    }
   })
 })

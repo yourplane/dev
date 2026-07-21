@@ -1,4 +1,5 @@
 import type { TaskListStatus } from './api'
+import { showServiceWorkerNotification } from './notificationServiceWorker'
 import { completionNotificationTitle, isCompletionTransition } from './taskStatus'
 
 export const BROWSER_NOTIFICATIONS_KEY = 'dev_notifications_browser_enabled'
@@ -56,26 +57,26 @@ export function chooseNotificationFallbackDelivery(
 
 export interface TaskNotificationHandlers {
   navigateToTask: () => void
-  showInApp: (notification: { taskName: string; title: string }) => void
+  showInApp: (notification: { taskName: string; title: string; clickUrl?: string }) => void
   showTabTitle: (override: { taskName: string; title: string }) => void
 }
 
-export function deliverTaskNotification(
+export async function deliverTaskNotification(
   event: TaskCompletionEvent,
   prefs: NotificationPreferences,
   permission: NotificationPermission | 'unsupported',
   tabVisible: boolean,
   handlers: TaskNotificationHandlers,
-): boolean {
+): Promise<boolean> {
   const primary = chooseNotificationDelivery(prefs, permission, tabVisible)
   if (primary === 'none') return false
 
   if (primary === 'browser') {
-    const notification = showBrowserNotification(event.title, event.taskName, handlers.navigateToTask)
-    if (notification) return true
+    const delivered = await showBrowserNotification(event.title, event.taskName, event.clickUrl)
+    if (delivered) return true
     const fallback = chooseNotificationFallbackDelivery(prefs, tabVisible)
     if (fallback === 'in_app') {
-      handlers.showInApp({ taskName: event.taskName, title: event.title })
+      handlers.showInApp({ taskName: event.taskName, title: event.title, clickUrl: event.clickUrl })
       return true
     }
     if (fallback === 'tab_title') {
@@ -86,7 +87,7 @@ export function deliverTaskNotification(
   }
 
   if (primary === 'in_app') {
-    handlers.showInApp({ taskName: event.taskName, title: event.title })
+    handlers.showInApp({ taskName: event.taskName, title: event.title, clickUrl: event.clickUrl })
     return true
   }
 
@@ -98,13 +99,69 @@ export function deliverTaskNotification(
   return false
 }
 
+export const TEST_NOTIFICATION_TITLE = 'Test notification'
+
 export function createTestNotificationEvent(): TaskCompletionEvent {
-  const status = 'plan_complete' as const
   return {
     taskName: 'notifications-test',
-    status,
-    title: completionNotificationTitle('notifications test', status),
+    status: 'plan_complete',
+    title: TEST_NOTIFICATION_TITLE,
     dedupeKey: 'test-notification',
+    clickUrl: '/settings',
+  }
+}
+
+export function deliverTestInAppNotification(
+  event: TaskCompletionEvent,
+  prefs: NotificationPreferences,
+  showInApp: (notification: { taskName: string; title: string; clickUrl?: string }) => void,
+): boolean {
+  if (!prefs.inAppEnabled) return false
+  showInApp({ taskName: event.taskName, title: event.title, clickUrl: event.clickUrl })
+  return true
+}
+
+export interface BrowserNotificationAttemptResult {
+  delivered: boolean
+  failureReason?: string
+}
+
+export async function deliverTestBrowserNotification(
+  event: TaskCompletionEvent,
+  prefs: NotificationPreferences,
+  permission: NotificationPermission | 'unsupported',
+): Promise<BrowserNotificationAttemptResult> {
+  if (!prefs.browserEnabled) {
+    return {
+      delivered: false,
+      failureReason: 'Browser notifications are disabled. Turn on the browser notifications toggle above.',
+    }
+  }
+  if (permission === 'unsupported') {
+    return {
+      delivered: false,
+      failureReason: 'This browser does not support the Web Notifications API.',
+    }
+  }
+  if (permission === 'denied') {
+    return {
+      delivered: false,
+      failureReason: 'Browser notification permission is blocked. Allow notifications for this site in your browser settings, then try again.',
+    }
+  }
+  if (permission === 'default') {
+    return {
+      delivered: false,
+      failureReason: 'Browser notification permission has not been granted yet. Click Enable browser notifications first.',
+    }
+  }
+
+  const delivered = await showBrowserNotification(event.title, event.taskName, event.clickUrl)
+  if (delivered) return { delivered: true }
+
+  return {
+    delivered: false,
+    failureReason: 'The browser refused to create an OS notification. Check site notification settings, Do Not Disturb / focus modes, and try again with the Dev tab in the background.',
   }
 }
 
@@ -117,6 +174,7 @@ export interface TaskCompletionEvent {
   status: TaskListStatus
   title: string
   dedupeKey: string
+  clickUrl?: string
 }
 
 export function detectCompletionEvents(
@@ -153,21 +211,11 @@ export function shouldSuppressForRoute(taskName: string, pathname: string): bool
   }
 }
 
-export function showBrowserNotification(
+export async function showBrowserNotification(
   title: string,
   taskName: string,
-  onClick: () => void,
-): Notification | null {
-  if (typeof Notification === 'undefined') return null
-  try {
-    const notification = new Notification(title, { tag: `dev-task-${taskName}` })
-    notification.onclick = () => {
-      window.focus()
-      onClick()
-      notification.close()
-    }
-    return notification
-  } catch {
-    return null
-  }
+  clickUrl?: string,
+): Promise<boolean> {
+  if (typeof Notification === 'undefined') return false
+  return showServiceWorkerNotification(title, taskName, clickUrl)
 }

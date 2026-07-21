@@ -3,6 +3,7 @@
   margin: 0 auto;
   padding: 1rem 1.5rem;
   min-width: 0;
+  overflow-x: clip;
 }
 
 .header {
@@ -72,6 +73,7 @@
   box-shadow: 0 1px 3px rgba(0,0,0,0.08);
   min-width: 0;
   max-width: 100%;
+  overflow-x: clip;
 }
 
 .status {
@@ -394,16 +396,43 @@
   cursor: not-allowed;
 }
 
+.task-notification-stack {
+  position: fixed;
+  left: 50%;
+  top: 0;
+  transform: translateX(-50%);
+  width: min(720px, calc(100vw - 3rem));
+  padding: max(1rem, env(safe-area-inset-top)) 0 0;
+  z-index: 1000;
+  pointer-events: none;
+}
+
+.task-notification-stack-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  pointer-events: none;
+}
+
 .task-notification-banner {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
-  margin-bottom: 0.75rem;
+  padding: 0.75rem 0.875rem;
   background: #e8f0ff;
   border: 1px solid #88a;
-  border-radius: 6px;
+  border-radius: 10px;
   font-size: 0.95rem;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  pointer-events: auto;
+  transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.task-notification-banner--dragging {
+  transition: none;
 }
 
 .task-notification-banner-main {
@@ -419,6 +448,41 @@
 
 .task-notification-banner-main:hover {
   text-decoration: underline;
+}
+
+.task-notification-dismiss-btn {
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid #666;
+  border-radius: 999px;
+  background: #fff;
+  color: #333;
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.settings-success {
+  margin: 0.5rem 0;
+  color: #2a662a;
+  font-size: 0.95rem;
+}
+
+.settings-os-test-wait {
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
+}
+
+.settings-os-test-countdown {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 1.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #1e40af;
 }
 
 .settings-toggle-row {
@@ -2407,10 +2471,17 @@
   margin-top: 0;
 }
 
+.settings-page {
+  overflow-x: clip;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .settings-section {
   margin-top: 1.75rem;
   padding-top: 1.25rem;
   border-top: 1px solid #e2e8f0;
+  min-width: 0;
 }
 
 .settings-section:first-of-type {
@@ -2510,6 +2581,9 @@
 
 .settings-field input,
 .settings-input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 0.55rem 0.65rem;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
@@ -2526,10 +2600,17 @@
 
 .settings-bots-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.5rem;
   margin-bottom: 0.5rem;
-  max-width: 32rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .settings-bots-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .settings-actions {
@@ -2583,4 +2664,44 @@
 .settings-btn-danger:hover:not(:disabled) {
   background: #fef2f2;
   border-color: #f87171;
+}
+
+.app-error-boundary {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: #f8fafc;
+}
+
+.app-error-boundary-card {
+  width: min(480px, 100%);
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.app-error-boundary-card h2 {
+  margin: 0 0 0.75rem;
+}
+
+.app-error-boundary-message {
+  margin: 0 0 0.75rem;
+  color: #334155;
+}
+
+.app-error-boundary-detail {
+  margin: 0 0 1rem;
+  color: #64748b;
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+
+.app-error-boundary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }
