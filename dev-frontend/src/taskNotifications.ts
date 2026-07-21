@@ -128,7 +128,6 @@ export function deliverTestBrowserNotification(
   prefs: NotificationPreferences,
   permission: NotificationPermission | 'unsupported',
   navigateToTask: () => void,
-  tabVisible: boolean,
 ): BrowserNotificationAttemptResult {
   if (!prefs.browserEnabled) {
     return {
@@ -152,12 +151,6 @@ export function deliverTestBrowserNotification(
     return {
       delivered: false,
       failureReason: 'Browser notification permission has not been granted yet. Click Enable browser notifications first.',
-    }
-  }
-  if (tabVisible) {
-    return {
-      delivered: false,
-      failureReason: 'OS notifications are only attempted when the Dev tab is in the background. Switch to another tab or app, then press Test OS notification again. On Android Chrome, alerts in a foreground tab are often suppressed even when permission is granted.',
     }
   }
 

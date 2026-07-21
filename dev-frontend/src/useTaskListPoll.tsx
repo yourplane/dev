@@ -140,7 +140,6 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
       prefs,
       currentNotificationPermission(),
       () => { window.focus() },
-      tabVisibleRef.current,
     )
   }, [])
 

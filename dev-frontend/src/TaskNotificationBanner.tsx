@@ -5,6 +5,7 @@ import { isCloudMode } from './cloudAuth'
 import { useTaskList, type InAppNotification } from './useTaskListPoll'
 
 const SWIPE_DISMISS_PX = 72
+const SWIPE_START_PX = 8
 
 function NotificationCard({
   notification,
@@ -19,25 +20,35 @@ function NotificationCard({
   const [dragging, setDragging] = useState(false)
   const startYRef = useRef(0)
   const offsetYRef = useRef(0)
+  const draggingRef = useRef(false)
 
   const handleTouchStart = (e: React.TouchEvent) => {
     startYRef.current = e.touches[0]?.clientY ?? 0
     offsetYRef.current = 0
-    setDragging(true)
+    draggingRef.current = false
+    setDragging(false)
     setOffsetY(0)
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    if (!dragging) return
     const currentY = e.touches[0]?.clientY ?? startYRef.current
-    const nextOffset = Math.max(0, currentY - startYRef.current)
+    const deltaY = currentY - startYRef.current
+    if (!draggingRef.current && deltaY <= SWIPE_START_PX) return
+
+    draggingRef.current = true
+    setDragging(true)
+    e.preventDefault()
+
+    const nextOffset = Math.max(0, deltaY)
     offsetYRef.current = nextOffset
     setOffsetY(nextOffset)
   }
 
   const handleTouchEnd = () => {
+    const shouldDismiss = draggingRef.current && offsetYRef.current >= SWIPE_DISMISS_PX
+    draggingRef.current = false
     setDragging(false)
-    if (offsetYRef.current >= SWIPE_DISMISS_PX) {
+    if (shouldDismiss) {
       onDismiss(notification.id)
     }
     offsetYRef.current = 0

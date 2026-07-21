@@ -139,16 +139,6 @@ describe('taskNotifications', () => {
       title: 'Task notifications test — Plan complete',
     })
 
-    const foreground = deliverTestBrowserNotification(
-      event,
-      { browserEnabled: true, inAppEnabled: true },
-      'granted',
-      vi.fn(),
-      true,
-    )
-    expect(foreground.delivered).toBe(false)
-    expect(foreground.failureReason).toContain('background')
-
     const originalNotification = globalThis.Notification
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(globalThis as any).Notification = class {
@@ -158,12 +148,19 @@ describe('taskNotifications', () => {
       close() {}
     }
     try {
+      const foreground = deliverTestBrowserNotification(
+        event,
+        { browserEnabled: true, inAppEnabled: true },
+        'granted',
+        vi.fn(),
+      )
+      expect(foreground.delivered).toBe(true)
+
       const background = deliverTestBrowserNotification(
         event,
         { browserEnabled: true, inAppEnabled: true },
         'granted',
         vi.fn(),
-        false,
       )
       expect(background.delivered).toBe(true)
       expect(deliverTestBrowserNotification(
@@ -171,7 +168,6 @@ describe('taskNotifications', () => {
         { browserEnabled: false, inAppEnabled: true },
         'granted',
         vi.fn(),
-        false,
       ).delivered).toBe(false)
     } finally {
       globalThis.Notification = originalNotification

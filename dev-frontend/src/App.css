@@ -424,7 +424,9 @@
   border-radius: 10px;
   font-size: 0.95rem;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  touch-action: pan-y;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
   pointer-events: auto;
   transition: transform 0.15s ease, opacity 0.15s ease;
 }
@@ -465,6 +467,14 @@
   margin: 0.5rem 0;
   color: #2a662a;
   font-size: 0.95rem;
+}
+
+.settings-os-test-wait {
+  margin: 0.75rem 0;
+  padding: 0.75rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 8px;
+  background: #f8fafc;
 }
 
 .settings-toggle-row {

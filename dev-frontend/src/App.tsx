@@ -26,6 +26,7 @@ import {
 import { TaskListProvider, usePageTitle, useTaskList } from './useTaskListPoll'
 import { TaskNotificationBanner } from './TaskNotificationBanner'
 import { AppErrorBoundary } from './AppErrorBoundary'
+import { useOsNotificationTestWait } from './useOsNotificationTestWait'
 import './App.css'
 
 const markdownComponents: Partial<Components> = {
@@ -3055,6 +3056,22 @@ function SettingsPage() {
     saveNotificationPreferences(next)
   }
 
+  const showNotificationError = useCallback((message: string) => {
+    setNotificationSettingsMessage(message)
+    setNotificationSettingsSuccess(null)
+  }, [])
+
+  const showNotificationSuccess = useCallback((message: string) => {
+    setNotificationSettingsSuccess(message)
+    setNotificationSettingsMessage(null)
+  }, [])
+
+  const { waiting: osTestWaiting, startWait: startOsTestWait, cancelWait: cancelOsTestWait } = useOsNotificationTestWait({
+    attemptDelivery: deliverTestBrowserNotification,
+    onError: showNotificationError,
+    onSuccess: showNotificationSuccess,
+  })
+
   const handleTestInAppNotification = () => {
     setNotificationSettingsMessage(null)
     setNotificationSettingsSuccess(null)
@@ -3073,12 +3090,32 @@ function SettingsPage() {
   const handleTestBrowserNotification = () => {
     setNotificationSettingsMessage(null)
     setNotificationSettingsSuccess(null)
-    const result = deliverTestBrowserNotification()
-    if (result.delivered) {
-      setNotificationSettingsSuccess('OS notification sent. If you still do not see it, check Android notification settings for Chrome and any focus/Do Not Disturb modes.')
-    } else {
-      setNotificationSettingsMessage(result.failureReason ?? 'Could not show an OS notification on this device or browser.')
+    if (!notificationPrefs.browserEnabled) {
+      setNotificationSettingsMessage('Enable browser notifications above to test OS alerts.')
+      return
     }
+    if (browserPermission === 'unsupported') {
+      setNotificationSettingsMessage('Browser notifications are not supported in this browser.')
+      return
+    }
+    if (browserPermission === 'denied') {
+      setNotificationSettingsMessage('Browser notification permission is blocked. Allow notifications for this site in your browser settings, then try again.')
+      return
+    }
+    if (browserPermission === 'default') {
+      setNotificationSettingsMessage('Browser notification permission has not been granted yet. Click Enable browser notifications first.')
+      return
+    }
+    if (document.hidden) {
+      const result = deliverTestBrowserNotification()
+      if (result.delivered) {
+        setNotificationSettingsSuccess('OS notification sent. If you still do not see it, check Android notification settings for Chrome and any focus/Do Not Disturb modes.')
+      } else {
+        setNotificationSettingsMessage(result.failureReason ?? 'Could not show an OS notification on this device or browser.')
+      }
+      return
+    }
+    startOsTestWait()
   }
 
   const handleEnableBrowserNotifications = async () => {
@@ -3310,6 +3347,20 @@ function SettingsPage() {
         {notificationSettingsSuccess && (
           <p className="settings-success" role="status">{notificationSettingsSuccess}</p>
         )}
+        {osTestWaiting && (
+          <div className="settings-os-test-wait" role="status">
+            <p className="settings-hint">
+              Switch to another tab or app within 30 seconds. Dev will send a test OS notification once the tab is backgrounded.
+            </p>
+            <button
+              type="button"
+              className="settings-btn settings-btn-secondary"
+              onClick={cancelOsTestWait}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
         <label className="settings-toggle-row">
           <input
             type="checkbox"
@@ -3356,8 +3407,9 @@ function SettingsPage() {
             type="button"
             className="settings-btn settings-btn-secondary"
             onClick={handleTestBrowserNotification}
+            disabled={osTestWaiting}
           >
-            Test OS notification
+            {osTestWaiting ? 'Waiting for background…' : 'Test OS notification'}
           </button>
         </div>
       </div>
