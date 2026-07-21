@@ -47,6 +47,7 @@ class DevCloudStack(Stack):
             sort_key=dynamodb.Attribute(name="pk", type=dynamodb.AttributeType.STRING),
             projection_type=dynamodb.ProjectionType.ALL,
         )
+        table.add_time_to_live_attribute("ttl")
 
         bucket = s3.Bucket(
             self,
@@ -88,6 +89,7 @@ class DevCloudStack(Stack):
             environment={
                 "DEV_CLOUD_TABLE": table.table_name,
                 "DEV_CLOUD_BUCKET": bucket.bucket_name,
+                "CONTROL_PLANE_LOG_GROUP": api_fn.log_group.log_group_name,
             },
             log_retention=logs.RetentionDays.TWO_WEEKS,
         )
@@ -96,6 +98,16 @@ class DevCloudStack(Stack):
         api_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
+                resources=["*"],
+            )
+        )
+        api_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "logs:StartQuery",
+                    "logs:GetQueryResults",
+                    "logs:DescribeLogGroups",
+                ],
                 resources=["*"],
             )
         )

@@ -228,6 +228,53 @@ export interface EnvironmentInfo {
   registered_at: number;
 }
 
+export interface TelemetryPoint {
+  bucket_ts: number;
+  sample_ts: number;
+  metrics: Record<string, unknown>;
+}
+
+export interface EnvironmentDiagnosticsResponse {
+  environment: EnvironmentInfo;
+  snapshot: {
+    sample_ts: number;
+    env_metrics: Record<string, unknown>;
+    task_metrics: Array<Record<string, unknown>>;
+  } | null;
+  env_series: TelemetryPoint[];
+  task_series: Record<string, TelemetryPoint[]>;
+  retention_sec: number;
+}
+
+export interface EnvironmentErrorEntry {
+  ts: number;
+  level: string;
+  category: string;
+  message: string;
+  task_name?: string | null;
+  detail?: string | null;
+}
+
+export interface EnvironmentErrorsResponse {
+  environment_id: string;
+  online: boolean;
+  last_heartbeat: number;
+  errors: EnvironmentErrorEntry[];
+  retention_sec: number;
+}
+
+export interface ControlPlaneErrorEntry {
+  timestamp?: string;
+  message: string;
+  log_stream?: string;
+}
+
+export interface ControlPlaneErrorsResponse {
+  entries: ControlPlaneErrorEntry[];
+  query_status: string;
+  window_hours: number;
+}
+
 export interface BranchStatusInfo {
   ahead: number;
   behind: number;
@@ -320,6 +367,18 @@ export const api = {
       method: 'DELETE',
       parseJson: false,
     });
+  },
+
+  getEnvironmentDiagnostics(environmentId: string): Promise<EnvironmentDiagnosticsResponse> {
+    return request(`/environments/${encodeURIComponent(environmentId)}/diagnostics`);
+  },
+
+  getEnvironmentErrors(environmentId: string): Promise<EnvironmentErrorsResponse> {
+    return request(`/environments/${encodeURIComponent(environmentId)}/errors`);
+  },
+
+  getControlPlaneErrors(): Promise<ControlPlaneErrorsResponse> {
+    return request('/control-plane/errors');
   },
 
   getBots(): Promise<{ bots: Array<{ org: string; secret: string }> }> {

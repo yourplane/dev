@@ -51,6 +51,10 @@ class StreamUploadSupervisor:
             for key in stale:
                 del self._threads[key]
 
+    def active_thread_count(self) -> int:
+        with self._guard:
+            return sum(1 for t in self._threads.values() if t.is_alive())
+
     def _ensure_thread(
         self,
         task_name: str,
@@ -112,6 +116,10 @@ class BackgroundSyncWorker:
         with self._guard:
             self._pending.update(sync_tasks)
         self._wake.set()
+
+    def queue_depth(self) -> int:
+        with self._guard:
+            return len(self._pending)
 
     def _run(self) -> None:
         while True:

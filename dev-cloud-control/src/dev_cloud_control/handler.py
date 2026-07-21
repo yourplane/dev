@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import time
 import uuid
 from decimal import Decimal
 from typing import Any
 from urllib.parse import parse_qs, unquote
+
+import boto3
 
 from dev_sdk.branch_status import get_branch_status_from_metadata
 from dev_sdk.create_pr import (
@@ -32,6 +35,7 @@ from dev_cloud_control.store import (
     CloudStore,
     FeedItem,
     TaskRecord,
+    TELEMETRY_RETENTION_SEC,
     collect_pr_comment_keys,
     next_comms_filename,
 )
@@ -238,6 +242,17 @@ class Router:
         if handler:
             return handler(event)
 
+        m = re.match(r"^/environments/([^/]+)/diagnostics$", path)
+        if m and method == "GET":
+            return self.get_environment_diagnostics(event, unquote(m.group(1)))
+
+        m = re.match(r"^/environments/([^/]+)/errors$", path)
+        if m and method == "GET":
+            return self.get_environment_errors(event, unquote(m.group(1)))
+
+        if path == "/control-plane/errors" and method == "GET":
+            return self.get_control_plane_errors(event)
+
         m = re.match(r"^/environments/([^/]+)$", path)
         if m and method == "GET":
             return self.get_environment(event, unquote(m.group(1)))
@@ -400,6 +415,114 @@ class Router:
             )
         self.store.delete_environment(environment_id)
         return _no_content()
+
+    def get_environment_diagnostics(self, event: dict, environment_id: str) -> dict:
+        env = self.store.get_environment(environment_id)
+        if not env:
+            return _json(404, {"detail": "Environment not found"})
+        since = time.time() - TELEMETRY_RETENTION_SEC
+        snapshot = self.store.get_telemetry_snapshot(environment_id)
+        env_series = self.store.query_env_metrics(environment_id, since)
+        task_names = self.store.list_telemetry_tasks(environment_id, since)
+        active_tasks = set()
+        for task_name in self.store.list_tasks():
+            task = self.store.get_task(task_name)
+            if (
+                task
+                and task.environment_id == environment_id
+                and task.active_command
+                and task.active_command.get("started")
+            ):
+                active_tasks.add(task_name)
+        task_names = sorted(set(task_names) | active_tasks)
+        task_series = {
+            name: self.store.query_task_metrics(environment_id, name, since) for name in task_names
+        }
+        return _json(
+            200,
+            {
+                "environment": {
+                    "environment_id": env.environment_id,
+                    "display_name": env.display_name,
+                    "online": env.online,
+                    "last_heartbeat": env.last_heartbeat,
+                    "registered_at": env.registered_at,
+                },
+                "snapshot": snapshot,
+                "env_series": env_series,
+                "task_series": task_series,
+                "retention_sec": TELEMETRY_RETENTION_SEC,
+            },
+        )
+
+    def get_environment_errors(self, event: dict, environment_id: str) -> dict:
+        env = self.store.get_environment(environment_id)
+        if not env:
+            return _json(404, {"detail": "Environment not found"})
+        since = time.time() - TELEMETRY_RETENTION_SEC
+        errors = self.store.query_env_errors(environment_id, since)
+        return _json(
+            200,
+            {
+                "environment_id": environment_id,
+                "online": env.online,
+                "last_heartbeat": env.last_heartbeat,
+                "errors": errors,
+                "retention_sec": TELEMETRY_RETENTION_SEC,
+            },
+        )
+
+    def get_control_plane_errors(self, event: dict) -> dict:
+        log_group = os.environ.get("CONTROL_PLANE_LOG_GROUP", "").strip()
+        if not log_group:
+            return _json(503, {"detail": "Control plane log group not configured"})
+        hours = 3
+        start_ms = int((time.time() - hours * 3600) * 1000)
+        end_ms = int(time.time() * 1000)
+        query = (
+            "fields @timestamp, @message, @logStream "
+            "| filter @message like /ERROR|WARNING|Exception|Traceback/ "
+            "| sort @timestamp desc "
+            "| limit 500"
+        )
+        client = boto3.client("logs")
+        try:
+            started = client.start_query(
+                logGroupNames=[log_group],
+                startTime=start_ms,
+                endTime=end_ms,
+                queryString=query,
+            )
+            query_id = started["queryId"]
+            result: dict[str, Any] = {"status": "Running", "results": []}
+            for _ in range(40):
+                result = client.get_query_results(queryId=query_id)
+                if result.get("status") in ("Complete", "Failed", "Cancelled"):
+                    break
+                time.sleep(0.25)
+        except Exception as exc:
+            return _json(502, {"detail": f"CloudWatch Logs query failed: {exc}"})
+        entries = []
+        for row in result.get("results") or []:
+            fields = {cell.get("field"): cell.get("value") for cell in row}
+            message = fields.get("@message") or ""
+            if not message:
+                continue
+            entries.append(
+                {
+                    "timestamp": fields.get("@timestamp"),
+                    "message": message,
+                    "log_stream": fields.get("@logStream"),
+                }
+            )
+        return _json(
+            200,
+            {
+                "entries": entries,
+                "query_status": result.get("status", "Unknown"),
+                "window_hours": hours,
+            },
+        )
 
     # --- repos ---
 
@@ -1216,8 +1339,8 @@ class Router:
     def _worker_dispatch(self, method: str, path: str, event: dict) -> dict:
         if path == "/worker/poll" and method == "POST":
             return self.worker_poll(event)
-        if path == "/worker/heartbeat" and method == "POST":
-            return self.worker_heartbeat(event)
+        if path == "/worker/telemetry" and method == "POST":
+            return self.worker_telemetry(event)
         if path == "/worker/git-token" and method == "POST":
             return self.worker_git_token(event)
         m = re.match(r"^/worker/tasks/([^/]+)/logs$", path)
@@ -1324,15 +1447,14 @@ class Router:
             },
         )
 
-    def worker_heartbeat(self, event: dict) -> dict:
+    def worker_telemetry(self, event: dict) -> dict:
         body = _parse_body(event) or {}
         env_id = (body.get("environment_id") or "").strip()
         if not env_id:
             return _json(400, {"detail": "environment_id required"})
         if not self.store.get_environment(env_id):
             self.store.register_environment(env_id)
-        else:
-            self.store.heartbeat(env_id)
+        self.store.ingest_telemetry(env_id, body)
         return _no_content()
 
     def worker_git_token(self, event: dict) -> dict:
@@ -1481,6 +1603,14 @@ class Router:
             updates["active_command"] = None
             updates["queued_command"] = None
             updates["last_command_error"] = str(error)
+            self.store.append_env_error(
+                task.environment_id,
+                ts=time.time(),
+                level="error",
+                category="command",
+                message=str(error),
+                task_name=task_name,
+            )
         else:
             updates["last_command_error"] = None
             updates["sync_health"] = None
@@ -1514,6 +1644,15 @@ class Router:
             return _json(404, {"detail": "Task not found"})
         value = None if sync_health == "healthy" else "unhealthy"
         self.store.update_task(task_name, sync_health=value)
+        if value == "unhealthy":
+            self.store.append_env_error(
+                task.environment_id,
+                ts=time.time(),
+                level="warning",
+                category="sync_health",
+                message=f"Task {task_name} sync unhealthy",
+                task_name=task_name,
+            )
         return _no_content()
 
     def worker_deletion_ack(self, event: dict) -> dict:

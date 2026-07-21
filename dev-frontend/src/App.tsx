@@ -16,6 +16,7 @@ import {
 import { isCloudMode, getIdToken, signIn, signOut, completeNewPassword, restoreCloudSession } from './cloudAuth'
 import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logParser'
 import { QuestionAnswerForm } from './QuestionAnswerForm'
+import { ControlPlaneErrorsPage, EnvironmentDiagnosticsPage } from './environmentDiagnostics'
 import { getPersistedAnswersForSource, tryParseQuestionPayload, userAnswersContentsKey, type SubmittedAnswers } from './questionForm'
 import './App.css'
 
@@ -67,6 +68,8 @@ export function Layout() {
           <Route path="new" element={<CreateTaskPage />} />
           <Route path="archive" element={<ArchivePage />} />
           {isCloudMode() && <Route path="settings" element={<SettingsPage />} />}
+          {isCloudMode() && <Route path="settings/environments/:environmentId" element={<EnvironmentDiagnosticsPage />} />}
+          {isCloudMode() && <Route path="settings/control-plane-errors" element={<ControlPlaneErrorsPage />} />}
           <Route path="task/:taskName" element={<TaskCommsPage />} />
         </Routes>
       </main>
@@ -3195,7 +3198,9 @@ function SettingsPage() {
             {environments.map((env) => (
               <li key={env.environment_id} className="settings-list-row">
                 <div className="settings-list-main">
-                  <span className="settings-list-title">{env.display_name}</span>
+                  <Link to={`/settings/environments/${encodeURIComponent(env.environment_id)}`} className="settings-list-title settings-list-link">
+                    {env.display_name}
+                  </Link>
                   <span className={`settings-badge ${env.online ? 'settings-badge-online' : 'settings-badge-offline'}`}>
                     {env.online ? 'online' : 'offline'}
                   </span>
@@ -3288,6 +3293,14 @@ function SettingsPage() {
             {saving ? 'Saving…' : 'Save bots'}
           </button>
         </div>
+      </div>
+
+      <div className="settings-section">
+        <h3>Diagnostics</h3>
+        <p className="settings-hint">Review control-plane errors not visible to workers.</p>
+        <Link to="/settings/control-plane-errors" className="settings-btn settings-btn-secondary">
+          Control plane errors
+        </Link>
       </div>
 
       <div className="settings-section">

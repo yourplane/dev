@@ -831,3 +831,61 @@ def test_worker_sync_index_not_in_feed(aws_env):
     index_raw = router.store.get_comms(task_name, "index.txt")
     assert index_raw is not None
     assert "index.txt" not in index_raw
+
+
+def test_worker_telemetry_ingest_and_diagnostics(aws_env):
+    import time as time_mod
+
+    router = Router()
+    store = CloudStore()
+    now = time_mod.time()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-tel", "display_name": "Tel"}))
+    payload = {
+        "environment_id": "env-tel",
+        "ts": now,
+        "env_metrics": {
+            "cpu_percent": 12.5,
+            "memory_percent": 40.0,
+            "poll_loop_utilization": 15.0,
+            "worker_threads": 3,
+            "upload_backlog_bytes": 1024,
+        },
+        "task_metrics": [
+            {
+                "task_name": "task-a",
+                "stream_backlog_bytes": 512,
+                "log_silence_sec": 2.0,
+                "sync_failures": 0,
+            }
+        ],
+        "errors": [
+            {
+                "ts": now,
+                "level": "error",
+                "category": "http",
+                "message": "poll timeout",
+            }
+        ],
+    }
+    resp = router.dispatch(_event("POST", "/worker/telemetry", payload))
+    assert resp["statusCode"] == 204
+    snap = store.get_telemetry_snapshot("env-tel")
+    assert snap is not None
+    assert float(snap["env_metrics"]["cpu_percent"]) == 12.5
+    diag = json.loads(
+        router.dispatch(_event("GET", "/environments/env-tel/diagnostics"))["body"]
+    )
+    assert diag["environment"]["environment_id"] == "env-tel"
+    assert diag["snapshot"]["env_metrics"]["cpu_percent"] == 12.5
+    assert "task-a" in diag["task_series"]
+    errors = json.loads(
+        router.dispatch(_event("GET", "/environments/env-tel/errors"))["body"]
+    )
+    assert len(errors["errors"]) == 1
+    assert errors["errors"][0]["message"] == "poll timeout"
+
+
+def test_worker_heartbeat_route_removed(aws_env):
+    router = Router()
+    resp = router.dispatch(_event("POST", "/worker/heartbeat", {"environment_id": "env-1"}))
+    assert resp["statusCode"] == 404

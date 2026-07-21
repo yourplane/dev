@@ -17,6 +17,8 @@ from botocore.exceptions import ClientError
 OFFLINE_THRESHOLD_SEC = 10
 STREAM_CHUNK_MAX_BYTES = 250_000
 COMMS_INDEX_FILE = "index.txt"
+TELEMETRY_RETENTION_SEC = 3 * 3600
+TELEMETRY_BUCKET_SEC = 60
 
 
 def scrub_comms_index_content(raw: str) -> str:
@@ -645,6 +647,236 @@ class CloudStore:
             owner=item.get("owner"),
             repo_name=item.get("repo_name"),
         )
+
+    # --- telemetry ---
+
+    def _telemetry_ttl(self) -> int:
+        return int(time.time()) + TELEMETRY_RETENTION_SEC
+
+    def _minute_bucket(self, ts: float) -> int:
+        return int(ts // TELEMETRY_BUCKET_SEC) * TELEMETRY_BUCKET_SEC
+
+    def _float_val(self, value: Any) -> float:
+        if isinstance(value, Decimal):
+            return float(value)
+        return float(value or 0)
+
+    def append_env_error(
+        self,
+        environment_id: str,
+        *,
+        ts: float,
+        level: str,
+        category: str,
+        message: str,
+        task_name: str | None = None,
+        detail: str | None = None,
+    ) -> None:
+        err_id = f"{int(ts * 1000):013d}"
+        item = {
+            "pk": f"ENV#{environment_id}",
+            "sk": f"ERR#{err_id}",
+            "entity": "telemetry_err",
+            "ts": _ddb(ts),
+            "level": level,
+            "category": category,
+            "message": message,
+            "ttl": self._telemetry_ttl(),
+        }
+        if task_name:
+            item["task_name"] = task_name
+        if detail:
+            item["detail"] = detail[:4000]
+        self._table.put_item(Item=_ddb(item))
+
+    def ingest_telemetry(self, environment_id: str, payload: dict) -> None:
+        ts = float(payload.get("ts") or time.time())
+        self.heartbeat(environment_id)
+        env_metrics = payload.get("env_metrics") or {}
+        bucket = self._minute_bucket(ts)
+        env_bucket = {
+            "pk": f"ENV#{environment_id}",
+            "sk": f"TS#{bucket:010d}",
+            "entity": "telemetry_env",
+            "bucket_ts": bucket,
+            "sample_ts": _ddb(ts),
+            "metrics": _ddb(env_metrics),
+            "ttl": self._telemetry_ttl(),
+        }
+        self._table.put_item(Item=env_bucket)
+        snapshot = {
+            "pk": f"ENV#{environment_id}",
+            "sk": "SNAP",
+            "entity": "telemetry_snap",
+            "sample_ts": _ddb(ts),
+            "env_metrics": _ddb(env_metrics),
+            "task_metrics": [],
+        }
+        task_snapshots: list[dict] = []
+        for raw_task in payload.get("task_metrics") or []:
+            if not isinstance(raw_task, dict):
+                continue
+            task_name = str(raw_task.get("task_name") or "").strip()
+            if not task_name:
+                continue
+            task = self.get_task(task_name)
+            enriched = dict(raw_task)
+            if task and task.environment_id == environment_id:
+                enriched["comms_epoch_lag"] = max(
+                    0, int(task.comms_cloud_epoch or 0) - int(task.worker_comms_epoch or 0)
+                )
+                enriched["sync_health"] = task.sync_health
+                active = task.active_command
+                enriched["active_command"] = bool(active and active.get("started"))
+                dwell: dict[str, float | None] = {}
+                now = ts
+                if active:
+                    claimed_at = active.get("claimed_at")
+                    started_at = active.get("started_at")
+                    if claimed_at:
+                        dwell["claimed_sec"] = round(now - float(claimed_at), 1)
+                    if started_at:
+                        dwell["started_sec"] = round(now - float(started_at), 1)
+                enriched["phase_dwell"] = dwell
+            task_bucket = {
+                "pk": f"ENV#{environment_id}",
+                "sk": f"TASKTS#{task_name}#{bucket:010d}",
+                "entity": "telemetry_task",
+                "task_name": task_name,
+                "bucket_ts": bucket,
+                "sample_ts": _ddb(ts),
+                "metrics": _ddb(enriched),
+                "ttl": self._telemetry_ttl(),
+            }
+            self._table.put_item(Item=task_bucket)
+            self._table.put_item(
+                Item=_ddb(
+                    {
+                        "pk": f"ENV#{environment_id}",
+                        "sk": f"TASKACT#{task_name}",
+                        "entity": "telemetry_task_act",
+                        "task_name": task_name,
+                        "last_activity": _ddb(ts),
+                        "ttl": self._telemetry_ttl(),
+                    }
+                )
+            )
+            task_snapshots.append(_ddb(enriched))
+        snapshot["task_metrics"] = task_snapshots
+        self._table.put_item(Item=_ddb(snapshot))
+        for raw_err in payload.get("errors") or []:
+            if not isinstance(raw_err, dict):
+                continue
+            message = str(raw_err.get("message") or "").strip()
+            if not message:
+                continue
+            self.append_env_error(
+                environment_id,
+                ts=float(raw_err.get("ts") or ts),
+                level=str(raw_err.get("level") or "error"),
+                category=str(raw_err.get("category") or "worker"),
+                message=message,
+                task_name=str(raw_err.get("task_name") or "").strip() or None,
+                detail=str(raw_err.get("detail") or "").strip() or None,
+            )
+
+    def get_telemetry_snapshot(self, environment_id: str) -> dict | None:
+        resp = self._table.get_item(Key={"pk": f"ENV#{environment_id}", "sk": "SNAP"})
+        item = resp.get("Item")
+        if not item:
+            return None
+        return {
+            "sample_ts": self._float_val(item.get("sample_ts")),
+            "env_metrics": item.get("env_metrics") or {},
+            "task_metrics": item.get("task_metrics") or [],
+        }
+
+    def query_env_metrics(self, environment_id: str, since: float) -> list[dict]:
+        since_bucket = self._minute_bucket(since)
+        resp = self._table.query(
+            KeyConditionExpression="pk = :pk AND sk BETWEEN :lo AND :hi",
+            ExpressionAttributeValues={
+                ":pk": f"ENV#{environment_id}",
+                ":lo": f"TS#{since_bucket:010d}",
+                ":hi": "TS#~",
+            },
+        )
+        points = []
+        for item in resp.get("Items", []):
+            if not str(item.get("sk", "")).startswith("TS#"):
+                continue
+            points.append(
+                {
+                    "bucket_ts": int(item.get("bucket_ts", 0)),
+                    "sample_ts": self._float_val(item.get("sample_ts")),
+                    "metrics": item.get("metrics") or {},
+                }
+            )
+        return sorted(points, key=lambda p: p["bucket_ts"])
+
+    def query_task_metrics(self, environment_id: str, task_name: str, since: float) -> list[dict]:
+        since_bucket = self._minute_bucket(since)
+        resp = self._table.query(
+            KeyConditionExpression="pk = :pk AND sk BETWEEN :lo AND :hi",
+            ExpressionAttributeValues={
+                ":pk": f"ENV#{environment_id}",
+                ":lo": f"TASKTS#{task_name}#{since_bucket:010d}",
+                ":hi": f"TASKTS#{task_name}#~",
+            },
+        )
+        points = []
+        for item in resp.get("Items", []):
+            points.append(
+                {
+                    "bucket_ts": int(item.get("bucket_ts", 0)),
+                    "sample_ts": self._float_val(item.get("sample_ts")),
+                    "metrics": item.get("metrics") or {},
+                }
+            )
+        return sorted(points, key=lambda p: p["bucket_ts"])
+
+    def query_env_errors(self, environment_id: str, since: float) -> list[dict]:
+        resp = self._table.query(
+            KeyConditionExpression="pk = :pk AND begins_with(sk, :prefix)",
+            ExpressionAttributeValues={
+                ":pk": f"ENV#{environment_id}",
+                ":prefix": "ERR#",
+            },
+            ScanIndexForward=False,
+        )
+        errors = []
+        for item in resp.get("Items", []):
+            ts = self._float_val(item.get("ts"))
+            if ts < since:
+                continue
+            errors.append(
+                {
+                    "ts": ts,
+                    "level": item.get("level", "error"),
+                    "category": item.get("category", "worker"),
+                    "message": item.get("message", ""),
+                    "task_name": item.get("task_name"),
+                    "detail": item.get("detail"),
+                }
+            )
+        return sorted(errors, key=lambda e: e["ts"], reverse=True)
+
+    def list_telemetry_tasks(self, environment_id: str, since: float) -> list[str]:
+        resp = self._table.query(
+            KeyConditionExpression="pk = :pk AND begins_with(sk, :prefix)",
+            ExpressionAttributeValues={
+                ":pk": f"ENV#{environment_id}",
+                ":prefix": "TASKACT#",
+            },
+        )
+        names: list[str] = []
+        for item in resp.get("Items", []):
+            last = self._float_val(item.get("last_activity"))
+            if last >= since:
+                name = item.get("task_name")
+                if name:
+                    names.append(str(name))
+        return sorted(set(names))
 
 
 def next_comms_filename(existing: list[str], role: str, *, kind: str | None = None) -> str:
