@@ -662,6 +662,8 @@ def next_comms_filename(existing: list[str], role: str, *, kind: str | None = No
     seq = max_n + 1
     if role == "user" and kind == "bash":
         return f"{seq:03d}-user-bash.md"
+    if role == "user" and kind == "answers":
+        return f"{seq:03d}-user-answers.md"
     if role == "user":
         return f"{seq:03d}-user.md"
     if role == "agent" and kind == "question":

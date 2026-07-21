@@ -703,7 +703,7 @@ class Router:
         ]
         content = build_answers_markdown(body.get("source", ""), answers)
         existing = self.store.list_comms_keys(task_name)
-        filename = next_comms_filename(existing, "user")
+        filename = next_comms_filename(existing, "user", kind="answers")
         self.store.put_comms(task_name, filename, content, origin="cloud")
         self._append_comms_index(task_name, filename)
         ts = time.time()

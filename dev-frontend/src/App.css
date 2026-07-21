@@ -2085,11 +2085,12 @@
   border: none;
   background: transparent;
   color: #888;
-  font-size: 1rem;
+  font-size: 0.75rem;
   line-height: 1;
-  padding: 0.1rem 0.35rem;
+  padding: 0 0.15rem;
+  min-width: 0;
   cursor: pointer;
-  border-radius: 3px;
+  border-radius: 2px;
 }
 
 .question-option-clear:hover {
