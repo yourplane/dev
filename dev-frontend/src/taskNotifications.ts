@@ -118,15 +118,56 @@ export function deliverTestInAppNotification(
   return true
 }
 
+export interface BrowserNotificationAttemptResult {
+  delivered: boolean
+  failureReason?: string
+}
+
 export function deliverTestBrowserNotification(
   event: TaskCompletionEvent,
   prefs: NotificationPreferences,
   permission: NotificationPermission | 'unsupported',
   navigateToTask: () => void,
-): boolean {
-  if (!prefs.browserEnabled) return false
-  if (permission !== 'granted') return false
-  return showBrowserNotification(event.title, event.taskName, navigateToTask) !== null
+  tabVisible: boolean,
+): BrowserNotificationAttemptResult {
+  if (!prefs.browserEnabled) {
+    return {
+      delivered: false,
+      failureReason: 'Browser notifications are disabled. Turn on the browser notifications toggle above.',
+    }
+  }
+  if (permission === 'unsupported') {
+    return {
+      delivered: false,
+      failureReason: 'This browser does not support the Web Notifications API.',
+    }
+  }
+  if (permission === 'denied') {
+    return {
+      delivered: false,
+      failureReason: 'Browser notification permission is blocked. Allow notifications for this site in your browser settings, then try again.',
+    }
+  }
+  if (permission === 'default') {
+    return {
+      delivered: false,
+      failureReason: 'Browser notification permission has not been granted yet. Click Enable browser notifications first.',
+    }
+  }
+  if (tabVisible) {
+    return {
+      delivered: false,
+      failureReason: 'OS notifications are only attempted when the Dev tab is in the background. Switch to another tab or app, then press Test OS notification again. On Android Chrome, alerts in a foreground tab are often suppressed even when permission is granted.',
+    }
+  }
+
+  const notification = showBrowserNotification(event.title, event.taskName, navigateToTask)
+  if (notification) return { delivered: true }
+
+  return {
+    delivered: false,
+    failureReason: 'The browser refused to create an OS notification. Check site notification settings, Do Not Disturb / focus modes, and try again with the Dev tab in the background.',
+  }
 }
 
 export function completionDedupeKey(taskName: string, prev: TaskListStatus, next: TaskListStatus): string {

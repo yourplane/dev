@@ -3,6 +3,7 @@
   margin: 0 auto;
   padding: 1rem 1.5rem;
   min-width: 0;
+  overflow-x: clip;
 }
 
 .header {
@@ -72,6 +73,7 @@
   box-shadow: 0 1px 3px rgba(0,0,0,0.08);
   min-width: 0;
   max-width: 100%;
+  overflow-x: clip;
 }
 
 .status {
@@ -2451,10 +2453,17 @@
   margin-top: 0;
 }
 
+.settings-page {
+  overflow-x: clip;
+  max-width: 100%;
+  min-width: 0;
+}
+
 .settings-section {
   margin-top: 1.75rem;
   padding-top: 1.25rem;
   border-top: 1px solid #e2e8f0;
+  min-width: 0;
 }
 
 .settings-section:first-of-type {
@@ -2554,6 +2563,9 @@
 
 .settings-field input,
 .settings-input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   padding: 0.55rem 0.65rem;
   border: 1px solid #cbd5e1;
   border-radius: 8px;
@@ -2570,10 +2582,17 @@
 
 .settings-bots-row {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 0.5rem;
   margin-bottom: 0.5rem;
-  max-width: 32rem;
+  max-width: 100%;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .settings-bots-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .settings-actions {
@@ -2627,4 +2646,44 @@
 .settings-btn-danger:hover:not(:disabled) {
   background: #fef2f2;
   border-color: #f87171;
+}
+
+.app-error-boundary {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: #f8fafc;
+}
+
+.app-error-boundary-card {
+  width: min(480px, 100%);
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+}
+
+.app-error-boundary-card h2 {
+  margin: 0 0 0.75rem;
+}
+
+.app-error-boundary-message {
+  margin: 0 0 0.75rem;
+  color: #334155;
+}
+
+.app-error-boundary-detail {
+  margin: 0 0 1rem;
+  color: #64748b;
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+
+.app-error-boundary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
 }

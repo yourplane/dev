@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api, type TaskListEntry, type TaskListStatus } from './api'
 import { isCloudMode } from './cloudAuth'
@@ -10,6 +10,7 @@ import {
   createTestNotificationEvent,
   deliverTestBrowserNotification,
   deliverTestInAppNotification,
+  type BrowserNotificationAttemptResult,
   type TaskCompletionEvent,
 } from './taskNotifications'
 
@@ -26,7 +27,7 @@ interface TaskListContextValue {
   dismissInAppNotification: (id: string) => void
   deliverNotification: (event: TaskCompletionEvent, opts?: { ignoreRouteSuppression?: boolean }) => boolean
   deliverTestInAppNotification: () => boolean
-  deliverTestBrowserNotification: () => boolean
+  deliverTestBrowserNotification: () => BrowserNotificationAttemptResult
 }
 
 const TaskListContext = createContext<TaskListContextValue | null>(null)
@@ -60,17 +61,17 @@ interface PageTitleContextValue {
 const PageTitleContext = createContext<PageTitleContextValue | null>(null)
 
 export function usePageTitle(title: string): void {
-  const ctx = useContext(PageTitleContext)
+  const setPageTitle = useContext(PageTitleContext)?.setPageTitle
   useEffect(() => {
-    if (ctx) {
-      ctx.setPageTitle(title)
-      return () => ctx.setPageTitle(DEFAULT_TAB_TITLE)
+    if (setPageTitle) {
+      setPageTitle(title)
+      return () => setPageTitle(DEFAULT_TAB_TITLE)
     }
     document.title = title
     return () => {
       document.title = DEFAULT_TAB_TITLE
     }
-  }, [title, ctx])
+  }, [title, setPageTitle])
 }
 
 function currentNotificationPermission(): NotificationPermission | 'unsupported' {
@@ -132,13 +133,14 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
     })
   }, [pushInAppNotification])
 
-  const deliverTestBrowserNotificationHandler = useCallback(() => {
+  const deliverTestBrowserNotificationHandler = useCallback((): BrowserNotificationAttemptResult => {
     const prefs = loadNotificationPreferences()
     return deliverTestBrowserNotification(
       createTestNotificationEvent(),
       prefs,
       currentNotificationPermission(),
       () => { window.focus() },
+      tabVisibleRef.current,
     )
   }, [])
 
@@ -149,7 +151,7 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
     }
     try {
       const res = await api.getTasks()
-      setTasks(res.tasks)
+      setTasks((current) => (tasksUnchanged(current, res.tasks) ? current : res.tasks))
       if (!silent) setError(null)
 
       if (isCloudMode()) {
@@ -219,13 +221,16 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
     const match = location.pathname.match(/^\/task\/([^/]+)/)
     if (!match) return
     const viewedTask = decodeURIComponent(match[1])
-    setInAppNotifications((current) => current.filter((item) => item.taskName !== viewedTask))
+    setInAppNotifications((current) => {
+      const next = current.filter((item) => item.taskName !== viewedTask)
+      return next.length === current.length ? current : next
+    })
     setTabTitleOverride((current) => (current?.taskName === viewedTask ? null : current))
   }, [location.pathname])
 
   const clearTabTitleOverride = useCallback(() => setTabTitleOverride(null), [])
 
-  const contextValue: TaskListContextValue = {
+  const contextValue = useMemo<TaskListContextValue>(() => ({
     tasks,
     loading,
     error,
@@ -236,13 +241,37 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
     deliverNotification,
     deliverTestInAppNotification: deliverTestInAppNotificationHandler,
     deliverTestBrowserNotification: deliverTestBrowserNotificationHandler,
-  }
+  }), [
+    tasks,
+    loading,
+    error,
+    refreshTasks,
+    inAppNotifications,
+    pushInAppNotification,
+    dismissInAppNotification,
+    deliverNotification,
+    deliverTestInAppNotificationHandler,
+    deliverTestBrowserNotificationHandler,
+  ])
+
+  const pageTitleContextValue = useMemo(
+    () => ({ pageTitle, setPageTitle, tabTitleOverride, clearTabTitleOverride }),
+    [pageTitle, tabTitleOverride, clearTabTitleOverride],
+  )
 
   return (
-    <PageTitleContext.Provider value={{ pageTitle, setPageTitle, tabTitleOverride, clearTabTitleOverride }}>
+    <PageTitleContext.Provider value={pageTitleContextValue}>
       <TaskListContext.Provider value={contextValue}>
         {children}
       </TaskListContext.Provider>
     </PageTitleContext.Provider>
   )
+}
+
+function tasksUnchanged(current: TaskListEntry[], next: TaskListEntry[]): boolean {
+  if (current.length !== next.length) return false
+  for (let i = 0; i < current.length; i += 1) {
+    if (current[i].name !== next[i].name || current[i].status !== next[i].status) return false
+  }
+  return true
 }

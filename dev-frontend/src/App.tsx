@@ -25,6 +25,7 @@ import {
 } from './taskNotifications'
 import { TaskListProvider, usePageTitle, useTaskList } from './useTaskListPoll'
 import { TaskNotificationBanner } from './TaskNotificationBanner'
+import { AppErrorBoundary } from './AppErrorBoundary'
 import './App.css'
 
 const markdownComponents: Partial<Components> = {
@@ -3072,19 +3073,11 @@ function SettingsPage() {
   const handleTestBrowserNotification = () => {
     setNotificationSettingsMessage(null)
     setNotificationSettingsSuccess(null)
-    if (!notificationPrefs.browserEnabled) {
-      setNotificationSettingsMessage('Enable browser notifications above to test OS alerts.')
-      return
-    }
-    if (browserPermission !== 'granted') {
-      setNotificationSettingsMessage('Browser notification permission is not granted. Click Enable browser notifications first.')
-      return
-    }
-    const delivered = deliverTestBrowserNotification()
-    if (delivered) {
-      setNotificationSettingsSuccess('OS notification sent. Switch away from this tab if you do not see it while Dev is focused.')
+    const result = deliverTestBrowserNotification()
+    if (result.delivered) {
+      setNotificationSettingsSuccess('OS notification sent. If you still do not see it, check Android notification settings for Chrome and any focus/Do Not Disturb modes.')
     } else {
-      setNotificationSettingsMessage('Could not show an OS notification on this device or browser.')
+      setNotificationSettingsMessage(result.failureReason ?? 'Could not show an OS notification on this device or browser.')
     }
   }
 
@@ -3565,10 +3558,12 @@ function CloudLoginGate({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <CloudLoginGate>
-        <Layout />
-      </CloudLoginGate>
-    </BrowserRouter>
+    <AppErrorBoundary>
+      <BrowserRouter>
+        <CloudLoginGate>
+          <Layout />
+        </CloudLoginGate>
+      </BrowserRouter>
+    </AppErrorBoundary>
   )
 }
