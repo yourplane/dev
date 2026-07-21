@@ -18,6 +18,13 @@ import { parseLogToSegments, type LogSegment, type ToolCallInfo } from './logPar
 import { QuestionAnswerForm } from './QuestionAnswerForm'
 import { ControlPlaneErrorsPage, EnvironmentDiagnosticsPage } from './environmentDiagnostics'
 import { getPersistedAnswersForSource, tryParseQuestionPayload, userAnswersContentsKey, type SubmittedAnswers } from './questionForm'
+import { TASK_STATUS_LABELS } from './taskStatus'
+import {
+  loadNotificationPreferences,
+  saveNotificationPreferences,
+  type NotificationPreferences,
+} from './taskNotifications'
+import { TaskListProvider, usePageTitle, useTaskList, TaskNotificationBanner } from './useTaskListPoll'
 import './App.css'
 
 const markdownComponents: Partial<Components> = {
@@ -52,46 +59,32 @@ function formatBranchStatus(status: { ahead: number; behind: number }): string {
 
 export function Layout() {
   return (
-    <div className="app">
-      <header className="header">
-        <h1 className="logo"><Link to="/">Dev</Link></h1>
-        <nav>
-          <Link to="/" className="nav-link">Tasks</Link>
-          <Link to="/new" className="nav-link">New task</Link>
-          <Link to="/archive" className="nav-link">Archive</Link>
-          {isCloudMode() && <Link to="/settings" className="nav-link">Settings</Link>}
-        </nav>
-      </header>
-      <main className="main">
-        <Routes>
-          <Route index element={<TaskListPage />} />
-          <Route path="new" element={<CreateTaskPage />} />
-          <Route path="archive" element={<ArchivePage />} />
-          {isCloudMode() && <Route path="settings" element={<SettingsPage />} />}
-          {isCloudMode() && <Route path="settings/environments/:environmentId" element={<EnvironmentDiagnosticsPage />} />}
-          {isCloudMode() && <Route path="settings/control-plane-errors" element={<ControlPlaneErrorsPage />} />}
-          <Route path="task/:taskName" element={<TaskCommsPage />} />
-        </Routes>
-      </main>
-    </div>
+    <TaskListProvider>
+      <div className="app">
+        <header className="header">
+          <h1 className="logo"><Link to="/">Dev</Link></h1>
+          <nav>
+            <Link to="/" className="nav-link">Tasks</Link>
+            <Link to="/new" className="nav-link">New task</Link>
+            <Link to="/archive" className="nav-link">Archive</Link>
+            {isCloudMode() && <Link to="/settings" className="nav-link">Settings</Link>}
+          </nav>
+        </header>
+        <main className="main">
+          <TaskNotificationBanner />
+          <Routes>
+            <Route index element={<TaskListPage />} />
+            <Route path="new" element={<CreateTaskPage />} />
+            <Route path="archive" element={<ArchivePage />} />
+            {isCloudMode() && <Route path="settings" element={<SettingsPage />} />}
+            {isCloudMode() && <Route path="settings/environments/:environmentId" element={<EnvironmentDiagnosticsPage />} />}
+            {isCloudMode() && <Route path="settings/control-plane-errors" element={<ControlPlaneErrorsPage />} />}
+            <Route path="task/:taskName" element={<TaskCommsPage />} />
+          </Routes>
+        </main>
+      </div>
+    </TaskListProvider>
   )
-}
-
-const DEFAULT_TAB_TITLE = 'Dev – Task management'
-
-const TASK_STATUS_LABELS: Record<Exclude<TaskListStatus, 'idle'>, string> = {
-  worker_issue: 'Worker offline',
-  syncing: 'Command syncing — waiting for worker',
-  running: 'Command in progress',
-  failed: 'Last command failed',
-  waiting_for_answers: 'Waiting for question answers',
-  ready_for_next_step: 'Ready for next step (e.g. Plan or Implement)',
-  plan_complete: 'Plan complete',
-  implement_complete: 'Implement complete',
-  merge_from_main_complete: 'Merge from main complete',
-  user_comment: 'User comment — latest activity is your input',
-  pr_comments: 'PR comments — latest activity is review feedback',
-  bash_complete: 'Shell command finished — latest activity is bash output',
 }
 
 function taskStatusIconClass(status: TaskListStatus): string {
@@ -113,10 +106,7 @@ function TaskStatusIcon({ status }: { status: TaskListStatus }) {
 }
 
 function TaskListPage() {
-  const [tasks, setTasks] = useState<TaskListEntry[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const tabVisibleRef = useRef(!document.hidden)
+  const { tasks, loading, error, refreshTasks } = useTaskList()
   const [lastArchived, setLastArchived] = useState<{ archivedName: string; taskName: string } | null>(() => {
     try {
       const raw = sessionStorage.getItem('dev_undo_archive')
@@ -130,51 +120,16 @@ function TaskListPage() {
     return null
   })
 
-  const loadTasks = useCallback(async ({ silent = false } = {}) => {
-    if (!silent) {
-      setError(null)
-      setLoading(true)
-    }
-    try {
-      const res = await api.getTasks()
-      setTasks(res.tasks)
-      if (!silent) setError(null)
-    } catch (e) {
-      if (!silent) setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      if (!silent) setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    loadTasks()
-  }, [loadTasks])
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      if (tabVisibleRef.current) loadTasks({ silent: true })
-    }, 1000)
-    return () => clearInterval(interval)
-  }, [loadTasks])
-
-  useEffect(() => {
-    const onVisibility = () => {
-      tabVisibleRef.current = !document.hidden
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => document.removeEventListener('visibilitychange', onVisibility)
-  }, [])
-
   const handleUndoArchive = useCallback(async () => {
     if (!lastArchived) return
     try {
       await api.unarchiveTask(lastArchived.archivedName)
       setLastArchived(null)
-      loadTasks()
+      refreshTasks()
     } catch {
       // leave banner so user can retry or dismiss
     }
-  }, [lastArchived, loadTasks])
+  }, [lastArchived, refreshTasks])
 
   return (
     <>
@@ -189,7 +144,7 @@ function TaskListPage() {
         tasks={tasks}
         loading={loading}
         error={error}
-        onRefresh={loadTasks}
+        onRefresh={refreshTasks}
         onArchived={setLastArchived}
       />
     </>
@@ -276,10 +231,7 @@ function TaskList({
 
 function CreateTaskPage() {
   const navigate = useNavigate()
-  useEffect(() => {
-    document.title = 'Dev – New task'
-    return () => { document.title = DEFAULT_TAB_TITLE }
-  }, [])
+  usePageTitle('Dev – New task')
   return (
     <CreateTaskForm
       onCreated={(taskName) => navigate(`/task/${encodeURIComponent(taskName)}`)}
@@ -306,6 +258,7 @@ function formatTimestampLabel(timestamp: string): string {
 }
 
 function ArchivePage() {
+  usePageTitle('Dev – Archive')
   const [entries, setEntries] = useState<Array<{
     archived_name: string
     task_name: string
@@ -355,11 +308,6 @@ function ArchivePage() {
       setLoadingMore(false)
     }
   }, [nextOffset])
-
-  useEffect(() => {
-    document.title = 'Dev – Archive'
-    return () => { document.title = DEFAULT_TAB_TITLE }
-  }, [])
 
   useEffect(() => {
     loadArchive()
@@ -2437,10 +2385,7 @@ export function TaskCommsPageContent({
     return () => clearTimeout(t)
   }, [taskName, shellInput])
 
-  useEffect(() => {
-    document.title = `Dev – ${taskName}`
-    return () => { document.title = DEFAULT_TAB_TITLE }
-  }, [taskName])
+  usePageTitle(`Dev – ${taskName}`)
 
   const bashHistoryOlder = useCallback(() => {
     const hist = bashHistoryRef.current
@@ -3085,6 +3030,8 @@ export function TaskCommsPageContent({
 }
 
 function SettingsPage() {
+  usePageTitle('Dev – Settings')
+  const { deliverTestNotification } = useTaskList()
   const [repos, setRepos] = useState<Record<string, string>>({})
   const [bots, setBots] = useState<Array<{ org: string; secret: string }>>([])
   const [environments, setEnvironments] = useState<EnvironmentInfo[]>([])
@@ -3096,11 +3043,46 @@ function SettingsPage() {
   const [adding, setAdding] = useState(false)
   const [removing, setRemoving] = useState<string | null>(null)
   const [deletingEnv, setDeletingEnv] = useState<string | null>(null)
+  const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>(() => loadNotificationPreferences())
+  const [notificationSettingsMessage, setNotificationSettingsMessage] = useState<string | null>(null)
+  const [requestingPermission, setRequestingPermission] = useState(false)
 
-  useEffect(() => {
-    document.title = 'Dev – Settings'
-    return () => { document.title = DEFAULT_TAB_TITLE }
-  }, [])
+  const browserPermission: NotificationPermission | 'unsupported' =
+    typeof Notification === 'undefined' ? 'unsupported' : Notification.permission
+
+  const updateNotificationPrefs = (next: NotificationPreferences) => {
+    setNotificationPrefs(next)
+    saveNotificationPreferences(next)
+  }
+
+  const handleTestNotification = () => {
+    setNotificationSettingsMessage(null)
+    const delivered = deliverTestNotification()
+    if (!delivered) {
+      setNotificationSettingsMessage('Enable at least one notification toggle to test delivery.')
+    }
+  }
+
+  const handleEnableBrowserNotifications = async () => {
+    if (typeof Notification === 'undefined') {
+      setNotificationSettingsMessage('Browser notifications are not supported in this browser.')
+      return
+    }
+    setRequestingPermission(true)
+    setNotificationSettingsMessage(null)
+    try {
+      const result = await Notification.requestPermission()
+      if (result === 'granted') {
+        updateNotificationPrefs({ ...notificationPrefs, browserEnabled: true })
+      } else if (result === 'denied') {
+        setNotificationSettingsMessage('Browser notifications are blocked. Enable them in your browser settings to use this option.')
+      } else {
+        setNotificationSettingsMessage('Browser notification permission was not granted.')
+      }
+    } finally {
+      setRequestingPermission(false)
+    }
+  }
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -3301,6 +3283,65 @@ function SettingsPage() {
         <Link to="/settings/control-plane-errors" className="settings-btn settings-btn-secondary">
           Control plane errors
         </Link>
+      </div>
+
+      <div className="settings-section">
+        <h3>Notifications</h3>
+        <p className="settings-hint">
+          Get alerted when an agent command finishes while you are not viewing that task&apos;s feed.
+          In-app banners show when the Dev tab is visible; browser/OS alerts show when the Dev tab is in the background.
+          Toggles are saved per browser — enable them on each device you use.
+        </p>
+        <p className="settings-hint">
+          On mobile (especially iPhone Safari), background tabs are heavily throttled and OS web notifications may not appear
+          unless Dev is added to the home screen as an installed web app. Use the test button below to verify what works on this device.
+        </p>
+        {notificationSettingsMessage && (
+          <p className="inline-error settings-error" role="alert">{notificationSettingsMessage}</p>
+        )}
+        <label className="settings-toggle-row">
+          <input
+            type="checkbox"
+            checked={notificationPrefs.inAppEnabled}
+            onChange={(e) => updateNotificationPrefs({ ...notificationPrefs, inAppEnabled: e.target.checked })}
+          />
+          <span>In-app notifications (banner while Dev tab is visible)</span>
+        </label>
+        <label className="settings-toggle-row">
+          <input
+            type="checkbox"
+            checked={notificationPrefs.browserEnabled}
+            disabled={browserPermission !== 'granted'}
+            onChange={(e) => updateNotificationPrefs({ ...notificationPrefs, browserEnabled: e.target.checked })}
+          />
+          <span>Browser notifications (OS alerts when Dev tab is in the background)</span>
+        </label>
+        {browserPermission === 'granted' ? (
+          <p className="settings-hint">Browser notification permission: granted</p>
+        ) : browserPermission === 'denied' ? (
+          <p className="settings-hint">Browser notification permission: blocked</p>
+        ) : browserPermission === 'default' ? (
+          <p className="settings-hint">Browser notification permission: not requested yet</p>
+        ) : (
+          <p className="settings-hint">Browser notifications are not supported in this browser</p>
+        )}
+        <div className="settings-actions">
+          <button
+            type="button"
+            className="settings-btn settings-btn-primary"
+            disabled={requestingPermission || browserPermission === 'granted' || browserPermission === 'unsupported'}
+            onClick={() => void handleEnableBrowserNotifications()}
+          >
+            {requestingPermission ? 'Requesting…' : 'Enable browser notifications'}
+          </button>
+          <button
+            type="button"
+            className="settings-btn settings-btn-secondary"
+            onClick={handleTestNotification}
+          >
+            Send test notification
+          </button>
+        </div>
       </div>
 
       <div className="settings-section">

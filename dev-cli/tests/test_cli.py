@@ -260,18 +260,18 @@ def test_question_runs_headless_and_writes_comms(runner: CliRunner, tmp_path: Pa
         ) as mock_popen:
             mock_popen.return_value = mock_proc
             result = runner.invoke(main, ["question"])
-    assert result.exit_code == 0
-    argv = mock_popen.call_args[0][0]
-    assert "--mode" in argv and "ask" in argv
-    assert "--resume" in argv
-    assert not (cwd / "task-question-draft.md").exists()
-    order = [n.strip() for n in (cwd / "comms" / "index.txt").read_text().splitlines() if n.strip()]
-    assert len(order) == 1 and "agent-question" in order[0]
-    comms_text = (cwd / "comms" / order[0]).read_text()
-    assert '"intro": "Need clarity"' in comms_text
-    assert "Starting question" in result.output
-    assert "Questions written to" in result.output
-    assert list((cwd / ".logs").glob("dev-question-stream-*.log"))
+        assert result.exit_code == 0
+        argv = mock_popen.call_args[0][0]
+        assert "--mode" in argv and "ask" in argv
+        assert "--resume" in argv
+        assert not (cwd / "task-question-draft.md").exists()
+        order = [n.strip() for n in (cwd / "comms" / "index.txt").read_text().splitlines() if n.strip()]
+        assert len(order) == 1 and "agent-question" in order[0]
+        comms_text = (cwd / "comms" / order[0]).read_text()
+        assert '"summary": "Need clarity"' in comms_text
+        assert "Starting question" in result.output
+        assert "Questions written to" in result.output
+        assert list((cwd / ".logs").glob("dev-question-stream-*.log"))
 
 
 def test_create_with_unknown_shorthand_exits_nonzero(

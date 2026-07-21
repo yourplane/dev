@@ -7,6 +7,8 @@ import {
   draftIndicatesEditing,
   findOptionByLabel,
   hasAnyAnswer,
+  isQuestionAnswered,
+  normalizeSelectionsRecord,
   submittedAnswersEqual,
   submittedAnswersSignature,
   type QuestionAnswersDraft,
@@ -83,7 +85,7 @@ export function QuestionAnswerForm({
   onSubmitted?: () => void
 }) {
   const questions = payload.questions
-  const [selections, setSelections] = useState<Record<string, string>>({})
+  const [selections, setSelections] = useState<Record<string, string[]>>({})
   const [freeText, setFreeText] = useState<Record<string, string>>({})
   const [expandedFreeText, setExpandedFreeText] = useState<Record<string, boolean>>({})
   const [editing, setEditing] = useState(false)
@@ -103,8 +105,12 @@ export function QuestionAnswerForm({
     let cancelled = false
     api.getQuestionAnswersDraft(taskName, sourceFilename).then((draft) => {
       if (cancelled) return
-      setSelections(draft.selections ?? {})
-      setFreeText(draft.freeText ?? {})
+      setSelections((prev) => (
+        Object.keys(prev).length > 0 ? prev : normalizeSelectionsRecord(draft.selections)
+      ))
+      setFreeText((prev) => (
+        Object.keys(prev).length > 0 ? prev : (draft.freeText ?? {})
+      ))
       setExpandedFreeText(draft.expandedFreeText ?? {})
       setEditing(draft.editing ?? false)
       draftLoadedRef.current = true
@@ -125,9 +131,10 @@ export function QuestionAnswerForm({
       expandedFreeText,
       editing,
     }
-    const showEditable = draftIndicatesEditing(draft, questions)
-    const nextLocked = !showEditable && !!persistedAnswers
-    const nextSubmitted = persistedAnswers ?? null
+    const effectiveAnswers = persistedAnswers ?? (lastSubmitted && !editing ? lastSubmitted : null)
+    const showEditable = editing || (!effectiveAnswers && draftIndicatesEditing(draft, questions))
+    const nextLocked = !showEditable && !!effectiveAnswers
+    const nextSubmitted = effectiveAnswers
 
     if (!lockStateAppliedRef.current) {
       lockStateAppliedRef.current = true
@@ -174,15 +181,17 @@ export function QuestionAnswerForm({
     setSubmitting(true)
     setSubmitError(null)
     try {
-      const answers = questions.map((q) => {
-        const id = q.id ?? ''
-        return {
-          id,
-          text: q.text,
-          selected: selections[id] ?? '',
-          free_text: freeText[id] ?? '',
-        }
-      })
+      const answers = questions
+        .filter((q) => isQuestionAnswered(q, selections, freeText))
+        .map((q) => {
+          const id = q.id ?? ''
+          return {
+            id,
+            text: q.text,
+            selected: selections[id] ?? [],
+            free_text: freeText[id] ?? '',
+          }
+        })
       await api.postQuestionAnswers(taskName, { source: sourceFilename, answers })
       const submitted: SubmittedAnswers = {
         selections: { ...selections },
@@ -231,10 +240,16 @@ export function QuestionAnswerForm({
 
   return (
     <div className="question-answer-form">
-      {payload.intro.trim() ? (
-        <div className="question-intro">
-          <MarkdownInline>{payload.intro}</MarkdownInline>
+      {payload.response?.trim() ? (
+        <div className="question-response">
+          <MarkdownInline>{payload.response}</MarkdownInline>
         </div>
+      ) : null}
+
+      {payload.summary?.trim() ? (
+        <CollapsibleSection label="Summary" className="question-summary-block">
+          <MarkdownInline>{payload.summary}</MarkdownInline>
+        </CollapsibleSection>
       ) : null}
 
       {questions.length === 0 ? (
@@ -245,7 +260,7 @@ export function QuestionAnswerForm({
             <QuestionSummary
               key={q.id}
               question={q}
-              selected={displaySelections[q.id ?? ''] ?? ''}
+              selected={displaySelections[q.id ?? ''] ?? []}
               freeText={displayFreeText[q.id ?? ''] ?? ''}
             />
           ))}
@@ -259,12 +274,22 @@ export function QuestionAnswerForm({
             <QuestionField
               key={q.id}
               question={q}
-              selected={selections[q.id ?? ''] ?? ''}
+              selected={selections[q.id ?? ''] ?? []}
               freeText={freeText[q.id ?? ''] ?? ''}
               expanded={expandedFreeText[q.id ?? ''] ?? false}
-              onSelect={(value) => {
+              onSelectSingle={(value) => {
                 const id = q.id ?? ''
-                setSelections((prev) => ({ ...prev, [id]: value }))
+                setSelections((prev) => ({ ...prev, [id]: value ? [value] : [] }))
+              }}
+              onToggleMulti={(value) => {
+                const id = q.id ?? ''
+                setSelections((prev) => {
+                  const current = prev[id] ?? []
+                  const next = current.includes(value)
+                    ? current.filter((item) => item !== value)
+                    : [...current, value]
+                  return { ...prev, [id]: next }
+                })
               }}
               onFreeTextChange={(value) => {
                 const id = q.id ?? ''
@@ -303,64 +328,91 @@ function QuestionField({
   selected,
   freeText,
   expanded,
-  onSelect,
+  onSelectSingle,
+  onToggleMulti,
   onFreeTextChange,
   onToggleFreeText,
 }: {
   question: QuestionItem
-  selected: string
+  selected: string[]
   freeText: string
   expanded: boolean
-  onSelect: (value: string) => void
+  onSelectSingle: (value: string) => void
+  onToggleMulti: (value: string) => void
   onFreeTextChange: (value: string) => void
   onToggleFreeText: () => void
 }) {
   const qid = question.id ?? ''
+  const isMultiple = question.multiple === true
+  const singleSelected = selected[0] ?? ''
   return (
     <fieldset className="question-field">
       <legend className="question-text">
         <span className="question-text-content">
           <MarkdownInline>{question.text}</MarkdownInline>
         </span>
-        {question.rationale?.trim() ? (
-          <CollapsibleSection label="Why am I asking this?" className="question-attached-collapsible">
-            <MarkdownInline>{question.rationale}</MarkdownInline>
+        {question.examples?.trim() ? (
+          <CollapsibleSection label="Examples" className="question-attached-collapsible">
+            <MarkdownInline>{question.examples}</MarkdownInline>
           </CollapsibleSection>
         ) : null}
       </legend>
       {question.options.length > 0 ? (
-        <div className="question-options" role="radiogroup" aria-label={question.text}>
-          {question.options.map((option, i) => (
-            <label
-              key={`${qid}-${i}`}
-              className={['question-option', optionComplexityClass(option.complexity)].filter(Boolean).join(' ')}
-              title={option.complexity ? complexityLabel(option.complexity) : undefined}
-            >
-              <input
-                type="radio"
-                name={`question-${qid}`}
-                value={option.label}
-                checked={selected === option.label}
-                onChange={() => onSelect(option.label)}
-              />
-              <span className="question-option-content">
-                <span className="question-option-group">
-                  <span className="question-option-label">
-                    <MarkdownInline>{option.label}</MarkdownInline>
-                  </span>
-                  {option.implications?.trim() ? (
-                    <CollapsibleSection
-                      label={ARCHITECTURAL_IMPLICATIONS_LABEL}
-                      className="question-attached-collapsible question-option-implications"
+        isMultiple ? (
+          <div className="question-options" role="group" aria-label={question.text}>
+            {question.options.map((option, i) => (
+              <label
+                key={`${qid}-${i}`}
+                className={['question-option', optionComplexityClass(option.complexity)].filter(Boolean).join(' ')}
+                title={option.complexity ? complexityLabel(option.complexity) : undefined}
+              >
+                <input
+                  type="checkbox"
+                  name={`question-${qid}`}
+                  value={option.label}
+                  checked={selected.includes(option.label)}
+                  onChange={() => onToggleMulti(option.label)}
+                />
+                <OptionContent option={option} />
+              </label>
+            ))}
+          </div>
+        ) : (
+          <div className="question-options" role="radiogroup" aria-label={question.text}>
+            {question.options.map((option, i) => {
+              const isSelected = singleSelected === option.label
+              return (
+                <div
+                  key={`${qid}-${i}`}
+                  className={['question-option', optionComplexityClass(option.complexity)].filter(Boolean).join(' ')}
+                  title={option.complexity ? complexityLabel(option.complexity) : undefined}
+                >
+                  <label className="question-option-label-wrap">
+                    <input
+                      type="radio"
+                      name={`question-${qid}`}
+                      value={option.label}
+                      checked={isSelected}
+                      onChange={() => onSelectSingle(option.label)}
+                    />
+                    <OptionContent option={option} />
+                  </label>
+                  {isSelected ? (
+                    <button
+                      type="button"
+                      className="question-option-clear"
+                      aria-label="Clear selection"
+                      title="Clear selection"
+                      onClick={() => onSelectSingle('')}
                     >
-                      <MarkdownInline>{option.implications}</MarkdownInline>
-                    </CollapsibleSection>
+                      ×
+                    </button>
                   ) : null}
-                </span>
-              </span>
-            </label>
-          ))}
-        </div>
+                </div>
+              )
+            })}
+          </div>
+        )
       ) : null}
       {!expanded ? (
         <button type="button" className="question-add-notes-btn" onClick={onToggleFreeText}>
@@ -381,18 +433,37 @@ function QuestionField({
   )
 }
 
+function OptionContent({ option }: { option: QuestionOption }) {
+  return (
+    <span className="question-option-content">
+      <span className="question-option-group">
+        <span className="question-option-label">
+          <MarkdownInline>{option.label}</MarkdownInline>
+        </span>
+        {option.implications?.trim() ? (
+          <CollapsibleSection
+            label={ARCHITECTURAL_IMPLICATIONS_LABEL}
+            className="question-attached-collapsible question-option-implications"
+          >
+            <MarkdownInline>{option.implications}</MarkdownInline>
+          </CollapsibleSection>
+        ) : null}
+      </span>
+    </span>
+  )
+}
+
 function QuestionSummary({
   question,
   selected,
   freeText,
 }: {
   question: QuestionItem
-  selected: string
+  selected: string[]
   freeText: string
 }) {
-  const hasSelected = selected.trim().length > 0
+  const hasSelected = selected.length > 0
   const hasNotes = freeText.trim().length > 0
-  const selectedOption = hasSelected ? findOptionByLabel(question.options, selected) : undefined
   if (!hasSelected && !hasNotes) return null
   return (
     <div className="question-summary-item">
@@ -400,36 +471,42 @@ function QuestionSummary({
         <div className="question-summary-text">
           <MarkdownInline>{question.text}</MarkdownInline>
         </div>
-        {question.rationale?.trim() ? (
-          <CollapsibleSection label="Why am I asking this?" className="question-attached-collapsible">
-            <MarkdownInline>{question.rationale}</MarkdownInline>
+        {question.examples?.trim() ? (
+          <CollapsibleSection label="Examples" className="question-attached-collapsible">
+            <MarkdownInline>{question.examples}</MarkdownInline>
           </CollapsibleSection>
         ) : null}
       </div>
       {hasSelected ? (
         <div className="question-summary-selected">
-          <div
-            className={[
-              'question-summary-selection-group',
-              optionComplexityClass(selectedOption?.complexity),
-            ].filter(Boolean).join(' ')}
-            title={selectedOption?.complexity ? complexityLabel(selectedOption.complexity) : undefined}
-          >
-            <div className="question-summary-selection-row">
-              <strong>Selected:</strong>{' '}
-              <span className="question-summary-selected-label">
-                <MarkdownInline>{selected}</MarkdownInline>
-              </span>
-            </div>
-            {selectedOption?.implications?.trim() ? (
-              <CollapsibleSection
-                label={ARCHITECTURAL_IMPLICATIONS_LABEL}
-                className="question-attached-collapsible question-option-implications"
+          {selected.map((label) => {
+            const selectedOption = findOptionByLabel(question.options, label)
+            return (
+              <div
+                key={label}
+                className={[
+                  'question-summary-selection-group',
+                  optionComplexityClass(selectedOption?.complexity),
+                ].filter(Boolean).join(' ')}
+                title={selectedOption?.complexity ? complexityLabel(selectedOption.complexity) : undefined}
               >
-                <MarkdownInline>{selectedOption.implications}</MarkdownInline>
-              </CollapsibleSection>
-            ) : null}
-          </div>
+                <div className="question-summary-selection-row">
+                  <strong>Selected:</strong>{' '}
+                  <span className="question-summary-selected-label">
+                    <MarkdownInline>{label}</MarkdownInline>
+                  </span>
+                </div>
+                {selectedOption?.implications?.trim() ? (
+                  <CollapsibleSection
+                    label={ARCHITECTURAL_IMPLICATIONS_LABEL}
+                    className="question-attached-collapsible question-option-implications"
+                  >
+                    <MarkdownInline>{selectedOption.implications}</MarkdownInline>
+                  </CollapsibleSection>
+                ) : null}
+              </div>
+            )
+          })}
         </div>
       ) : null}
       {hasNotes ? (

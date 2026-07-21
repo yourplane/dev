@@ -414,7 +414,7 @@ class TaskCommentDraftRequest(BaseModel):
 class QuestionAnswerItemRequest(BaseModel):
     id: str = ""
     text: str = ""
-    selected: str = ""
+    selected: str | list[str] = ""
     free_text: str = ""
 
 
@@ -428,14 +428,14 @@ class PostQuestionAnswersResponse(BaseModel):
 
 
 class QuestionAnswersDraftRequest(BaseModel):
-    selections: dict[str, str] = Field(default_factory=dict)
+    selections: dict[str, str | list[str]] = Field(default_factory=dict)
     freeText: dict[str, str] = Field(default_factory=dict)
     expandedFreeText: dict[str, bool] = Field(default_factory=dict)
     editing: bool = False
 
 
 class QuestionAnswersDraftResponse(BaseModel):
-    selections: dict[str, str] = Field(default_factory=dict)
+    selections: dict[str, str | list[str]] = Field(default_factory=dict)
     freeText: dict[str, str] = Field(default_factory=dict)
     expandedFreeText: dict[str, bool] = Field(default_factory=dict)
     editing: bool = False
