@@ -4,6 +4,7 @@ import {
   INAPP_NOTIFICATIONS_KEY,
   chooseNotificationDelivery,
   chooseNotificationFallbackDelivery,
+  createTestNotificationEvent,
   deliverTaskNotification,
   deliverTestBrowserNotification,
   deliverTestInAppNotification,
@@ -11,6 +12,7 @@ import {
   loadNotificationPreferences,
   saveNotificationPreferences,
   shouldSuppressForRoute,
+  TEST_NOTIFICATION_TITLE,
 } from './taskNotifications'
 import { isCompletionTransition } from './taskStatus'
 
@@ -133,19 +135,21 @@ describe('taskNotifications', () => {
     expect(chooseNotificationFallbackDelivery({ browserEnabled: true, inAppEnabled: true }, true)).toBe('in_app')
   })
 
+  it('creates test notification with plain title and settings route', () => {
+    const event = createTestNotificationEvent()
+    expect(event.title).toBe(TEST_NOTIFICATION_TITLE)
+    expect(event.clickUrl).toBe('/settings')
+  })
+
   it('delivers split test notifications independently', async () => {
     const showInApp = vi.fn()
-    const event = {
-      taskName: 'notifications-test',
-      status: 'plan_complete' as const,
-      title: 'Task notifications test — Plan complete',
-      dedupeKey: 'test-notification',
-    }
+    const event = createTestNotificationEvent()
     expect(deliverTestInAppNotification(event, { browserEnabled: false, inAppEnabled: false }, showInApp)).toBe(false)
     expect(deliverTestInAppNotification(event, { browserEnabled: true, inAppEnabled: true }, showInApp)).toBe(true)
     expect(showInApp).toHaveBeenCalledWith({
       taskName: 'notifications-test',
-      title: 'Task notifications test — Plan complete',
+      title: TEST_NOTIFICATION_TITLE,
+      clickUrl: '/settings',
     })
 
     const originalNotification = globalThis.Notification
@@ -162,7 +166,12 @@ describe('taskNotifications', () => {
         'granted',
       )
       expect(foreground.delivered).toBe(true)
-      expect(showNotification).toHaveBeenCalled()
+      expect(showNotification).toHaveBeenCalledWith(
+        TEST_NOTIFICATION_TITLE,
+        expect.objectContaining({
+          data: expect.objectContaining({ url: '/settings' }),
+        }),
+      )
 
       const background = await deliverTestBrowserNotification(
         event,

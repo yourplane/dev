@@ -57,7 +57,7 @@ export function chooseNotificationFallbackDelivery(
 
 export interface TaskNotificationHandlers {
   navigateToTask: () => void
-  showInApp: (notification: { taskName: string; title: string }) => void
+  showInApp: (notification: { taskName: string; title: string; clickUrl?: string }) => void
   showTabTitle: (override: { taskName: string; title: string }) => void
 }
 
@@ -72,11 +72,11 @@ export async function deliverTaskNotification(
   if (primary === 'none') return false
 
   if (primary === 'browser') {
-    const delivered = await showBrowserNotification(event.title, event.taskName)
+    const delivered = await showBrowserNotification(event.title, event.taskName, event.clickUrl)
     if (delivered) return true
     const fallback = chooseNotificationFallbackDelivery(prefs, tabVisible)
     if (fallback === 'in_app') {
-      handlers.showInApp({ taskName: event.taskName, title: event.title })
+      handlers.showInApp({ taskName: event.taskName, title: event.title, clickUrl: event.clickUrl })
       return true
     }
     if (fallback === 'tab_title') {
@@ -87,7 +87,7 @@ export async function deliverTaskNotification(
   }
 
   if (primary === 'in_app') {
-    handlers.showInApp({ taskName: event.taskName, title: event.title })
+    handlers.showInApp({ taskName: event.taskName, title: event.title, clickUrl: event.clickUrl })
     return true
   }
 
@@ -99,23 +99,25 @@ export async function deliverTaskNotification(
   return false
 }
 
+export const TEST_NOTIFICATION_TITLE = 'Test notification'
+
 export function createTestNotificationEvent(): TaskCompletionEvent {
-  const status = 'plan_complete' as const
   return {
     taskName: 'notifications-test',
-    status,
-    title: completionNotificationTitle('notifications test', status),
+    status: 'plan_complete',
+    title: TEST_NOTIFICATION_TITLE,
     dedupeKey: 'test-notification',
+    clickUrl: '/settings',
   }
 }
 
 export function deliverTestInAppNotification(
   event: TaskCompletionEvent,
   prefs: NotificationPreferences,
-  showInApp: (notification: { taskName: string; title: string }) => void,
+  showInApp: (notification: { taskName: string; title: string; clickUrl?: string }) => void,
 ): boolean {
   if (!prefs.inAppEnabled) return false
-  showInApp({ taskName: event.taskName, title: event.title })
+  showInApp({ taskName: event.taskName, title: event.title, clickUrl: event.clickUrl })
   return true
 }
 
@@ -154,7 +156,7 @@ export async function deliverTestBrowserNotification(
     }
   }
 
-  const delivered = await showBrowserNotification(event.title, event.taskName)
+  const delivered = await showBrowserNotification(event.title, event.taskName, event.clickUrl)
   if (delivered) return { delivered: true }
 
   return {
@@ -172,6 +174,7 @@ export interface TaskCompletionEvent {
   status: TaskListStatus
   title: string
   dedupeKey: string
+  clickUrl?: string
 }
 
 export function detectCompletionEvents(
@@ -211,7 +214,8 @@ export function shouldSuppressForRoute(taskName: string, pathname: string): bool
 export async function showBrowserNotification(
   title: string,
   taskName: string,
+  clickUrl?: string,
 ): Promise<boolean> {
   if (typeof Notification === 'undefined') return false
-  return showServiceWorkerNotification(title, taskName)
+  return showServiceWorkerNotification(title, taskName, clickUrl)
 }

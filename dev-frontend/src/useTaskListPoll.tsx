@@ -42,6 +42,7 @@ export interface InAppNotification {
   id: string
   taskName: string
   title: string
+  clickUrl?: string
 }
 
 let inAppNotificationIdCounter = 0

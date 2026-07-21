@@ -3,10 +3,14 @@ self.addEventListener('notificationclick', (event) => {
   const data = event.notification.data || {}
   const url = data.url || '/'
   event.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clientList) => {
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(async (clientList) => {
       for (const client of clientList) {
         if ('focus' in client) {
-          return client.focus()
+          await client.focus()
+          if ('navigate' in client) {
+            return client.navigate(url)
+          }
+          return
         }
       }
       if (self.clients.openWindow) {

@@ -103,7 +103,7 @@ export function TaskNotificationBanner() {
 
   const handleOpen = (notification: InAppNotification) => {
     dismissInAppNotification(notification.id)
-    navigate(`/task/${encodeURIComponent(notification.taskName)}`)
+    navigate(notification.clickUrl ?? `/task/${encodeURIComponent(notification.taskName)}`)
   }
 
   const stack = (

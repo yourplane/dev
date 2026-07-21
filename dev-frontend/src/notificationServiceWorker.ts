@@ -15,6 +15,7 @@ export async function registerNotificationServiceWorker(): Promise<ServiceWorker
 export async function showServiceWorkerNotification(
   title: string,
   taskName: string,
+  clickUrl?: string,
 ): Promise<boolean> {
   if (!('serviceWorker' in navigator)) return false
   try {
@@ -25,7 +26,7 @@ export async function showServiceWorkerNotification(
       badge: '/icons/notification-icon-192.png',
       data: {
         taskName,
-        url: `/task/${encodeURIComponent(taskName)}`,
+        url: clickUrl ?? `/task/${encodeURIComponent(taskName)}`,
       },
     })
     return true
