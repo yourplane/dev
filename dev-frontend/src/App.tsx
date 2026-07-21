@@ -24,7 +24,10 @@ import {
   saveNotificationPreferences,
   type NotificationPreferences,
 } from './taskNotifications'
-import { TaskListProvider, usePageTitle, useTaskList, TaskNotificationBanner } from './useTaskListPoll'
+import { TaskListProvider, usePageTitle, useTaskList } from './useTaskListPoll'
+import { TaskNotificationBanner } from './TaskNotificationBanner'
+import { AppErrorBoundary } from './AppErrorBoundary'
+import { useOsNotificationTestWait } from './useOsNotificationTestWait'
 import './App.css'
 
 const markdownComponents: Partial<Components> = {
@@ -3031,7 +3034,7 @@ export function TaskCommsPageContent({
 
 function SettingsPage() {
   usePageTitle('Dev – Settings')
-  const { deliverTestNotification } = useTaskList()
+  const { deliverTestInAppNotification, deliverTestBrowserNotification } = useTaskList()
   const [repos, setRepos] = useState<Record<string, string>>({})
   const [bots, setBots] = useState<Array<{ org: string; secret: string }>>([])
   const [environments, setEnvironments] = useState<EnvironmentInfo[]>([])
@@ -3045,6 +3048,7 @@ function SettingsPage() {
   const [deletingEnv, setDeletingEnv] = useState<string | null>(null)
   const [notificationPrefs, setNotificationPrefs] = useState<NotificationPreferences>(() => loadNotificationPreferences())
   const [notificationSettingsMessage, setNotificationSettingsMessage] = useState<string | null>(null)
+  const [notificationSettingsSuccess, setNotificationSettingsSuccess] = useState<string | null>(null)
   const [requestingPermission, setRequestingPermission] = useState(false)
 
   const browserPermission: NotificationPermission | 'unsupported' =
@@ -3055,12 +3059,67 @@ function SettingsPage() {
     saveNotificationPreferences(next)
   }
 
-  const handleTestNotification = () => {
+  const showNotificationError = useCallback((message: string) => {
+    setNotificationSettingsMessage(message)
+    setNotificationSettingsSuccess(null)
+  }, [])
+
+  const showNotificationSuccess = useCallback((message: string) => {
+    setNotificationSettingsSuccess(message)
     setNotificationSettingsMessage(null)
-    const delivered = deliverTestNotification()
-    if (!delivered) {
-      setNotificationSettingsMessage('Enable at least one notification toggle to test delivery.')
+  }, [])
+
+  const { waiting: osTestWaiting, secondsRemaining: osTestSecondsRemaining, startWait: startOsTestWait, cancelWait: cancelOsTestWait } = useOsNotificationTestWait({
+    attemptDelivery: deliverTestBrowserNotification,
+    onError: showNotificationError,
+    onSuccess: showNotificationSuccess,
+  })
+
+  const handleTestInAppNotification = () => {
+    setNotificationSettingsMessage(null)
+    setNotificationSettingsSuccess(null)
+    if (!notificationPrefs.inAppEnabled) {
+      setNotificationSettingsMessage('Enable in-app notifications above to test the banner.')
+      return
     }
+    const delivered = deliverTestInAppNotification()
+    if (delivered) {
+      setNotificationSettingsSuccess('In-app banner sent — flick the banner at the top left or right to dismiss.')
+    } else {
+      setNotificationSettingsMessage('Could not show the in-app banner.')
+    }
+  }
+
+  const handleTestBrowserNotification = () => {
+    setNotificationSettingsMessage(null)
+    setNotificationSettingsSuccess(null)
+    if (!notificationPrefs.browserEnabled) {
+      setNotificationSettingsMessage('Enable browser notifications above to test OS alerts.')
+      return
+    }
+    if (browserPermission === 'unsupported') {
+      setNotificationSettingsMessage('Browser notifications are not supported in this browser.')
+      return
+    }
+    if (browserPermission === 'denied') {
+      setNotificationSettingsMessage('Browser notification permission is blocked. Allow notifications for this site in your browser settings, then try again.')
+      return
+    }
+    if (browserPermission === 'default') {
+      setNotificationSettingsMessage('Browser notification permission has not been granted yet. Click Enable browser notifications first.')
+      return
+    }
+    if (document.hidden) {
+      void deliverTestBrowserNotification().then((result) => {
+        if (result.delivered) {
+          setNotificationSettingsSuccess('OS notification sent. If you still do not see it, check Android notification settings for Chrome and any focus/Do Not Disturb modes.')
+        } else {
+          setNotificationSettingsMessage(result.failureReason ?? 'Could not show an OS notification on this device or browser.')
+        }
+      })
+      return
+    }
+    startOsTestWait()
   }
 
   const handleEnableBrowserNotifications = async () => {
@@ -3294,10 +3353,30 @@ function SettingsPage() {
         </p>
         <p className="settings-hint">
           On mobile (especially iPhone Safari), background tabs are heavily throttled and OS web notifications may not appear
-          unless Dev is added to the home screen as an installed web app. Use the test button below to verify what works on this device.
+          unless Dev is added to the home screen as an installed web app. Use the test buttons below to verify each channel on this device.
         </p>
         {notificationSettingsMessage && (
           <p className="inline-error settings-error" role="alert">{notificationSettingsMessage}</p>
+        )}
+        {notificationSettingsSuccess && (
+          <p className="settings-success" role="status">{notificationSettingsSuccess}</p>
+        )}
+        {osTestWaiting && (
+          <div className="settings-os-test-wait" role="status">
+            <p className="settings-hint">
+              Switch to another tab or app. Dev will send a test OS notification once the tab is backgrounded.
+            </p>
+            <p className="settings-os-test-countdown" aria-live="polite">
+              {osTestSecondsRemaining}s
+            </p>
+            <button
+              type="button"
+              className="settings-btn settings-btn-secondary"
+              onClick={cancelOsTestWait}
+            >
+              Cancel
+            </button>
+          </div>
         )}
         <label className="settings-toggle-row">
           <input
@@ -3337,9 +3416,17 @@ function SettingsPage() {
           <button
             type="button"
             className="settings-btn settings-btn-secondary"
-            onClick={handleTestNotification}
+            onClick={handleTestInAppNotification}
           >
-            Send test notification
+            Test in-app banner
+          </button>
+          <button
+            type="button"
+            className="settings-btn settings-btn-secondary"
+            onClick={handleTestBrowserNotification}
+            disabled={osTestWaiting}
+          >
+            {osTestWaiting ? 'Waiting for background…' : 'Test OS notification'}
           </button>
         </div>
       </div>
@@ -3540,10 +3627,12 @@ function CloudLoginGate({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <BrowserRouter>
-      <CloudLoginGate>
-        <Layout />
-      </CloudLoginGate>
-    </BrowserRouter>
+    <AppErrorBoundary>
+      <BrowserRouter>
+        <CloudLoginGate>
+          <Layout />
+        </CloudLoginGate>
+      </BrowserRouter>
+    </AppErrorBoundary>
   )
 }
