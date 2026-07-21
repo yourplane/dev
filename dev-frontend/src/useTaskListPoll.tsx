@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { api, type TaskListEntry, type TaskListStatus } from './api'
 import { isCloudMode } from './cloudAuth'
@@ -8,6 +8,9 @@ import {
   loadNotificationPreferences,
   shouldSuppressForRoute,
   createTestNotificationEvent,
+  deliverTestBrowserNotification,
+  deliverTestInAppNotification,
+  type BrowserNotificationAttemptResult,
   type TaskCompletionEvent,
 } from './taskNotifications'
 
@@ -19,10 +22,12 @@ interface TaskListContextValue {
   loading: boolean
   error: string | null
   refreshTasks: (opts?: { silent?: boolean }) => Promise<void>
-  inAppNotification: InAppNotification | null
-  setInAppNotification: (n: InAppNotification | null) => void
-  deliverNotification: (event: TaskCompletionEvent, opts?: { ignoreRouteSuppression?: boolean }) => boolean
-  deliverTestNotification: () => boolean
+  inAppNotifications: InAppNotification[]
+  pushInAppNotification: (notification: Omit<InAppNotification, 'id'>) => void
+  dismissInAppNotification: (id: string) => void
+  deliverNotification: (event: TaskCompletionEvent, opts?: { ignoreRouteSuppression?: boolean }) => Promise<boolean>
+  deliverTestInAppNotification: () => boolean
+  deliverTestBrowserNotification: () => Promise<BrowserNotificationAttemptResult>
 }
 
 const TaskListContext = createContext<TaskListContextValue | null>(null)
@@ -34,8 +39,17 @@ export function useTaskList(): TaskListContextValue {
 }
 
 export interface InAppNotification {
+  id: string
   taskName: string
   title: string
+  clickUrl?: string
+}
+
+let inAppNotificationIdCounter = 0
+
+function nextInAppNotificationId(): string {
+  inAppNotificationIdCounter += 1
+  return `in-app-${Date.now()}-${inAppNotificationIdCounter}`
 }
 
 interface PageTitleContextValue {
@@ -48,17 +62,17 @@ interface PageTitleContextValue {
 const PageTitleContext = createContext<PageTitleContextValue | null>(null)
 
 export function usePageTitle(title: string): void {
-  const ctx = useContext(PageTitleContext)
+  const setPageTitle = useContext(PageTitleContext)?.setPageTitle
   useEffect(() => {
-    if (ctx) {
-      ctx.setPageTitle(title)
-      return () => ctx.setPageTitle(DEFAULT_TAB_TITLE)
+    if (setPageTitle) {
+      setPageTitle(title)
+      return () => setPageTitle(DEFAULT_TAB_TITLE)
     }
     document.title = title
     return () => {
       document.title = DEFAULT_TAB_TITLE
     }
-  }, [title, ctx])
+  }, [title, setPageTitle])
 }
 
 function currentNotificationPermission(): NotificationPermission | 'unsupported' {
@@ -66,39 +80,11 @@ function currentNotificationPermission(): NotificationPermission | 'unsupported'
   return Notification.permission
 }
 
-export function TaskNotificationBanner() {
-  const ctx = useContext(TaskListContext)
-  const navigate = useNavigate()
-  if (!ctx?.inAppNotification || !isCloudMode()) return null
-  const { inAppNotification, setInAppNotification } = ctx
-  return (
-    <div className="task-notification-banner">
-      <button
-        type="button"
-        className="task-notification-banner-main"
-        onClick={() => {
-          setInAppNotification(null)
-          navigate(`/task/${encodeURIComponent(inAppNotification.taskName)}`)
-        }}
-      >
-        {inAppNotification.title}
-      </button>
-      <button
-        type="button"
-        className="archive-dismiss-btn"
-        onClick={() => setInAppNotification(null)}
-      >
-        Dismiss
-      </button>
-    </div>
-  )
-}
-
 export function TaskListProvider({ children }: { children: ReactNode }) {
   const [tasks, setTasks] = useState<TaskListEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [inAppNotification, setInAppNotification] = useState<InAppNotification | null>(null)
+  const [inAppNotifications, setInAppNotifications] = useState<InAppNotification[]>([])
   const [pageTitle, setPageTitle] = useState(DEFAULT_TAB_TITLE)
   const [tabTitleOverride, setTabTitleOverride] = useState<{ taskName: string; title: string } | null>(null)
 
@@ -109,7 +95,18 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
   const pollInitializedRef = useRef(false)
   const notifiedKeysRef = useRef<Set<string>>(new Set())
 
-  const deliverNotification = useCallback((
+  const pushInAppNotification = useCallback((notification: Omit<InAppNotification, 'id'>) => {
+    setInAppNotifications((current) => [
+      { ...notification, id: nextInAppNotificationId() },
+      ...current,
+    ])
+  }, [])
+
+  const dismissInAppNotification = useCallback((id: string) => {
+    setInAppNotifications((current) => current.filter((item) => item.id !== id))
+  }, [])
+
+  const deliverNotification = useCallback(async (
     event: TaskCompletionEvent,
     { ignoreRouteSuppression = false }: { ignoreRouteSuppression?: boolean } = {},
   ) => {
@@ -124,25 +121,25 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
       tabVisibleRef.current,
       {
         navigateToTask: () => navigate(`/task/${encodeURIComponent(event.taskName)}`),
-        showInApp: (notification) => setInAppNotification(notification),
+        showInApp: (notification) => pushInAppNotification(notification),
         showTabTitle: (override) => setTabTitleOverride(override),
       },
     )
-  }, [location.pathname, navigate])
+  }, [location.pathname, navigate, pushInAppNotification])
 
-  const deliverTestNotification = useCallback(() => {
+  const deliverTestInAppNotificationHandler = useCallback(() => {
     const prefs = loadNotificationPreferences()
-    if (!prefs.browserEnabled && !prefs.inAppEnabled) return false
-    return deliverTaskNotification(
+    return deliverTestInAppNotification(createTestNotificationEvent(), prefs, (notification) => {
+      pushInAppNotification(notification)
+    })
+  }, [pushInAppNotification])
+
+  const deliverTestBrowserNotificationHandler = useCallback(async (): Promise<BrowserNotificationAttemptResult> => {
+    const prefs = loadNotificationPreferences()
+    return deliverTestBrowserNotification(
       createTestNotificationEvent(),
       prefs,
       currentNotificationPermission(),
-      tabVisibleRef.current,
-      {
-        navigateToTask: () => { window.focus() },
-        showInApp: (notification) => setInAppNotification(notification),
-        showTabTitle: (override) => setTabTitleOverride(override),
-      },
     )
   }, [])
 
@@ -153,7 +150,7 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
     }
     try {
       const res = await api.getTasks()
-      setTasks(res.tasks)
+      setTasks((current) => (tasksUnchanged(current, res.tasks) ? current : res.tasks))
       if (!silent) setError(null)
 
       if (isCloudMode()) {
@@ -170,7 +167,7 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
           if (notifiedKeysRef.current.has(event.dedupeKey)) continue
           if (shouldSuppressForRoute(event.taskName, location.pathname)) continue
           if (!prefs.browserEnabled && !prefs.inAppEnabled) continue
-          const delivered = deliverNotification(event, { ignoreRouteSuppression: false })
+          const delivered = await deliverNotification(event, { ignoreRouteSuppression: false })
           if (delivered) notifiedKeysRef.current.add(event.dedupeKey)
         }
       }
@@ -223,28 +220,57 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
     const match = location.pathname.match(/^\/task\/([^/]+)/)
     if (!match) return
     const viewedTask = decodeURIComponent(match[1])
-    setInAppNotification((current) => (current?.taskName === viewedTask ? null : current))
+    setInAppNotifications((current) => {
+      const next = current.filter((item) => item.taskName !== viewedTask)
+      return next.length === current.length ? current : next
+    })
     setTabTitleOverride((current) => (current?.taskName === viewedTask ? null : current))
   }, [location.pathname])
 
   const clearTabTitleOverride = useCallback(() => setTabTitleOverride(null), [])
 
-  const contextValue: TaskListContextValue = {
+  const contextValue = useMemo<TaskListContextValue>(() => ({
     tasks,
     loading,
     error,
     refreshTasks,
-    inAppNotification,
-    setInAppNotification,
+    inAppNotifications,
+    pushInAppNotification,
+    dismissInAppNotification,
     deliverNotification,
-    deliverTestNotification,
-  }
+    deliverTestInAppNotification: deliverTestInAppNotificationHandler,
+    deliverTestBrowserNotification: deliverTestBrowserNotificationHandler,
+  }), [
+    tasks,
+    loading,
+    error,
+    refreshTasks,
+    inAppNotifications,
+    pushInAppNotification,
+    dismissInAppNotification,
+    deliverNotification,
+    deliverTestInAppNotificationHandler,
+    deliverTestBrowserNotificationHandler,
+  ])
+
+  const pageTitleContextValue = useMemo(
+    () => ({ pageTitle, setPageTitle, tabTitleOverride, clearTabTitleOverride }),
+    [pageTitle, tabTitleOverride, clearTabTitleOverride],
+  )
 
   return (
-    <PageTitleContext.Provider value={{ pageTitle, setPageTitle, tabTitleOverride, clearTabTitleOverride }}>
+    <PageTitleContext.Provider value={pageTitleContextValue}>
       <TaskListContext.Provider value={contextValue}>
         {children}
       </TaskListContext.Provider>
     </PageTitleContext.Provider>
   )
+}
+
+function tasksUnchanged(current: TaskListEntry[], next: TaskListEntry[]): boolean {
+  if (current.length !== next.length) return false
+  for (let i = 0; i < current.length; i += 1) {
+    if (current[i].name !== next[i].name || current[i].status !== next[i].status) return false
+  }
+  return true
 }

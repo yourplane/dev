@@ -163,11 +163,21 @@ if [[ "$DEPLOY_FRONTEND" -eq 1 ]]; then
     --region "$REGION" \
     --delete \
     --cache-control "public,max-age=31536000,immutable" \
-    --exclude "index.html"
+    --exclude "index.html" \
+    --exclude "notification-sw.js" \
+    --exclude "manifest.webmanifest"
   aws s3 cp "$FRONTEND_DIR/dist/index.html" "s3://$SpaBucketName/index.html" \
     --region "$REGION" \
     --cache-control "no-cache, no-store, must-revalidate" \
     --content-type "text/html"
+  aws s3 cp "$FRONTEND_DIR/dist/notification-sw.js" "s3://$SpaBucketName/notification-sw.js" \
+    --region "$REGION" \
+    --cache-control "no-cache, no-store, must-revalidate" \
+    --content-type "application/javascript"
+  aws s3 cp "$FRONTEND_DIR/dist/manifest.webmanifest" "s3://$SpaBucketName/manifest.webmanifest" \
+    --region "$REGION" \
+    --cache-control "no-cache, no-store, must-revalidate" \
+    --content-type "application/manifest+json"
 
   if [[ -n "${CloudFrontDistributionId:-}" ]]; then
     log "Invalidating CloudFront distribution $CloudFrontDistributionId"
