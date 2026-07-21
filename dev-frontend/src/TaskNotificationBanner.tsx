@@ -4,7 +4,8 @@ import { useNavigate } from 'react-router-dom'
 import { isCloudMode } from './cloudAuth'
 import { useTaskList, type InAppNotification } from './useTaskListPoll'
 
-const SWIPE_DISMISS_PX = 72
+const FLICK_DISMISS_PX = 80
+const FLICK_VELOCITY_PX_MS = 0.5
 const SWIPE_START_PX = 8
 
 function NotificationCard({
@@ -16,49 +17,59 @@ function NotificationCard({
   onDismiss: (id: string) => void
   onOpen: (notification: InAppNotification) => void
 }) {
-  const [offsetY, setOffsetY] = useState(0)
+  const [offsetX, setOffsetX] = useState(0)
   const [dragging, setDragging] = useState(false)
-  const startYRef = useRef(0)
-  const offsetYRef = useRef(0)
+  const startXRef = useRef(0)
+  const startTimeRef = useRef(0)
+  const offsetXRef = useRef(0)
   const draggingRef = useRef(false)
 
   const handleTouchStart = (e: React.TouchEvent) => {
-    startYRef.current = e.touches[0]?.clientY ?? 0
-    offsetYRef.current = 0
+    startXRef.current = e.touches[0]?.clientX ?? 0
+    startTimeRef.current = Date.now()
+    offsetXRef.current = 0
     draggingRef.current = false
     setDragging(false)
-    setOffsetY(0)
+    setOffsetX(0)
   }
 
   const handleTouchMove = (e: React.TouchEvent) => {
-    const currentY = e.touches[0]?.clientY ?? startYRef.current
-    const deltaY = currentY - startYRef.current
-    if (!draggingRef.current && deltaY <= SWIPE_START_PX) return
+    const currentX = e.touches[0]?.clientX ?? startXRef.current
+    const deltaX = currentX - startXRef.current
+    if (!draggingRef.current && Math.abs(deltaX) <= SWIPE_START_PX) return
 
     draggingRef.current = true
     setDragging(true)
     e.preventDefault()
 
-    const nextOffset = Math.max(0, deltaY)
-    offsetYRef.current = nextOffset
-    setOffsetY(nextOffset)
+    offsetXRef.current = deltaX
+    setOffsetX(deltaX)
   }
 
   const handleTouchEnd = () => {
-    const shouldDismiss = draggingRef.current && offsetYRef.current >= SWIPE_DISMISS_PX
+    const elapsed = Math.max(Date.now() - startTimeRef.current, 1)
+    const velocity = Math.abs(offsetXRef.current) / elapsed
+    const shouldDismiss = draggingRef.current && (
+      Math.abs(offsetXRef.current) >= FLICK_DISMISS_PX ||
+      velocity >= FLICK_VELOCITY_PX_MS
+    )
     draggingRef.current = false
     setDragging(false)
     if (shouldDismiss) {
       onDismiss(notification.id)
     }
-    offsetYRef.current = 0
-    setOffsetY(0)
+    offsetXRef.current = 0
+    setOffsetX(0)
   }
+
+  const dragOpacity = offsetX !== 0
+    ? Math.max(0.35, 1 - Math.abs(offsetX) / 160)
+    : undefined
 
   return (
     <div
       className={`task-notification-banner${dragging ? ' task-notification-banner--dragging' : ''}`}
-      style={offsetY > 0 ? { transform: `translateY(${offsetY}px)`, opacity: Math.max(0.35, 1 - offsetY / 160) } : undefined}
+      style={offsetX !== 0 ? { transform: `translateX(${offsetX}px)`, opacity: dragOpacity } : undefined}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}

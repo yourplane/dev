@@ -25,9 +25,15 @@ describe('useOsNotificationTestWait', () => {
       result.current.startWait()
     })
     expect(result.current.waiting).toBe(true)
+    expect(result.current.secondsRemaining).toBe(30)
 
     act(() => {
-      vi.advanceTimersByTime(OS_NOTIFICATION_TEST_TIMEOUT_MS)
+      vi.advanceTimersByTime(1000)
+    })
+    expect(result.current.secondsRemaining).toBe(29)
+
+    act(() => {
+      vi.advanceTimersByTime(OS_NOTIFICATION_TEST_TIMEOUT_MS - 1000)
     })
 
     expect(result.current.waiting).toBe(false)

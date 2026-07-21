@@ -1,4 +1,5 @@
 import type { TaskListStatus } from './api'
+import { showServiceWorkerNotification } from './notificationServiceWorker'
 import { completionNotificationTitle, isCompletionTransition } from './taskStatus'
 
 export const BROWSER_NOTIFICATIONS_KEY = 'dev_notifications_browser_enabled'
@@ -60,19 +61,19 @@ export interface TaskNotificationHandlers {
   showTabTitle: (override: { taskName: string; title: string }) => void
 }
 
-export function deliverTaskNotification(
+export async function deliverTaskNotification(
   event: TaskCompletionEvent,
   prefs: NotificationPreferences,
   permission: NotificationPermission | 'unsupported',
   tabVisible: boolean,
   handlers: TaskNotificationHandlers,
-): boolean {
+): Promise<boolean> {
   const primary = chooseNotificationDelivery(prefs, permission, tabVisible)
   if (primary === 'none') return false
 
   if (primary === 'browser') {
-    const notification = showBrowserNotification(event.title, event.taskName, handlers.navigateToTask)
-    if (notification) return true
+    const delivered = await showBrowserNotification(event.title, event.taskName)
+    if (delivered) return true
     const fallback = chooseNotificationFallbackDelivery(prefs, tabVisible)
     if (fallback === 'in_app') {
       handlers.showInApp({ taskName: event.taskName, title: event.title })
@@ -123,12 +124,11 @@ export interface BrowserNotificationAttemptResult {
   failureReason?: string
 }
 
-export function deliverTestBrowserNotification(
+export async function deliverTestBrowserNotification(
   event: TaskCompletionEvent,
   prefs: NotificationPreferences,
   permission: NotificationPermission | 'unsupported',
-  navigateToTask: () => void,
-): BrowserNotificationAttemptResult {
+): Promise<BrowserNotificationAttemptResult> {
   if (!prefs.browserEnabled) {
     return {
       delivered: false,
@@ -154,8 +154,8 @@ export function deliverTestBrowserNotification(
     }
   }
 
-  const notification = showBrowserNotification(event.title, event.taskName, navigateToTask)
-  if (notification) return { delivered: true }
+  const delivered = await showBrowserNotification(event.title, event.taskName)
+  if (delivered) return { delivered: true }
 
   return {
     delivered: false,
@@ -208,21 +208,10 @@ export function shouldSuppressForRoute(taskName: string, pathname: string): bool
   }
 }
 
-export function showBrowserNotification(
+export async function showBrowserNotification(
   title: string,
   taskName: string,
-  onClick: () => void,
-): Notification | null {
-  if (typeof Notification === 'undefined') return null
-  try {
-    const notification = new Notification(title, { tag: `dev-task-${taskName}` })
-    notification.onclick = () => {
-      window.focus()
-      onClick()
-      notification.close()
-    }
-    return notification
-  } catch {
-    return null
-  }
+): Promise<boolean> {
+  if (typeof Notification === 'undefined') return false
+  return showServiceWorkerNotification(title, taskName)
 }

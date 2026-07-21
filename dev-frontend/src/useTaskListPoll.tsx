@@ -25,9 +25,9 @@ interface TaskListContextValue {
   inAppNotifications: InAppNotification[]
   pushInAppNotification: (notification: Omit<InAppNotification, 'id'>) => void
   dismissInAppNotification: (id: string) => void
-  deliverNotification: (event: TaskCompletionEvent, opts?: { ignoreRouteSuppression?: boolean }) => boolean
+  deliverNotification: (event: TaskCompletionEvent, opts?: { ignoreRouteSuppression?: boolean }) => Promise<boolean>
   deliverTestInAppNotification: () => boolean
-  deliverTestBrowserNotification: () => BrowserNotificationAttemptResult
+  deliverTestBrowserNotification: () => Promise<BrowserNotificationAttemptResult>
 }
 
 const TaskListContext = createContext<TaskListContextValue | null>(null)
@@ -105,7 +105,7 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
     setInAppNotifications((current) => current.filter((item) => item.id !== id))
   }, [])
 
-  const deliverNotification = useCallback((
+  const deliverNotification = useCallback(async (
     event: TaskCompletionEvent,
     { ignoreRouteSuppression = false }: { ignoreRouteSuppression?: boolean } = {},
   ) => {
@@ -133,13 +133,12 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
     })
   }, [pushInAppNotification])
 
-  const deliverTestBrowserNotificationHandler = useCallback((): BrowserNotificationAttemptResult => {
+  const deliverTestBrowserNotificationHandler = useCallback(async (): Promise<BrowserNotificationAttemptResult> => {
     const prefs = loadNotificationPreferences()
     return deliverTestBrowserNotification(
       createTestNotificationEvent(),
       prefs,
       currentNotificationPermission(),
-      () => { window.focus() },
     )
   }, [])
 
@@ -167,7 +166,7 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
           if (notifiedKeysRef.current.has(event.dedupeKey)) continue
           if (shouldSuppressForRoute(event.taskName, location.pathname)) continue
           if (!prefs.browserEnabled && !prefs.inAppEnabled) continue
-          const delivered = deliverNotification(event, { ignoreRouteSuppression: false })
+          const delivered = await deliverNotification(event, { ignoreRouteSuppression: false })
           if (delivered) notifiedKeysRef.current.add(event.dedupeKey)
         }
       }

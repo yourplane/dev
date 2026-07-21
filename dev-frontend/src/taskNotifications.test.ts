@@ -14,6 +14,15 @@ import {
 } from './taskNotifications'
 import { isCompletionTransition } from './taskStatus'
 
+function mockServiceWorker(showNotification: (...args: unknown[]) => unknown) {
+  Object.defineProperty(navigator, 'serviceWorker', {
+    configurable: true,
+    value: {
+      ready: Promise.resolve({ showNotification }),
+    },
+  })
+}
+
 describe('taskStatus', () => {
   it('detects completion transitions from active states and into completion statuses', () => {
     expect(isCompletionTransition('running', 'plan_complete')).toBe(true)
@@ -80,22 +89,22 @@ describe('taskNotifications', () => {
     expect(shouldSuppressForRoute('a/b', '/task/a%2Fb')).toBe(true)
   })
 
-  it('cascades to in-app when browser delivery fails in the foreground', () => {
+  it('cascades to in-app when browser delivery fails in the foreground', async () => {
     const showInApp = vi.fn()
     const showTabTitle = vi.fn()
     const prefs = { browserEnabled: true, inAppEnabled: true }
     const originalNotification = globalThis.Notification
 
+    mockServiceWorker(() => {
+      throw new Error('blocked')
+    })
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(globalThis as any).Notification = class {
       static permission = 'granted'
-      constructor() {
-        throw new Error('blocked')
-      }
     }
 
     try {
-      const delivered = deliverTaskNotification(
+      const delivered = await deliverTaskNotification(
         {
           taskName: 'foo',
           status: 'plan_complete',
@@ -124,7 +133,7 @@ describe('taskNotifications', () => {
     expect(chooseNotificationFallbackDelivery({ browserEnabled: true, inAppEnabled: true }, true)).toBe('in_app')
   })
 
-  it('delivers split test notifications independently', () => {
+  it('delivers split test notifications independently', async () => {
     const showInApp = vi.fn()
     const event = {
       taskName: 'notifications-test',
@@ -140,35 +149,32 @@ describe('taskNotifications', () => {
     })
 
     const originalNotification = globalThis.Notification
+    const showNotification = vi.fn().mockResolvedValue(undefined)
+    mockServiceWorker(showNotification)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ;(globalThis as any).Notification = class {
       static permission = 'granted'
-      onclick: (() => void) | null = null
-      constructor(public title: string) {}
-      close() {}
     }
     try {
-      const foreground = deliverTestBrowserNotification(
+      const foreground = await deliverTestBrowserNotification(
         event,
         { browserEnabled: true, inAppEnabled: true },
         'granted',
-        vi.fn(),
       )
       expect(foreground.delivered).toBe(true)
+      expect(showNotification).toHaveBeenCalled()
 
-      const background = deliverTestBrowserNotification(
+      const background = await deliverTestBrowserNotification(
         event,
         { browserEnabled: true, inAppEnabled: true },
         'granted',
-        vi.fn(),
       )
       expect(background.delivered).toBe(true)
-      expect(deliverTestBrowserNotification(
+      expect(await deliverTestBrowserNotification(
         event,
         { browserEnabled: false, inAppEnabled: true },
         'granted',
-        vi.fn(),
-      ).delivered).toBe(false)
+      ).then((result) => result.delivered)).toBe(false)
     } finally {
       globalThis.Notification = originalNotification
     }

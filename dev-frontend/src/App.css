@@ -399,10 +399,10 @@
 .task-notification-stack {
   position: fixed;
   left: 50%;
-  bottom: 0;
+  top: 0;
   transform: translateX(-50%);
   width: min(720px, calc(100vw - 3rem));
-  padding: 0 0 max(1rem, env(safe-area-inset-bottom));
+  padding: max(1rem, env(safe-area-inset-top)) 0 0;
   z-index: 1000;
   pointer-events: none;
 }
@@ -475,6 +475,14 @@
   border: 1px solid #cbd5e1;
   border-radius: 8px;
   background: #f8fafc;
+}
+
+.settings-os-test-countdown {
+  margin: 0.25rem 0 0.5rem;
+  font-size: 1.75rem;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: #1e40af;
 }
 
 .settings-toggle-row {

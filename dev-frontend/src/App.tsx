@@ -3066,7 +3066,7 @@ function SettingsPage() {
     setNotificationSettingsMessage(null)
   }, [])
 
-  const { waiting: osTestWaiting, startWait: startOsTestWait, cancelWait: cancelOsTestWait } = useOsNotificationTestWait({
+  const { waiting: osTestWaiting, secondsRemaining: osTestSecondsRemaining, startWait: startOsTestWait, cancelWait: cancelOsTestWait } = useOsNotificationTestWait({
     attemptDelivery: deliverTestBrowserNotification,
     onError: showNotificationError,
     onSuccess: showNotificationSuccess,
@@ -3081,7 +3081,7 @@ function SettingsPage() {
     }
     const delivered = deliverTestInAppNotification()
     if (delivered) {
-      setNotificationSettingsSuccess('In-app banner sent — swipe down on the banner at the bottom to dismiss.')
+      setNotificationSettingsSuccess('In-app banner sent — flick the banner at the top left or right to dismiss.')
     } else {
       setNotificationSettingsMessage('Could not show the in-app banner.')
     }
@@ -3107,12 +3107,13 @@ function SettingsPage() {
       return
     }
     if (document.hidden) {
-      const result = deliverTestBrowserNotification()
-      if (result.delivered) {
-        setNotificationSettingsSuccess('OS notification sent. If you still do not see it, check Android notification settings for Chrome and any focus/Do Not Disturb modes.')
-      } else {
-        setNotificationSettingsMessage(result.failureReason ?? 'Could not show an OS notification on this device or browser.')
-      }
+      void deliverTestBrowserNotification().then((result) => {
+        if (result.delivered) {
+          setNotificationSettingsSuccess('OS notification sent. If you still do not see it, check Android notification settings for Chrome and any focus/Do Not Disturb modes.')
+        } else {
+          setNotificationSettingsMessage(result.failureReason ?? 'Could not show an OS notification on this device or browser.')
+        }
+      })
       return
     }
     startOsTestWait()
@@ -3350,7 +3351,10 @@ function SettingsPage() {
         {osTestWaiting && (
           <div className="settings-os-test-wait" role="status">
             <p className="settings-hint">
-              Switch to another tab or app within 30 seconds. Dev will send a test OS notification once the tab is backgrounded.
+              Switch to another tab or app. Dev will send a test OS notification once the tab is backgrounded.
+            </p>
+            <p className="settings-os-test-countdown" aria-live="polite">
+              {osTestSecondsRemaining}s
             </p>
             <button
               type="button"

@@ -4,7 +4,7 @@ import type { BrowserNotificationAttemptResult } from './taskNotifications'
 export const OS_NOTIFICATION_TEST_TIMEOUT_MS = 30_000
 
 export interface UseOsNotificationTestWaitOptions {
-  attemptDelivery: () => BrowserNotificationAttemptResult
+  attemptDelivery: () => BrowserNotificationAttemptResult | Promise<BrowserNotificationAttemptResult>
   onError: (message: string) => void
   onSuccess: (message: string) => void
 }
@@ -15,6 +15,9 @@ export function useOsNotificationTestWait({
   onSuccess,
 }: UseOsNotificationTestWaitOptions) {
   const [waiting, setWaiting] = useState(false)
+  const [secondsRemaining, setSecondsRemaining] = useState(
+    Math.ceil(OS_NOTIFICATION_TEST_TIMEOUT_MS / 1000),
+  )
   const pendingSuccessRef = useRef(false)
   const attemptDeliveryRef = useRef(attemptDelivery)
   const onErrorRef = useRef(onError)
@@ -36,16 +39,19 @@ export function useOsNotificationTestWait({
   useEffect(() => {
     if (!waiting) return
 
+    const totalSeconds = Math.ceil(OS_NOTIFICATION_TEST_TIMEOUT_MS / 1000)
+    setSecondsRemaining(totalSeconds)
+
+    const intervalId = window.setInterval(() => {
+      setSecondsRemaining((current) => Math.max(0, current - 1))
+    }, 1000)
+
     const timeoutId = window.setTimeout(() => {
       setWaiting(false)
       onErrorRef.current('Timed out after 30 seconds. Switch to another tab or app within that window, then press Test OS notification again.')
     }, OS_NOTIFICATION_TEST_TIMEOUT_MS)
 
-    const onBackground = () => {
-      if (!document.hidden) return
-      window.clearTimeout(timeoutId)
-      setWaiting(false)
-      const result = attemptDeliveryRef.current()
+    const handleDeliveryResult = (result: BrowserNotificationAttemptResult) => {
       if (result.delivered) {
         pendingSuccessRef.current = true
       } else {
@@ -53,9 +59,27 @@ export function useOsNotificationTestWait({
       }
     }
 
+    const onBackground = () => {
+      if (!document.hidden) return
+      window.clearTimeout(timeoutId)
+      window.clearInterval(intervalId)
+      setWaiting(false)
+      try {
+        const result = attemptDeliveryRef.current()
+        if (result && typeof (result as Promise<BrowserNotificationAttemptResult>).then === 'function') {
+          void (result as Promise<BrowserNotificationAttemptResult>).then(handleDeliveryResult)
+        } else {
+          handleDeliveryResult(result as BrowserNotificationAttemptResult)
+        }
+      } catch {
+        onErrorRef.current('Could not show an OS notification on this device or browser.')
+      }
+    }
+
     document.addEventListener('visibilitychange', onBackground)
     return () => {
       window.clearTimeout(timeoutId)
+      window.clearInterval(intervalId)
       document.removeEventListener('visibilitychange', onBackground)
     }
   }, [waiting])
@@ -70,5 +94,5 @@ export function useOsNotificationTestWait({
     setWaiting(true)
   }, [])
 
-  return { waiting, startWait, cancelWait }
+  return { waiting, secondsRemaining, startWait, cancelWait }
 }
