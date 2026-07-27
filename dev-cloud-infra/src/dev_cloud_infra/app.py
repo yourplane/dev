@@ -89,10 +89,10 @@ class DevCloudStack(Stack):
             environment={
                 "DEV_CLOUD_TABLE": table.table_name,
                 "DEV_CLOUD_BUCKET": bucket.bucket_name,
-                "CONTROL_PLANE_LOG_GROUP": api_fn.log_group.log_group_name,
             },
             log_retention=logs.RetentionDays.TWO_WEEKS,
         )
+        api_fn.add_environment("CONTROL_PLANE_LOG_GROUP", api_fn.log_group.log_group_name)
         table.grant_read_write_data(api_fn)
         bucket.grant_read_write(api_fn)
         api_fn.add_to_role_policy(
