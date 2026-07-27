@@ -40,6 +40,7 @@ class DevCloudStack(Stack):
             sort_key=dynamodb.Attribute(name="sk", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             removal_policy=RemovalPolicy.RETAIN,
+            time_to_live_attribute="ttl",
         )
         table.add_global_secondary_index(
             index_name="entity-index",
@@ -47,7 +48,6 @@ class DevCloudStack(Stack):
             sort_key=dynamodb.Attribute(name="pk", type=dynamodb.AttributeType.STRING),
             projection_type=dynamodb.ProjectionType.ALL,
         )
-        table.add_time_to_live_attribute("ttl")
 
         bucket = s3.Bucket(
             self,
