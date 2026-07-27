@@ -1,5 +1,7 @@
 /** Cognito authentication for cloud dev mode. */
 
+import { fetchWithRetry } from './fetchUtils';
+
 export interface CloudAuthConfig {
   userPoolId: string;
   clientId: string;
@@ -82,7 +84,7 @@ function isTokenExpired(token: string, skewSec = 60): boolean {
 let refreshPromise: Promise<boolean> | null = null;
 
 async function cognitoRequest<T>(region: string, target: string, body: Record<string, unknown>): Promise<T> {
-  const resp = await fetch(`https://cognito-idp.${region}.amazonaws.com/`, {
+  const resp = await fetchWithRetry(`https://cognito-idp.${region}.amazonaws.com/`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-amz-json-1.1',
