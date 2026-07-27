@@ -423,18 +423,13 @@ class Router:
         since = time.time() - TELEMETRY_RETENTION_SEC
         snapshot = self.store.get_telemetry_snapshot(environment_id)
         env_series = self.store.query_env_metrics(environment_id, since)
-        task_names = self.store.list_telemetry_tasks(environment_id, since)
-        active_tasks = set()
-        for task_name in self.store.list_tasks():
-            task = self.store.get_task(task_name)
-            if (
-                task
-                and task.environment_id == environment_id
-                and task.active_command
-                and task.active_command.get("started")
-            ):
-                active_tasks.add(task_name)
-        task_names = sorted(set(task_names) | active_tasks)
+        task_names = sorted(
+            {
+                str(t.get("task_name"))
+                for t in (snapshot or {}).get("task_metrics") or []
+                if t.get("task_name")
+            }
+        )
         task_series = {
             name: self.store.query_task_metrics(environment_id, name, since) for name in task_names
         }

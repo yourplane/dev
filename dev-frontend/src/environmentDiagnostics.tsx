@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import {
   api,
@@ -6,10 +6,28 @@ import {
   type EnvironmentDiagnosticsResponse,
   type EnvironmentErrorEntry,
   type TelemetryPoint,
+  type ThreadInventoryEntry,
 } from './api'
 
 const ENV_REFRESH_MS = 30_000
 const CP_ERRORS_REFRESH_MS = 60_000
+
+const ACTIVITY_BADGE_LABELS: Record<string, string> = {
+  sync_tasks: 'in sync_tasks',
+  command: 'command running',
+  outbox: 'outbox',
+  uploading: 'uploading',
+  backlog: 'upload backlog',
+  sync_failures: 'sync failures',
+  sync_unhealthy: 'sync unhealthy',
+  comms_lag: 'comms lag',
+}
+
+const THREAD_GROUP_LABELS: Record<string, string> = {
+  infrastructure: 'Infrastructure',
+  commands: 'Commands',
+  stream_uploads: 'Stream uploads',
+}
 
 function metricValue(point: TelemetryPoint, key: string): number {
   const raw = point.metrics[key]
@@ -29,6 +47,10 @@ function formatTime(ts: number): string {
   return new Date(ts * 1000).toLocaleTimeString()
 }
 
+function formatDateTime(ts: number): string {
+  return new Date(ts * 1000).toLocaleString()
+}
+
 function formatOfflineSince(ts: number): string {
   return new Date(ts * 1000).toLocaleString()
 }
@@ -46,6 +68,8 @@ function MetricChart({
   unit?: string
   formatValue?: (value: number) => string
 }) {
+  const svgRef = useRef<SVGSVGElement>(null)
+  const [selectedIndex, setSelectedIndex] = useState<number | null>(null)
   const values = points.map((p) => metricValue(p, valueKey))
   const latest = values.length ? values[values.length - 1] : 0
   const max = Math.max(...values, 1)
@@ -54,9 +78,44 @@ function MetricChart({
   const coords = values.map((v, i) => {
     const x = values.length <= 1 ? width / 2 : (i / (values.length - 1)) * width
     const y = height - (v / max) * (height - 4) - 2
-    return `${x},${y}`
+    return { x, y, v, i }
   })
   const display = formatValue ? formatValue(latest) : `${latest.toFixed(1)}${unit}`
+  const selected = selectedIndex != null ? coords[selectedIndex] : null
+  const selectedPoint = selectedIndex != null ? points[selectedIndex] : null
+
+  const handleChartClick = (event: React.MouseEvent<SVGSVGElement>) => {
+    if (coords.length === 0) return
+    const svg = svgRef.current
+    if (!svg) return
+    const rect = svg.getBoundingClientRect()
+    const clickX = ((event.clientX - rect.left) / rect.width) * width
+    let nearest = 0
+    let bestDist = Number.POSITIVE_INFINITY
+    for (const c of coords) {
+      const dist = Math.abs(c.x - clickX)
+      if (dist < bestDist) {
+        bestDist = dist
+        nearest = c.i
+      }
+    }
+    setSelectedIndex((prev) => (prev === nearest ? null : nearest))
+  }
+
+  useEffect(() => {
+    if (selectedIndex == null) return
+    const dismiss = (event: MouseEvent) => {
+      if (svgRef.current && !svgRef.current.contains(event.target as Node)) {
+        setSelectedIndex(null)
+      }
+    }
+    document.addEventListener('click', dismiss)
+    return () => document.removeEventListener('click', dismiss)
+  }, [selectedIndex])
+
+  const selectedDisplay = selected && selectedPoint
+    ? (formatValue ? formatValue(selected.v) : `${selected.v.toFixed(1)}${unit}`)
+    : null
 
   return (
     <div className="diag-chart">
@@ -65,9 +124,41 @@ function MetricChart({
         <span className="diag-chart-latest">{display}</span>
       </div>
       {values.length > 1 ? (
-        <svg viewBox={`0 0 ${width} ${height}`} className="diag-chart-svg" aria-hidden="true">
-          <polyline points={coords.join(' ')} fill="none" stroke="currentColor" strokeWidth="1.5" />
-        </svg>
+        <div className="diag-chart-interactive">
+          <svg
+            ref={svgRef}
+            viewBox={`0 0 ${width} ${height}`}
+            className="diag-chart-svg diag-chart-svg-interactive"
+            role="img"
+            aria-label={`${title} chart`}
+            onClick={handleChartClick}
+          >
+            <polyline
+              points={coords.map((c) => `${c.x},${c.y}`).join(' ')}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            />
+            {coords.map((c) => (
+              <circle
+                key={c.i}
+                cx={c.x}
+                cy={c.y}
+                r={selectedIndex === c.i ? 4 : 2.5}
+                className={selectedIndex === c.i ? 'diag-chart-point-selected' : 'diag-chart-point'}
+              />
+            ))}
+          </svg>
+          {selected && selectedPoint && selectedDisplay && (
+            <div
+              className="diag-chart-tooltip"
+              style={{ left: `${(selected.x / width) * 100}%` }}
+            >
+              <div>{formatDateTime(selectedPoint.sample_ts)}</div>
+              <div>{selectedDisplay}</div>
+            </div>
+          )}
+        </div>
       ) : (
         <p className="hint diag-chart-empty">Waiting for history…</p>
       )}
@@ -81,10 +172,9 @@ function SnapshotGrid({ metrics }: { metrics: Record<string, unknown> }) {
     ['Memory', `${Number(metrics.memory_percent ?? 0).toFixed(1)}%`],
     ['Storage', `${Number(metrics.storage_used_percent ?? 0).toFixed(1)}%`],
     ['Poll loop', `${Number(metrics.poll_loop_utilization ?? 0).toFixed(1)}%`],
-    ['Worker threads', String(metrics.worker_threads ?? 0)],
+    ['Total threads', String(metrics.total_threads ?? 0)],
     ['Upload backlog', formatBytes(Number(metrics.upload_backlog_bytes ?? 0))],
     ['BG sync queue', String(metrics.bg_sync_queue_depth ?? 0)],
-    ['Stream upload threads', String(metrics.stream_upload_threads ?? 0)],
   ]
   return (
     <div className="diag-snapshot-grid">
@@ -93,6 +183,63 @@ function SnapshotGrid({ metrics }: { metrics: Record<string, unknown> }) {
           <span className="diag-snapshot-label">{label}</span>
           <span className="diag-snapshot-value">{value}</span>
         </div>
+      ))}
+    </div>
+  )
+}
+
+function ThreadTree({ inventory }: { inventory: ThreadInventoryEntry[] }) {
+  const groups = useMemo(() => {
+    const order = ['infrastructure', 'commands', 'stream_uploads']
+    const map = new Map<string, ThreadInventoryEntry[]>()
+    for (const entry of inventory) {
+      const cat = entry.category || 'infrastructure'
+      const list = map.get(cat) ?? []
+      list.push(entry)
+      map.set(cat, list)
+    }
+    return order
+      .filter((cat) => map.has(cat))
+      .map((cat) => ({ category: cat, entries: map.get(cat) ?? [] }))
+  }, [inventory])
+
+  if (!inventory.length) {
+    return <p className="hint">No thread inventory yet.</p>
+  }
+
+  return (
+    <div className="diag-thread-tree">
+      {groups.map(({ category, entries }) => (
+        <details key={category} className="diag-thread-group" open>
+          <summary className="diag-thread-group-summary">
+            {THREAD_GROUP_LABELS[category] ?? category}
+            <span className="diag-thread-group-count">{entries.length}</span>
+          </summary>
+          <ul className="diag-thread-list">
+            {entries.map((entry, idx) => (
+              <li key={`${category}-${idx}`} className="diag-thread-row">
+                <span className="diag-thread-label">{entry.label}</span>
+                <span className={`settings-badge diag-thread-state-${entry.state}`}>
+                  {entry.state}
+                </span>
+                {entry.detail && <span className="diag-thread-detail">{entry.detail}</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ))}
+    </div>
+  )
+}
+
+function ActivityBadges({ badges }: { badges: string[] }) {
+  if (!badges.length) return null
+  return (
+    <div className="diag-activity-badges">
+      {badges.map((badge) => (
+        <span key={badge} className="diag-activity-badge">
+          {ACTIVITY_BADGE_LABELS[badge] ?? badge}
+        </span>
       ))}
     </div>
   )
@@ -127,6 +274,7 @@ function TaskSection({
   snapshot?: Record<string, unknown>
 }) {
   const dwell = (snapshot?.phase_dwell as Record<string, number | null> | undefined) ?? {}
+  const badges = (snapshot?.activity_badges as string[] | undefined) ?? []
   return (
     <details className="diag-task-section">
       <summary className="diag-task-summary">
@@ -134,10 +282,10 @@ function TaskSection({
         {snapshot?.active_command ? <span className="settings-badge settings-badge-online">active</span> : null}
       </summary>
       <div className="diag-task-body">
+        <ActivityBadges badges={badges} />
         <div className="diag-task-dwell">
           {dwell.claimed_sec != null && <span>Claimed: {dwell.claimed_sec}s</span>}
           {dwell.started_sec != null && <span>Started: {dwell.started_sec}s</span>}
-          {snapshot?.sync_health === 'unhealthy' && <span className="diag-unhealthy">Sync unhealthy</span>}
         </div>
         <div className="diag-chart-grid">
           <MetricChart title="Stream backlog" points={points} valueKey="stream_backlog_bytes" formatValue={formatBytes} />
@@ -200,6 +348,7 @@ export function EnvironmentDiagnosticsPage() {
   const env = data.environment
   const envMetrics = data.snapshot?.env_metrics ?? {}
   const taskNames = Object.keys(data.task_series)
+  const threadInventory = data.snapshot?.thread_inventory ?? []
 
   return (
     <section className="diag-page">
@@ -225,6 +374,8 @@ export function EnvironmentDiagnosticsPage() {
           <>
             <p className="settings-hint">Updated {formatTime(data.snapshot.sample_ts)}</p>
             <SnapshotGrid metrics={envMetrics} />
+            <h4 className="diag-subheading">Threads</h4>
+            <ThreadTree inventory={threadInventory} />
           </>
         ) : (
           <p className="hint">No telemetry received yet.</p>
@@ -238,7 +389,7 @@ export function EnvironmentDiagnosticsPage() {
           <MetricChart title="Memory" points={data.env_series} valueKey="memory_percent" unit="%" />
           <MetricChart title="Storage" points={data.env_series} valueKey="storage_used_percent" unit="%" />
           <MetricChart title="Poll loop utilization" points={data.env_series} valueKey="poll_loop_utilization" unit="%" />
-          <MetricChart title="Worker threads" points={data.env_series} valueKey="worker_threads" />
+          <MetricChart title="Total threads" points={data.env_series} valueKey="total_threads" />
           <MetricChart title="Upload backlog" points={data.env_series} valueKey="upload_backlog_bytes" formatValue={formatBytes} />
         </div>
       </div>
@@ -246,6 +397,7 @@ export function EnvironmentDiagnosticsPage() {
       {taskNames.length > 0 && (
         <div className="settings-section">
           <h3>Tasks</h3>
+          <p className="settings-hint">Tasks the worker is managing (sync_tasks plus any with outbox or active uploads).</p>
           {taskNames.map((taskName) => (
             <TaskSection
               key={taskName}

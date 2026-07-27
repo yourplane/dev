@@ -8,6 +8,7 @@ import time
 from pathlib import Path
 from typing import Callable
 
+from dev_cloud_worker.task_dirs import iter_task_dirs
 from dev_sdk.worker_sync import (
     read_streams,
     read_tail_state,
@@ -33,9 +34,7 @@ class StreamUploadSupervisor:
         active: set[tuple[str, str, str]] = set()
         if not self.tasks_root.is_dir():
             return
-        for task_dir in self.tasks_root.iterdir():
-            if not task_dir.is_dir():
-                continue
+        for task_dir in iter_task_dirs(self.tasks_root):
             task_name = task_dir.name
             streams = read_streams(task_dir)
             if streams.active_log:
@@ -54,6 +53,18 @@ class StreamUploadSupervisor:
     def active_thread_count(self) -> int:
         with self._guard:
             return sum(1 for t in self._threads.values() if t.is_alive())
+
+    def active_streams(self) -> list[dict[str, str]]:
+        with self._guard:
+            return [
+                {
+                    "task_name": key[0],
+                    "kind": key[1],
+                    "filename": key[2],
+                    "state": "active" if thread.is_alive() else "idle",
+                }
+                for key, thread in self._threads.items()
+            ]
 
     def _ensure_thread(
         self,
@@ -109,6 +120,8 @@ class BackgroundSyncWorker:
         self._pending: set[str] = set()
         self._wake = threading.Event()
         self._guard = threading.Lock()
+        self._busy = False
+        self._current_tasks: list[str] = []
         self._thread = threading.Thread(target=self._run, daemon=True, name="bg-sync")
         self._thread.start()
 
@@ -121,6 +134,22 @@ class BackgroundSyncWorker:
         with self._guard:
             return len(self._pending)
 
+    def sync_status(self) -> dict:
+        with self._guard:
+            pending = sorted(self._pending)
+            busy = self._busy
+            current = list(self._current_tasks)
+        if busy and current:
+            detail = f"syncing: {', '.join(current[:8])}"
+            state = "active"
+        elif pending:
+            detail = f"queued: {', '.join(pending[:8])}"
+            state = "active"
+        else:
+            detail = ""
+            state = "idle"
+        return {"state": state, "pending_tasks": pending, "current_tasks": current, "detail": detail}
+
     def _run(self) -> None:
         while True:
             self._wake.wait(timeout=1.0)
@@ -130,7 +159,14 @@ class BackgroundSyncWorker:
                 self._pending.clear()
             if not tasks:
                 continue
+            self._busy = True
+            with self._guard:
+                self._current_tasks = list(tasks)
             try:
                 self._poller.run_sync_pass(tasks, task_lock=self._task_lock)
             except Exception:
                 logger.exception("Background sync pass failed")
+            finally:
+                self._busy = False
+                with self._guard:
+                    self._current_tasks = []

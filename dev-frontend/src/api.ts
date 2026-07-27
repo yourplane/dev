@@ -234,12 +234,25 @@ export interface TelemetryPoint {
   metrics: Record<string, unknown>;
 }
 
+export interface ThreadInventoryEntry {
+  category: string;
+  label: string;
+  state: string;
+  detail?: string;
+  task_name?: string;
+  command?: string;
+  kind?: string;
+  filename?: string;
+}
+
 export interface EnvironmentDiagnosticsResponse {
   environment: EnvironmentInfo;
   snapshot: {
     sample_ts: number;
     env_metrics: Record<string, unknown>;
     task_metrics: Array<Record<string, unknown>>;
+    thread_inventory?: ThreadInventoryEntry[];
+    sync_tasks?: string[];
   } | null;
   env_series: TelemetryPoint[];
   task_series: Record<string, TelemetryPoint[]>;

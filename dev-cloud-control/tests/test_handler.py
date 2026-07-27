@@ -847,15 +847,22 @@ def test_worker_telemetry_ingest_and_diagnostics(aws_env):
             "cpu_percent": 12.5,
             "memory_percent": 40.0,
             "poll_loop_utilization": 15.0,
-            "worker_threads": 3,
+            "total_threads": 4,
             "upload_backlog_bytes": 1024,
         },
+        "sync_tasks": ["task-a"],
+        "thread_inventory": [
+            {"category": "infrastructure", "label": "Poll loop", "state": "active"},
+            {"category": "commands", "label": "task-a / implement", "state": "active", "task_name": "task-a", "command": "implement"},
+        ],
         "task_metrics": [
             {
                 "task_name": "task-a",
+                "in_sync_tasks": True,
                 "stream_backlog_bytes": 512,
                 "log_silence_sec": 2.0,
                 "sync_failures": 0,
+                "activity_badges": ["sync_tasks", "command"],
             }
         ],
         "errors": [
@@ -877,7 +884,9 @@ def test_worker_telemetry_ingest_and_diagnostics(aws_env):
     )
     assert diag["environment"]["environment_id"] == "env-tel"
     assert diag["snapshot"]["env_metrics"]["cpu_percent"] == 12.5
+    assert diag["snapshot"]["env_metrics"]["total_threads"] == 4
     assert "task-a" in diag["task_series"]
+    assert diag["snapshot"]["task_metrics"][0]["activity_badges"]
     errors = json.loads(
         router.dispatch(_event("GET", "/environments/env-tel/errors"))["body"]
     )

@@ -738,6 +738,12 @@ class CloudStore:
                     if started_at:
                         dwell["started_sec"] = round(now - float(started_at), 1)
                 enriched["phase_dwell"] = dwell
+                badges = list(enriched.get("activity_badges") or [])
+                if enriched.get("sync_health") == "unhealthy" and "sync_unhealthy" not in badges:
+                    badges.append("sync_unhealthy")
+                if int(enriched.get("comms_epoch_lag") or 0) > 0 and "comms_lag" not in badges:
+                    badges.append("comms_lag")
+                enriched["activity_badges"] = badges
             task_bucket = {
                 "pk": f"ENV#{environment_id}",
                 "sk": f"TASKTS#{task_name}#{bucket:010d}",
@@ -763,6 +769,8 @@ class CloudStore:
             )
             task_snapshots.append(_ddb(enriched))
         snapshot["task_metrics"] = task_snapshots
+        snapshot["thread_inventory"] = _ddb(payload.get("thread_inventory") or [])
+        snapshot["sync_tasks"] = payload.get("sync_tasks") or []
         self._table.put_item(Item=_ddb(snapshot))
         for raw_err in payload.get("errors") or []:
             if not isinstance(raw_err, dict):
@@ -789,6 +797,8 @@ class CloudStore:
             "sample_ts": self._float_val(item.get("sample_ts")),
             "env_metrics": item.get("env_metrics") or {},
             "task_metrics": item.get("task_metrics") or [],
+            "thread_inventory": item.get("thread_inventory") or [],
+            "sync_tasks": item.get("sync_tasks") or [],
         }
 
     def query_env_metrics(self, environment_id: str, since: float) -> list[dict]:

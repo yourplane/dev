@@ -3261,6 +3261,14 @@ function SettingsPage() {
       </div>
 
       <div className="settings-section">
+        <h3>Control plane errors</h3>
+        <p className="settings-hint">Review control-plane errors not visible to workers.</p>
+        <Link to="/settings/control-plane-errors" className="settings-btn settings-btn-secondary">
+          View control plane errors
+        </Link>
+      </div>
+
+      <div className="settings-section">
         <h3>Repos</h3>
         {Object.keys(repos).length === 0 ? (
           <p className="hint">No repos configured.</p>
@@ -3334,14 +3342,6 @@ function SettingsPage() {
             {saving ? 'Saving…' : 'Save bots'}
           </button>
         </div>
-      </div>
-
-      <div className="settings-section">
-        <h3>Diagnostics</h3>
-        <p className="settings-hint">Review control-plane errors not visible to workers.</p>
-        <Link to="/settings/control-plane-errors" className="settings-btn settings-btn-secondary">
-          Control plane errors
-        </Link>
       </div>
 
       <div className="settings-section">

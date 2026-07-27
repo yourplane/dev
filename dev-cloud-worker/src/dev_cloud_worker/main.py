@@ -17,6 +17,7 @@ import requests
 
 from dev_cloud_worker.poller import CloudPoller
 from dev_cloud_worker.stream_supervisor import BackgroundSyncWorker, StreamUploadSupervisor
+from dev_cloud_worker.sync_tasks_state import SyncTasksState
 from dev_cloud_worker.telemetry import ErrorBuffer, PollLoopStats, TelemetryReporter
 from dev_sdk.agent_run import (
     AgentRunError,
@@ -275,14 +276,17 @@ class CommandExecutor:
         self._cancel_flags: dict[str, threading.Event] = {}
         self._cancel_lock = threading.Lock()
         self._running_tasks: set[str] = set()
+        self._running_commands: dict[str, str] = {}
         self._running_lock = threading.Lock()
         self._completion_tracker = completion_tracker or CommandCompletionTracker()
 
-    def try_start(self, task_name: str) -> bool:
+    def try_start(self, task_name: str, command_type: str | None = None) -> bool:
         with self._running_lock:
             if task_name in self._running_tasks:
                 return False
             self._running_tasks.add(task_name)
+            if command_type:
+                self._running_commands[task_name] = command_type
             return True
 
     def is_running(self, task_name: str) -> bool:
@@ -297,9 +301,14 @@ class CommandExecutor:
         with self._running_lock:
             return len(self._running_tasks)
 
+    def running_commands(self) -> dict[str, str]:
+        with self._running_lock:
+            return dict(self._running_commands)
+
     def discard_running(self, task_name: str) -> None:
         with self._running_lock:
             self._running_tasks.discard(task_name)
+            self._running_commands.pop(task_name, None)
 
     def reconcile_orphans(self, active_commands: list[dict]) -> None:
         active_names = {
@@ -387,6 +396,7 @@ class CommandExecutor:
         finally:
             with self._running_lock:
                 self._running_tasks.discard(task_name)
+                self._running_commands.pop(task_name, None)
 
     def _task_result(self, task_name: str) -> dict:
         task_dir = self.tasks_root / task_name
@@ -585,6 +595,7 @@ def run_loop() -> None:
             return lock
 
     bg_sync = BackgroundSyncWorker(poller, task_lock=task_lock)
+    sync_tasks_state = SyncTasksState()
     TelemetryReporter(
         client,
         tasks_root,
@@ -593,6 +604,7 @@ def run_loop() -> None:
         executor=executor,
         stream_supervisor=stream_supervisor,
         bg_sync=bg_sync,
+        sync_tasks_state=sync_tasks_state,
     )
 
     logger.info("Worker started env=%s tasks_root=%s", client.env_id, tasks_root)
@@ -605,6 +617,7 @@ def run_loop() -> None:
         loop_start = time.perf_counter()
         try:
             data = client.poll(claim_work=False)
+            sync_tasks_state.update(data.get("sync_tasks", []))
             bg_sync.enqueue(data.get("sync_tasks", []))
             stream_supervisor.supervise()
             work_data = client.poll(claim_work=True)
@@ -622,7 +635,7 @@ def run_loop() -> None:
                 if command.get("command") == "cancel":
                     executor.request_cancel(task_name)
                     continue
-                if not executor.try_start(task_name):
+                if not executor.try_start(task_name, str(command.get("command") or "unknown")):
                     continue
                 try:
                     client.command_start(task_name)
