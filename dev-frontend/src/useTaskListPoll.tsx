@@ -182,16 +182,19 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
     let fetchedTasks: TaskListEntry[] | null = null
     try {
       const res = await api.getTasks()
-      if (generation !== refreshGenerationRef.current) return
-      fetchedTasks = res.tasks
-      setTasks((current) => (tasksUnchanged(current, res.tasks) ? current : res.tasks))
-      if (!silent) setError(null)
+      if (generation === refreshGenerationRef.current) {
+        fetchedTasks = res.tasks
+        setTasks((current) => (tasksUnchanged(current, res.tasks) ? current : res.tasks))
+        if (!silent) setError(null)
+      }
     } catch (e) {
-      if (generation !== refreshGenerationRef.current) return
-      if (!silent) setError(e instanceof Error ? e.message : String(e))
+      if (generation === refreshGenerationRef.current && !silent) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
     } finally {
-      if (generation !== refreshGenerationRef.current) return
-      if (!silent) setLoading(false)
+      if (generation === refreshGenerationRef.current && !silent) {
+        setLoading(false)
+      }
     }
 
     if (fetchedTasks && generation === refreshGenerationRef.current) {
