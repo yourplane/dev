@@ -17,6 +17,8 @@ import requests
 
 from dev_cloud_worker.poller import CloudPoller
 from dev_cloud_worker.stream_supervisor import BackgroundSyncWorker, StreamUploadSupervisor
+from dev_cloud_worker.sync_tasks_state import SyncTasksState
+from dev_cloud_worker.telemetry import ErrorBuffer, PollLoopStats, TelemetryReporter
 from dev_sdk.agent_run import (
     AgentRunError,
     run_do,
@@ -139,23 +141,39 @@ def _load_cursor_api_key() -> None:
 
 
 class WorkerClient:
-    def __init__(self) -> None:
+    def __init__(self, error_buffer: ErrorBuffer | None = None) -> None:
         self.base = _control_plane_url()
         self.env_id = _load_environment_id()
         self.session = requests.Session()
         self.session.headers["Content-Type"] = "application/json"
+        self._error_buffer = error_buffer
+
+    def _record_http_error(self, context: str, exc: Exception) -> None:
+        if self._error_buffer is None:
+            return
+        detail = str(exc)
+        if hasattr(exc, "response") and exc.response is not None:
+            try:
+                detail = exc.response.text[:500]
+            except Exception:
+                pass
+        self._error_buffer.add(f"HTTP failure: {context}", category="http", detail=detail)
 
     def poll(self, *, claim_work: bool = True) -> dict:
-        resp = self.session.post(
-            f"{self.base}/worker/poll",
-            json={
-                "environment_id": self.env_id,
-                "display_name": _load_display_name(),
-                "claim_work": claim_work,
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
+        try:
+            resp = self.session.post(
+                f"{self.base}/worker/poll",
+                json={
+                    "environment_id": self.env_id,
+                    "display_name": _load_display_name(),
+                    "claim_work": claim_work,
+                },
+                timeout=30,
+            )
+            resp.raise_for_status()
+        except Exception as exc:
+            self._record_http_error("poll", exc)
+            raise
         data = resp.json()
         if data.get("environment_id"):
             self.env_id = data["environment_id"]
@@ -236,6 +254,13 @@ class WorkerClient:
         resp.raise_for_status()
         return resp.json()["token"]
 
+    def post_telemetry(self, payload: dict) -> None:
+        self.session.post(
+            f"{self.base}/worker/telemetry",
+            json=payload,
+            timeout=30,
+        ).raise_for_status()
+
 
 class CommandExecutor:
     """Runs commands locally; poller owns all cloud writes except git-token reads."""
@@ -251,23 +276,39 @@ class CommandExecutor:
         self._cancel_flags: dict[str, threading.Event] = {}
         self._cancel_lock = threading.Lock()
         self._running_tasks: set[str] = set()
+        self._running_commands: dict[str, str] = {}
         self._running_lock = threading.Lock()
         self._completion_tracker = completion_tracker or CommandCompletionTracker()
 
-    def try_start(self, task_name: str) -> bool:
+    def try_start(self, task_name: str, command_type: str | None = None) -> bool:
         with self._running_lock:
             if task_name in self._running_tasks:
                 return False
             self._running_tasks.add(task_name)
+            if command_type:
+                self._running_commands[task_name] = command_type
             return True
 
     def is_running(self, task_name: str) -> bool:
         with self._running_lock:
             return task_name in self._running_tasks
 
+    def running_tasks(self) -> set[str]:
+        with self._running_lock:
+            return set(self._running_tasks)
+
+    def running_count(self) -> int:
+        with self._running_lock:
+            return len(self._running_tasks)
+
+    def running_commands(self) -> dict[str, str]:
+        with self._running_lock:
+            return dict(self._running_commands)
+
     def discard_running(self, task_name: str) -> None:
         with self._running_lock:
             self._running_tasks.discard(task_name)
+            self._running_commands.pop(task_name, None)
 
     def reconcile_orphans(self, active_commands: list[dict]) -> None:
         active_names = {
@@ -355,6 +396,7 @@ class CommandExecutor:
         finally:
             with self._running_lock:
                 self._running_tasks.discard(task_name)
+                self._running_commands.pop(task_name, None)
 
     def _task_result(self, task_name: str) -> dict:
         task_dir = self.tasks_root / task_name
@@ -533,12 +575,14 @@ class CommandExecutor:
 def run_loop() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     _load_cursor_api_key()
-    client = WorkerClient()
+    error_buffer = ErrorBuffer()
+    client = WorkerClient(error_buffer=error_buffer)
     tasks_root = _tasks_root()
     completion_tracker = CommandCompletionTracker()
     executor = CommandExecutor(tasks_root, completion_tracker=completion_tracker)
     poller = CloudPoller(client, tasks_root, completion_tracker=completion_tracker)
     stream_supervisor = StreamUploadSupervisor(client, tasks_root)
+    poll_stats = PollLoopStats(available_ms=POLL_INTERVAL_SEC * 1000)
     task_locks: dict[str, threading.Lock] = {}
     task_locks_guard = threading.Lock()
 
@@ -551,6 +595,17 @@ def run_loop() -> None:
             return lock
 
     bg_sync = BackgroundSyncWorker(poller, task_lock=task_lock)
+    sync_tasks_state = SyncTasksState()
+    TelemetryReporter(
+        client,
+        tasks_root,
+        poll_stats,
+        error_buffer,
+        executor=executor,
+        stream_supervisor=stream_supervisor,
+        bg_sync=bg_sync,
+        sync_tasks_state=sync_tasks_state,
+    )
 
     logger.info("Worker started env=%s tasks_root=%s", client.env_id, tasks_root)
 
@@ -559,8 +614,10 @@ def run_loop() -> None:
             executor.execute(task_name, command)
 
     while True:
+        loop_start = time.perf_counter()
         try:
             data = client.poll(claim_work=False)
+            sync_tasks_state.update(data.get("sync_tasks", []))
             bg_sync.enqueue(data.get("sync_tasks", []))
             stream_supervisor.supervise()
             work_data = client.poll(claim_work=True)
@@ -578,7 +635,7 @@ def run_loop() -> None:
                 if command.get("command") == "cancel":
                     executor.request_cancel(task_name)
                     continue
-                if not executor.try_start(task_name):
+                if not executor.try_start(task_name, str(command.get("command") or "unknown")):
                     continue
                 try:
                     client.command_start(task_name)
@@ -594,6 +651,8 @@ def run_loop() -> None:
                 ).start()
         except Exception:
             logger.exception("Poll loop error")
+            error_buffer.add("Poll loop error", category="poll")
+        poll_stats.last_duration_ms = (time.perf_counter() - loop_start) * 1000
         time.sleep(POLL_INTERVAL_SEC)
 
 
