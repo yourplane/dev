@@ -94,6 +94,12 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
   const previousStatusesRef = useRef<Map<string, TaskListStatus>>(new Map())
   const pollInitializedRef = useRef(false)
   const notifiedKeysRef = useRef<Set<string>>(new Set())
+  const locationPathnameRef = useRef(location.pathname)
+  const refreshGenerationRef = useRef(0)
+  const loadingGenerationRef = useRef<number | null>(null)
+  const prevPathnameRef = useRef(location.pathname)
+
+  locationPathnameRef.current = location.pathname
 
   const pushInAppNotification = useCallback((notification: Omit<InAppNotification, 'id'>) => {
     setInAppNotifications((current) => [
@@ -112,7 +118,7 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
   ) => {
     const prefs = loadNotificationPreferences()
     if (!prefs.browserEnabled && !prefs.inAppEnabled) return false
-    if (!ignoreRouteSuppression && shouldSuppressForRoute(event.taskName, location.pathname)) return false
+    if (!ignoreRouteSuppression && shouldSuppressForRoute(event.taskName, locationPathnameRef.current)) return false
 
     return deliverTaskNotification(
       event,
@@ -125,7 +131,31 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
         showTabTitle: (override) => setTabTitleOverride(override),
       },
     )
-  }, [location.pathname, navigate, pushInAppNotification])
+  }, [navigate, pushInAppNotification])
+
+  const deliverNotificationRef = useRef(deliverNotification)
+  deliverNotificationRef.current = deliverNotification
+
+  const processCompletionNotifications = useCallback(async (tasks: TaskListEntry[]) => {
+    if (!isCloudMode()) return
+
+    const prefs = loadNotificationPreferences()
+    const { events, nextPrevious } = detectCompletionEvents(
+      previousStatusesRef.current,
+      tasks,
+      pollInitializedRef.current,
+    )
+    previousStatusesRef.current = nextPrevious
+    pollInitializedRef.current = true
+
+    for (const event of events) {
+      if (notifiedKeysRef.current.has(event.dedupeKey)) continue
+      if (shouldSuppressForRoute(event.taskName, locationPathnameRef.current)) continue
+      if (!prefs.browserEnabled && !prefs.inAppEnabled) continue
+      const delivered = await deliverNotificationRef.current(event, { ignoreRouteSuppression: false })
+      if (delivered) notifiedKeysRef.current.add(event.dedupeKey)
+    }
+  }, [])
 
   const deliverTestInAppNotificationHandler = useCallback(() => {
     const prefs = loadNotificationPreferences()
@@ -144,43 +174,49 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const refreshTasks = useCallback(async ({ silent = false } = {}) => {
+    const generation = refreshGenerationRef.current + 1
+    refreshGenerationRef.current = generation
     if (!silent) {
       setError(null)
       setLoading(true)
+      loadingGenerationRef.current = generation
     }
+    let fetchedTasks: TaskListEntry[] | null = null
     try {
       const res = await api.getTasks()
-      setTasks((current) => (tasksUnchanged(current, res.tasks) ? current : res.tasks))
-      if (!silent) setError(null)
-
-      if (isCloudMode()) {
-        const prefs = loadNotificationPreferences()
-        const { events, nextPrevious } = detectCompletionEvents(
-          previousStatusesRef.current,
-          res.tasks,
-          pollInitializedRef.current,
-        )
-        previousStatusesRef.current = nextPrevious
-        pollInitializedRef.current = true
-
-        for (const event of events) {
-          if (notifiedKeysRef.current.has(event.dedupeKey)) continue
-          if (shouldSuppressForRoute(event.taskName, location.pathname)) continue
-          if (!prefs.browserEnabled && !prefs.inAppEnabled) continue
-          const delivered = await deliverNotification(event, { ignoreRouteSuppression: false })
-          if (delivered) notifiedKeysRef.current.add(event.dedupeKey)
-        }
+      if (generation === refreshGenerationRef.current) {
+        fetchedTasks = res.tasks
+        setTasks((current) => (tasksUnchanged(current, res.tasks) ? current : res.tasks))
+        if (!silent) setError(null)
       }
     } catch (e) {
-      if (!silent) setError(e instanceof Error ? e.message : String(e))
+      if (generation === refreshGenerationRef.current && !silent) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
     } finally {
-      if (!silent) setLoading(false)
+      if (!silent && loadingGenerationRef.current === generation) {
+        setLoading(false)
+        loadingGenerationRef.current = null
+      }
     }
-  }, [location.pathname, deliverNotification])
+
+    if (fetchedTasks && generation === refreshGenerationRef.current) {
+      void processCompletionNotifications(fetchedTasks)
+    }
+  }, [processCompletionNotifications])
 
   useEffect(() => {
     void refreshTasks()
   }, [refreshTasks])
+
+  useEffect(() => {
+    const prev = prevPathnameRef.current
+    prevPathnameRef.current = location.pathname
+    const returnedToTaskList = location.pathname === '/' && /^\/task\//.test(prev)
+    if (returnedToTaskList) {
+      void refreshTasks()
+    }
+  }, [location.pathname, refreshTasks])
 
   useEffect(() => {
     const interval = setInterval(() => {
