@@ -133,28 +133,66 @@ class CloudPoller:
             sync_health="healthy" if healthy else "unhealthy",
         )
 
-    def run_sync_pass(
-        self,
-        sync_tasks: list[str],
-        *,
-        task_lock: Callable[[str], threading.Lock] | None = None,
-    ) -> None:
+    def _pass_task_names(self, sync_tasks: list[str]) -> list[str]:
+        """Ordered pass list: sync_tasks (deduped) plus outbox-only tasks."""
+        pass_tasks: list[str] = []
         seen: set[str] = set()
         for task_name in sync_tasks:
             if task_name in seen:
                 continue
             seen.add(task_name)
-            try:
-                self.sync_task(task_name, task_lock=task_lock)
-            except Exception:
-                logger.exception("Background comms sync failed for %s", task_name)
-
+            pass_tasks.append(task_name)
         if not self.tasks_root.is_dir():
-            return
+            return pass_tasks
         for task_dir in iter_task_dirs(self.tasks_root):
             task_name = task_dir.name
-            if has_outbox(task_dir):
+            if has_outbox(task_dir) and task_name not in seen:
+                seen.add(task_name)
+                pass_tasks.append(task_name)
+        return pass_tasks
+
+    def _sync_one_task_in_pass(
+        self,
+        task_name: str,
+        *,
+        in_sync_tasks: bool,
+        task_lock: Callable[[str], threading.Lock] | None = None,
+    ) -> bool:
+        """Run comms (if listed) then outbox for one task. Returns False if lock busy."""
+        lock = task_lock(task_name) if task_lock else None
+        if lock is not None and not lock.acquire(blocking=False):
+            return False
+        try:
+            task_dir = self.task_dir(task_name)
+            if in_sync_tasks:
                 try:
-                    self.process_outbox(task_name, task_lock=task_lock)
+                    self._sync_task_unlocked(task_name)
+                except Exception:
+                    logger.exception("Background comms sync failed for %s", task_name)
+            if task_dir.is_dir() and has_outbox(task_dir):
+                try:
+                    self.process_outbox(task_name, task_lock=None)
                 except Exception:
                     logger.exception("Outbox processing failed for %s", task_name)
+        finally:
+            if lock is not None:
+                lock.release()
+        return True
+
+    def run_sync_pass(
+        self,
+        sync_tasks: list[str],
+        *,
+        task_lock: Callable[[str], threading.Lock] | None = None,
+    ) -> list[str]:
+        """Interleave comms then outbox per task; return tasks skipped due to lock contention."""
+        sync_tasks_set = set(sync_tasks)
+        skipped: list[str] = []
+        for task_name in self._pass_task_names(sync_tasks):
+            if not self._sync_one_task_in_pass(
+                task_name,
+                in_sync_tasks=task_name in sync_tasks_set,
+                task_lock=task_lock,
+            ):
+                skipped.append(task_name)
+        return skipped

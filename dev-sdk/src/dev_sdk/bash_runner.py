@@ -19,7 +19,17 @@ logger = logging.getLogger(__name__)
 DEFAULT_BASH_MAX_OUTPUT_BYTES = 2_000_000
 DEFAULT_BASH_TIMEOUT_SEC = 3600.0
 
-_bash_comms_append_lock = threading.Lock()
+_bash_comms_append_locks: dict[Path, threading.Lock] = {}
+_bash_comms_append_locks_guard = threading.Lock()
+
+
+def _bash_comms_append_lock(path: Path) -> threading.Lock:
+    with _bash_comms_append_locks_guard:
+        lock = _bash_comms_append_locks.get(path)
+        if lock is None:
+            lock = threading.Lock()
+            _bash_comms_append_locks[path] = lock
+        return lock
 
 
 @dataclass(frozen=True)
@@ -47,7 +57,7 @@ class BashStreamHooks:
 
 
 def append_bytes_to_bash_comms(path: Path, data: bytes) -> None:
-    with _bash_comms_append_lock:
+    with _bash_comms_append_lock(path):
         with open(path, "ab") as f:
             f.write(data)
 
@@ -62,7 +72,7 @@ def append_bash_comms_footer(
     timeout_sec: float,
     interrupted: bool = False,
 ) -> None:
-    with _bash_comms_append_lock:
+    with _bash_comms_append_lock(path):
         with open(path, "a", encoding="utf-8") as f:
             if truncated:
                 f.write("\n[… output truncated (DEV_BASH_MAX_OUTPUT_BYTES) …]")

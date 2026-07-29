@@ -162,11 +162,16 @@ class BackgroundSyncWorker:
             self._busy = True
             with self._guard:
                 self._current_tasks = list(tasks)
+            skipped: list[str] = []
             try:
-                self._poller.run_sync_pass(tasks, task_lock=self._task_lock)
+                skipped = self._poller.run_sync_pass(tasks, task_lock=self._task_lock)
             except Exception:
                 logger.exception("Background sync pass failed")
             finally:
                 self._busy = False
                 with self._guard:
                     self._current_tasks = []
+            if skipped:
+                with self._guard:
+                    self._pending.update(skipped)
+                self._wake.set()
