@@ -96,6 +96,7 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
   const notifiedKeysRef = useRef<Set<string>>(new Set())
   const locationPathnameRef = useRef(location.pathname)
   const refreshGenerationRef = useRef(0)
+  const loadingGenerationRef = useRef<number | null>(null)
   const prevPathnameRef = useRef(location.pathname)
 
   locationPathnameRef.current = location.pathname
@@ -178,6 +179,7 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
     if (!silent) {
       setError(null)
       setLoading(true)
+      loadingGenerationRef.current = generation
     }
     let fetchedTasks: TaskListEntry[] | null = null
     try {
@@ -192,8 +194,9 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
         setError(e instanceof Error ? e.message : String(e))
       }
     } finally {
-      if (generation === refreshGenerationRef.current && !silent) {
+      if (!silent && loadingGenerationRef.current === generation) {
         setLoading(false)
+        loadingGenerationRef.current = null
       }
     }
 

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, act } from '@testing-library/react'
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom'
 import { TaskListProvider, useTaskList } from './useTaskListPoll'
 import { BROWSER_NOTIFICATIONS_KEY, INAPP_NOTIFICATIONS_KEY } from './taskNotifications'
@@ -134,5 +134,44 @@ describe('TaskListProvider refresh/loading', () => {
     await waitFor(() => {
       expect(screen.getByTestId('loading')).toHaveTextContent('ready')
     })
+  })
+
+  it('clears loading when initial fetch completes after a silent poll superseded its generation', async () => {
+    vi.useFakeTimers()
+    try {
+      const { isCloudMode } = await import('./cloudAuth')
+      vi.mocked(isCloudMode).mockReturnValue(true)
+
+      const { api } = await import('./api')
+      let resolveInitialFetch:
+        | ((value: { tasks: Array<{ name: string; status: 'idle' }> }) => void)
+        | undefined
+      vi.mocked(api.getTasks)
+        .mockImplementationOnce(
+          () =>
+            new Promise((resolve) => {
+              resolveInitialFetch = resolve
+            }),
+        )
+        .mockResolvedValue({ tasks: [{ name: 'foo', status: 'idle' }] })
+
+      renderWithRouter('/')
+      expect(screen.getByTestId('loading')).toHaveTextContent('loading')
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000)
+      })
+      expect(vi.mocked(api.getTasks)).toHaveBeenCalledTimes(2)
+      expect(screen.getByTestId('loading')).toHaveTextContent('loading')
+
+      await act(async () => {
+        resolveInitialFetch?.({ tasks: [{ name: 'foo', status: 'idle' }] })
+        await Promise.resolve()
+      })
+      expect(screen.getByTestId('loading')).toHaveTextContent('ready')
+      expect(screen.getByText('foo')).toBeInTheDocument()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
