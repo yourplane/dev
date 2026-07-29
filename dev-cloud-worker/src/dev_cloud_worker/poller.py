@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable
 from pathlib import Path
 
+from dev_cloud_worker.task_dirs import iter_task_dirs
 from dev_sdk.worker_sync import (
     OutboxEntry,
     clear_outbox,
@@ -150,9 +151,7 @@ class CloudPoller:
 
         if not self.tasks_root.is_dir():
             return
-        for task_dir in self.tasks_root.iterdir():
-            if not task_dir.is_dir():
-                continue
+        for task_dir in iter_task_dirs(self.tasks_root):
             task_name = task_dir.name
             if has_outbox(task_dir):
                 try:

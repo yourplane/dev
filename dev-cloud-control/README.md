@@ -7,6 +7,7 @@ Persists metadata in DynamoDB and comms/log blobs in S3. Mirrors the `dev-server
 ## Worker routes (IAM, no Cognito JWT)
 
 - `POST /worker/poll` — heartbeat, claim queued work, list pending deletions
+- `POST /worker/telemetry` — environment metrics, task metrics, and error events (every ~30s)
 - `POST /worker/tasks/{task}/sync` — bidirectional comms merge
 - `POST /worker/tasks/{task}/logs` — append log chunks for live UI
 - `POST /worker/tasks/{task}/command/complete` — finish command
