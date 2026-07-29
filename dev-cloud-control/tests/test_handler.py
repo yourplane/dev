@@ -508,6 +508,8 @@ def test_post_question_answers_clears_draft(aws_env):
     )
     assert resp["statusCode"] == 201
     assert store.get_draft(sk) is None
+    body = json.loads(resp["body"])
+    assert body["filename"].endswith("-user-answers.md")
 
 
 def test_set_question_answers_draft_empty_fields_clears_draft(aws_env):
