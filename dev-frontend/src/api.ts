@@ -1,5 +1,6 @@
 /** Base URL for API requests. Default `/api` uses Vite proxy (single-port dev). Override with VITE_DEV_SERVER_URL to talk to backend directly. */
 import { authHeaders, ensureValidIdToken, isCloudMode } from './cloudAuth';
+import { fetchWithRetry } from './fetchUtils';
 
 export const apiBaseUrl = import.meta.env.VITE_DEV_SERVER_URL ?? '/api';
 
@@ -32,7 +33,7 @@ function apiErrorMessage(httpStatus: number, detail: string): string {
 
 async function cloudAuthFetch(url: string, init?: RequestInit): Promise<Response> {
   if (isCloudMode()) await ensureValidIdToken();
-  return fetch(url, {
+  return fetchWithRetry(url, {
     ...init,
     headers: { ...authHeaders(), ...init?.headers },
   });

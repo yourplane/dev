@@ -1,5 +1,20 @@
 const SW_URL = '/notification-sw.js'
 const SW_SCOPE = '/'
+const SW_READY_TIMEOUT_MS = 5_000
+
+async function serviceWorkerReadyWithTimeout(): Promise<ServiceWorkerRegistration | null> {
+  if (!('serviceWorker' in navigator)) return null
+  try {
+    return await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error('Service worker ready timed out')), SW_READY_TIMEOUT_MS)
+      }),
+    ])
+  } catch {
+    return null
+  }
+}
 
 export async function registerNotificationServiceWorker(): Promise<ServiceWorkerRegistration | null> {
   if (!('serviceWorker' in navigator)) return null
@@ -19,7 +34,8 @@ export async function showServiceWorkerNotification(
 ): Promise<boolean> {
   if (!('serviceWorker' in navigator)) return false
   try {
-    const registration = await navigator.serviceWorker.ready
+    const registration = await serviceWorkerReadyWithTimeout()
+    if (!registration) return false
     await registration.showNotification(title, {
       tag: `dev-task-${taskName}`,
       icon: '/icons/notification-icon-192.png',
