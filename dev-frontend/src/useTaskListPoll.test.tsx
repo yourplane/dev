@@ -16,9 +16,12 @@ vi.mock('./cloudAuth', () => ({
 
 function TaskListProbe() {
   const { tasks, loading } = useTaskList()
+  if (loading) {
+    return <p data-testid="loading">loading</p>
+  }
   return (
     <div>
-      <p data-testid="loading">{loading ? 'loading' : 'ready'}</p>
+      <p data-testid="loading">ready</p>
       <ul>
         {tasks.map((task) => (
           <li key={task.name}>{task.name}</li>
@@ -90,17 +93,21 @@ describe('TaskListProvider refresh/loading', () => {
     expect(screen.getByText('foo')).toBeInTheDocument()
   })
 
-  it('keeps cached tasks visible when navigating back from a task detail page', async () => {
+  it('shows loading when navigating back from a task detail page until refresh completes', async () => {
     const { api } = await import('./api')
-    let resolveSecondFetch: ((value: { tasks: Array<{ name: string; status: 'idle' }> }) => void) | undefined
-    vi.mocked(api.getTasks)
-      .mockResolvedValueOnce({ tasks: [{ name: 'foo', status: 'idle' }] })
-      .mockImplementationOnce(
-        () =>
-          new Promise((resolve) => {
-            resolveSecondFetch = resolve
-          }),
-      )
+    let resolveNavigateBackFetch:
+      | ((value: { tasks: Array<{ name: string; status: 'idle' }> }) => void)
+      | undefined
+    let fetchCount = 0
+    vi.mocked(api.getTasks).mockImplementation(() => {
+      fetchCount += 1
+      if (fetchCount === 1) {
+        return Promise.resolve({ tasks: [{ name: 'foo', status: 'idle' }] })
+      }
+      return new Promise((resolve) => {
+        resolveNavigateBackFetch = resolve
+      })
+    })
 
     renderWithRouter('/')
 
@@ -114,15 +121,17 @@ describe('TaskListProvider refresh/loading', () => {
     })
 
     screen.getByRole('button', { name: 'Back to tasks' }).click()
-
-    expect(screen.getByTestId('loading')).toHaveTextContent('ready')
-    expect(screen.getByText('foo')).toBeInTheDocument()
-    expect(screen.queryByText('loading')).not.toBeInTheDocument()
-
-    resolveSecondFetch?.({ tasks: [{ name: 'foo', status: 'idle' }] })
     await waitFor(() => {
-      expect(vi.mocked(api.getTasks)).toHaveBeenCalledTimes(2)
+      expect(screen.getByTestId('loading')).toHaveTextContent('loading')
     })
+    expect(screen.queryByText('foo')).not.toBeInTheDocument()
+
+    resolveNavigateBackFetch?.({ tasks: [{ name: 'foo', status: 'idle' }] })
+    await waitFor(() => {
+      expect(screen.getByTestId('loading')).toHaveTextContent('ready')
+    })
+    expect(screen.getByText('foo')).toBeInTheDocument()
+    expect(fetchCount).toBe(2)
   })
 
   it('surfaces fetch errors instead of staying on Loading tasks forever', async () => {
