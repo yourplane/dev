@@ -40,6 +40,7 @@ class DevCloudStack(Stack):
             sort_key=dynamodb.Attribute(name="sk", type=dynamodb.AttributeType.STRING),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             removal_policy=RemovalPolicy.RETAIN,
+            time_to_live_attribute="ttl",
         )
         table.add_global_secondary_index(
             index_name="entity-index",
@@ -75,6 +76,12 @@ class DevCloudStack(Stack):
             access_token_validity=Duration.hours(1),
         )
 
+        api_log_group = logs.LogGroup(
+            self,
+            "DevCloudApiLogGroup",
+            retention=logs.RetentionDays.TWO_WEEKS,
+        )
+
         api_fn = lambda_.Function(
             self,
             "DevCloudApi",
@@ -88,14 +95,25 @@ class DevCloudStack(Stack):
             environment={
                 "DEV_CLOUD_TABLE": table.table_name,
                 "DEV_CLOUD_BUCKET": bucket.bucket_name,
+                "CONTROL_PLANE_LOG_GROUP": api_log_group.log_group_name,
             },
-            log_retention=logs.RetentionDays.TWO_WEEKS,
+            log_group=api_log_group,
         )
         table.grant_read_write_data(api_fn)
         bucket.grant_read_write(api_fn)
         api_fn.add_to_role_policy(
             iam.PolicyStatement(
                 actions=["secretsmanager:GetSecretValue"],
+                resources=["*"],
+            )
+        )
+        api_fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "logs:StartQuery",
+                    "logs:GetQueryResults",
+                    "logs:DescribeLogGroups",
+                ],
                 resources=["*"],
             )
         )

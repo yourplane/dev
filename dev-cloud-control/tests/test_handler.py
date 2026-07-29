@@ -508,6 +508,8 @@ def test_post_question_answers_clears_draft(aws_env):
     )
     assert resp["statusCode"] == 201
     assert store.get_draft(sk) is None
+    body = json.loads(resp["body"])
+    assert body["filename"].endswith("-user-answers.md")
 
 
 def test_set_question_answers_draft_empty_fields_clears_draft(aws_env):
@@ -831,3 +833,70 @@ def test_worker_sync_index_not_in_feed(aws_env):
     index_raw = router.store.get_comms(task_name, "index.txt")
     assert index_raw is not None
     assert "index.txt" not in index_raw
+
+
+def test_worker_telemetry_ingest_and_diagnostics(aws_env):
+    import time as time_mod
+
+    router = Router()
+    store = CloudStore()
+    now = time_mod.time()
+    router.dispatch(_event("POST", "/worker/poll", {"environment_id": "env-tel", "display_name": "Tel"}))
+    payload = {
+        "environment_id": "env-tel",
+        "ts": now,
+        "env_metrics": {
+            "cpu_percent": 12.5,
+            "memory_percent": 40.0,
+            "poll_loop_utilization": 15.0,
+            "total_threads": 4,
+            "upload_backlog_bytes": 1024,
+        },
+        "sync_tasks": ["task-a"],
+        "thread_inventory": [
+            {"category": "infrastructure", "label": "Poll loop", "state": "active"},
+            {"category": "commands", "label": "task-a / implement", "state": "active", "task_name": "task-a", "command": "implement"},
+        ],
+        "task_metrics": [
+            {
+                "task_name": "task-a",
+                "in_sync_tasks": True,
+                "stream_backlog_bytes": 512,
+                "log_silence_sec": 2.0,
+                "sync_failures": 0,
+                "activity_badges": ["sync_tasks", "command"],
+            }
+        ],
+        "errors": [
+            {
+                "ts": now,
+                "level": "error",
+                "category": "http",
+                "message": "poll timeout",
+            }
+        ],
+    }
+    resp = router.dispatch(_event("POST", "/worker/telemetry", payload))
+    assert resp["statusCode"] == 204
+    snap = store.get_telemetry_snapshot("env-tel")
+    assert snap is not None
+    assert float(snap["env_metrics"]["cpu_percent"]) == 12.5
+    diag = json.loads(
+        router.dispatch(_event("GET", "/environments/env-tel/diagnostics"))["body"]
+    )
+    assert diag["environment"]["environment_id"] == "env-tel"
+    assert diag["snapshot"]["env_metrics"]["cpu_percent"] == 12.5
+    assert diag["snapshot"]["env_metrics"]["total_threads"] == 4
+    assert "task-a" in diag["task_series"]
+    assert diag["snapshot"]["task_metrics"][0]["activity_badges"]
+    errors = json.loads(
+        router.dispatch(_event("GET", "/environments/env-tel/errors"))["body"]
+    )
+    assert len(errors["errors"]) == 1
+    assert errors["errors"][0]["message"] == "poll timeout"
+
+
+def test_worker_heartbeat_route_removed(aws_env):
+    router = Router()
+    resp = router.dispatch(_event("POST", "/worker/heartbeat", {"environment_id": "env-1"}))
+    assert resp["statusCode"] == 404
