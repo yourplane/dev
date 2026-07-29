@@ -214,7 +214,7 @@ export function TaskListProvider({ children }: { children: ReactNode }) {
     prevPathnameRef.current = location.pathname
     const returnedToTaskList = location.pathname === '/' && /^\/task\//.test(prev)
     if (returnedToTaskList) {
-      void refreshTasks({ silent: true })
+      void refreshTasks()
     }
   }, [location.pathname, refreshTasks])
 
